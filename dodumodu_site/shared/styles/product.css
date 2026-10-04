@@ -1,0 +1,284 @@
+/* ==========================================================================
+   PRODUCT PAGE CHROME — layout for the product page shell.
+   Bundled last (build/bundle.mjs) so it can refine base/layout/form sheets
+   without !important. This file used to be a 13 KB <style> block inside every
+   product page's HTML; the page now ships one link to the shared bundle.
+   ========================================================================== */
+
+/* ---- Overscroll guards: nothing on this page may push a horizontal bar ---- */
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+img { height: auto; }
+
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1 { line-height: 1.25; overflow-wrap: break-word; }
+h2 { line-height: 1.3; overflow-wrap: break-word; }
+p { overflow-wrap: break-word; }
+
+/* ---- Skip link: first tab stop, visible only when focused ---- */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 4px;
+  z-index: 9999;
+  font-weight: 600;
+}
+.skip-link:focus { left: 8px; }
+
+/* ---- Page frame ---- */
+.page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px 64px;
+  overflow-x: hidden;
+}
+
+/* ---- Header / breadcrumb ---- */
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+  width: 100%;
+}
+
+.site-logo {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--color-text);
+  text-transform: uppercase;
+}
+
+.site-nav a { font-size: 0.85rem; color: var(--color-text-muted); font-weight: 600; }
+
+.breadcrumbs {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  padding: 12px 0 4px;
+  margin: 0;
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.breadcrumbs li + li::before { content: "/"; margin-right: 6px; color: var(--color-primary); }
+
+/* ---- Mobile-first product layout: image on top, copy below ---- */
+.product-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  align-items: center;
+  text-align: left;
+}
+
+.hero {
+  width: 100%;
+  max-width: 100%;
+  padding: 12px 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* The carousel is 1:1 and never wider than the column it lives in. */
+#carousel {
+  width: 100%;
+  max-width: 480px;
+  aspect-ratio: 1 / 1;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--color-border);
+  margin: 0 auto;
+}
+
+/* First LCP candidate: painted from the static HTML before any JS runs. */
+.hero-fallback {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 20px;
+  display: block;
+  background: var(--color-border);
+}
+
+.product-summary { width: 100%; padding: 16px 0 0; }
+
+.rating-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.rating-stars { color: #f59e0b; letter-spacing: 1px; }
+
+.section { width: 100%; }
+
+.price-row { align-items: center; flex-wrap: wrap; }
+.trust-item { display: inline-flex; font-size: 0.85rem; max-width: 100%; }
+
+/* ---- Benefits / steps / FAQ ---- */
+.benefits-grid {
+  display: grid;
+  grid-template-columns: 100%;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  width: 100%;
+}
+
+.benefit-card {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+}
+.benefit-card strong { display: block; font-size: 0.92rem; color: var(--color-text); margin-bottom: 2px; }
+.benefit-card span { font-size: 0.82rem; color: var(--color-text-muted); line-height: 1.4; }
+
+.steps-list {
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+.steps-list li {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 12px 48px;
+  position: relative;
+  border: 1px solid var(--color-border);
+  font-size: 0.88rem;
+  color: var(--color-text);
+  word-break: break-word;
+}
+.steps-list li::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+
+/* <details>/<summary> keeps the accordion crawlable with no JavaScript. */
+details.faq-item {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+details.faq-item summary {
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+details.faq-item summary::-webkit-details-marker { display: none; }
+details.faq-item summary::after { content: "+"; font-size: 1.2rem; color: var(--color-primary); font-weight: 700; flex-shrink: 0; }
+details.faq-item[open] summary::after { content: "\25BC"; font-size: 0.8rem; }
+details.faq-item p { margin: 10px 0 0; font-size: 0.85rem; color: var(--color-text-muted); line-height: 1.5; }
+
+/* ---- Footer ---- */
+.site-footer {
+  padding: 32px 0 16px;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  width: 100%;
+}
+.site-footer a { color: var(--color-text-muted); }
+
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+
+/* Turnstile's iframe is fixed-width; let it shrink instead of overflowing.
+   display:none keeps the container out of the layout until Cloudflare has
+   actually rendered the widget (it sets data-ready), so an unconfigured build -
+   where turnstile.js never loads anything - cannot ship a visible empty box,
+   and a configured one cannot reserve a hole it may never fill. These two
+   rules used to live only in the page's inline copy; they are here so the
+   preview and the built site agree. */
+.cf-turnstile {
+  display: none;
+  max-width: 100%;
+  overflow: hidden;
+}
+.cf-turnstile[data-ready="true"] { display: block; }
+
+/* ---- Payment method hint (COD availability, driven by codRules.js) ---- */
+.cod-hint { font-size: 0.78rem; color: var(--color-text-muted); line-height: 1.4; min-height: 1em; }
+.radio-option[data-unavailable="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--color-bg);
+}
+
+/* ---- Narrow phones: fluid gutters, no fixed 960px frame ---- */
+@media (max-width: 640px) {
+  .page { max-width: 100%; padding: 0 4% 48px; }
+}
+
+/* ---- Desktop: two columns, everything gets roomier ---- */
+@media (min-width: 768px) {
+  .page { max-width: 960px; padding: 0 24px 64px; }
+  .product-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
+  #carousel { max-width: 100%; }
+  .product-summary { padding: 0; }
+  .benefits-grid { grid-template-columns: repeat(2, 1fr); }
+}

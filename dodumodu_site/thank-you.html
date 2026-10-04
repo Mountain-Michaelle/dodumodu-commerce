@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order received</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/__SITE_CSS__">
+<style>
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff8f5;color:#2b2320}
+  .confirm-page{max-width:480px;margin:0 auto;padding:56px 20px 72px;text-align:center}
+  .confirm-icon{width:56px;height:56px;color:#2f7d4f;margin:0 auto 16px}
+  .confirm-status{font-size:0.9rem;color:#6b5f59;margin-top:10px}
+  .order-summary{text-align:left;margin-top:24px}
+  /* The reference is a code, not a price. Monospaced and lowercase so it is read
+     one character at a time when it is read back to us over the phone, and so a
+     letter O can never be taken for a zero. The value is lowercased in markup
+     too, because orders placed before this format are still uppercase in the
+     database and must look the same to the customer. */
+  .confirm-reference{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.92em;letter-spacing:0.02em;overflow-wrap:anywhere}
+  .confirm-next{margin-top:28px;padding:20px 22px;border:1px solid #f0e2dc;border-radius:16px;background:#fff;text-align:left}
+  .confirm-next h2{margin:0 0 12px;font-size:0.78rem;letter-spacing:0.08em;text-transform:uppercase;color:#8a7b74}
+  .confirm-next ul{margin:0;padding-left:20px;font-size:0.95rem;line-height:1.6;color:#4a3f3a}
+  .confirm-next li+li{margin-top:10px}
+  .confirm-actions{margin-top:32px;display:flex;flex-direction:column;align-items:center;gap:12px}
+  .back-link{display:inline-flex;align-items:center;gap:9px;padding:14px 28px;border-radius:999px;background:#2f7d4f;color:#fff;font-size:1rem;font-weight:600;text-decoration:none;box-shadow:0 6px 18px rgba(47,125,79,.24)}
+  .back-link:hover{background:#27693f}
+  .back-link:focus-visible{outline:3px solid #1d4d2f;outline-offset:3px}
+  .back-hint{margin:0;font-size:0.85rem;color:#8a7b74}
+  .pay-link{color:#2f7d4f;font-weight:600}
+</style>
+</head>
+<body>
+<!-- ICONS -->
+<main class="confirm-page">
+  <svg class="confirm-icon" aria-hidden="true"><use href="#icon-check"></use></svg>
+  <h1>We've received your order</h1>
+  <p id="confirm-message">Hang tight while we confirm the details.</p>
+  <p class="confirm-status" id="confirm-status"></p>
+  <div id="order-summary" class="order-summary price-breakdown"></div>
+
+  <section class="confirm-next">
+    <h2>What happens next</h2>
+    <ul>
+      <li>Someone from our team will call or WhatsApp you on the number you gave us, to confirm your address and agree a delivery time.</li>
+      <li id="next-payment">Please keep your reference handy, and quote it if you get in touch about this order.</li>
+      <li>Nothing is dispatched until your order is confirmed, so there is no need to do anything else right now.</li>
+    </ul>
+  </section>
+
+  <div class="confirm-actions">
+    <a class="back-link" href="/products/glow-serum/">&larr; Back to the store</a>
+    <p class="back-hint">Ordering again? Your form comes back empty and ready.</p>
+  </div>
+</main>
+
+<script>
+  // Never claim payment succeeded just because the customer landed here (§6 step 8, §8.3).
+  // Payment status only ever changes via the verified webhook or reconciliation job.
+  //
+  // The summary below is rendered straight from the create-order response
+  // stored by orchestrate.js — never recomputed in the browser (§6 step 9),
+  // so it always exactly matches what was actually charged.
+  (function () {
+    function formatNaira(kobo) {
+      return "\u20A6" + Math.round(kobo / 100).toLocaleString("en-NG");
+    }
+
+    // Values below are interpolated into markup, so they are escaped even though
+    // they come from our own API: sessionStorage is script-readable storage, and
+    // a stray value should never be able to turn into markup.
+    function esc(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    var raw = sessionStorage.getItem("skincare_last_order");
+    var messageEl = document.getElementById("confirm-message");
+    var statusEl = document.getElementById("confirm-status");
+    var summaryEl = document.getElementById("order-summary");
+    var paymentNoteEl = document.getElementById("next-payment");
+    if (!raw) return;
+
+    var order = JSON.parse(raw);
+
+    // Each branch says what actually happens next, and roughly how long it takes.
+    // A bare "we received it" leaves the customer unsure whether the order went
+    // through, what they are waiting for, and whether they owe anything else.
+    if (order.status === "confirmed_cod") {
+      messageEl.textContent = "Your pay-on-delivery order is in. There is nothing more to pay online \u2014 our rider settles with you when your order arrives.";
+      statusEl.textContent = "We will call you shortly to agree a delivery time.";
+      paymentNoteEl.textContent = "Nothing more to pay online: you pay the rider in cash on delivery.";
+    } else if (order.checkoutUrl) {
+      messageEl.textContent = "One more step — complete your payment to finish the order.";
+      statusEl.innerHTML = '<a class="pay-link" href="' + esc(order.checkoutUrl) + '">Continue to payment</a>';
+      paymentNoteEl.textContent = "Pay online to secure your order, or message us if you would rather sort it out another way.";
+    } else {
+      messageEl.textContent = "Your order is saved. We are confirming the payment now \u2014 this normally takes under a minute.";
+      paymentNoteEl.textContent = "We will message you on the number you gave us as soon as the payment is confirmed.";
+    }
+
+    if (typeof order.quantity === "number") {
+      var rows = [
+        // Lowercased here as well as in CSS. References written before this
+        // format are still uppercase in the database, and the customer should not
+        // be able to tell which era their order came from.
+        '<div class="price-breakdown-row"><span>Reference</span><span class="confirm-reference">' + esc(String(order.reference || "").toLowerCase()) + "</span></div>",
+        '<div class="price-breakdown-row"><span>Unit price</span><span>' + formatNaira(order.unitPrice) + "</span></div>",
+        '<div class="price-breakdown-row"><span>Quantity</span><span>' + esc(order.quantity) + "</span></div>",
+        '<div class="price-breakdown-row"><span>Subtotal</span><span>' + formatNaira(order.subtotal) + "</span></div>",
+      ];
+      if (order.discountPercent > 0) {
+        rows.push(
+          '<div class="price-breakdown-row price-breakdown-discount"><span>Discount (' + esc(order.discountPercent) +
+          '%)</span><span>\u2212' + formatNaira(order.discountAmount) + "</span></div>"
+        );
+      }
+      rows.push('<div class="price-breakdown-row" data-emphasis="true"><span>Total</span><span>' + formatNaira(order.amount) + "</span></div>");
+      summaryEl.innerHTML = rows.join("");
+    }
+  })();
+</script>
+</body>
+</html>

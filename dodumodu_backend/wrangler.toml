@@ -1,0 +1,75 @@
+name = "skincare-backend"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+R2_BUCKET_NAME = "skincare-media"
+ENVIRONMENT = "sandbox" # 'sandbox' | 'production'
+RATE_LIMIT_API_PER_MINUTE = "20"
+
+# ---- image pipeline ----
+# Every one of these has the same default in src/config/imageConfig.ts, so a missing
+# value degrades to a working configuration rather than a broken deployment.
+#
+# IMAGE_MODE:
+#   "transform"  - customer URLs carry /cdn-cgi/image/<options>/ and Cloudflare
+#                  resizes + negotiates format at the edge. REQUIRES a custom domain
+#                  on a Cloudflare zone; it does not work on *.pages.dev.
+#   "derivative" - the admin's browser renders the widths and uploads them; the R2
+#                  custom domain serves them directly. Zero transformations.
+# Default is "derivative" because it is the only mode that works with no custom
+# domain, and it costs no transformation budget at all.
+IMAGE_MODE = "derivative"
+MAX_UPLOAD_BYTES = "10485760"   # 10MB
+MAX_IMAGE_DIMENSION = "12000"   # Cloudflare's transformation ceiling, per side
+IMAGE_KEY_PREFIX = "uploads"    # existing rows keep this shape; do not change
+# Three widths per slot. Never add a width no layout renders.
+IMAGE_WIDTHS_HERO = "480,768,1200"
+IMAGE_WIDTHS_GALLERY = "320,640,960"
+IMAGE_WIDTHS_TESTIMONIAL = "320,640"
+IMAGE_WIDTHS_THUMBNAIL = "160,320"
+# Quality is a VISUAL decision, not a size decision. Tune by looking at a real
+# product at 100% on a real phone - label text is the tell.
+IMAGE_QUALITY_HERO = "80"
+IMAGE_QUALITY_GALLERY = "75"
+IMAGE_QUALITY_TESTIMONIAL = "70"
+IMAGE_QUALITY_THUMBNAIL = "70"
+CATALOG_EDGE_TTL = "300"        # s-maxage for public catalog JSON
+CATALOG_EDGE_SWR = "3600"       # stale-while-revalidate
+
+# ---- REQUIRED before deploying images (see the deploy checklist) ----
+# R2 custom domain. NOT r2.dev (rate limited, not for production) and NOT a Worker
+# route - no Worker sits in the image path in either delivery mode.
+#   wrangler r2 bucket domain create skincare-media
+IMAGE_DELIVERY_BASE = "REPLACE-with-your-r2-custom-domain"
+# Cloudflare Pages deploy hook, fired by the admin's Publish action:
+#   Pages project -> Settings -> Builds & deployments -> Deploy hooks
+PAGES_DEPLOY_HOOK = ""          # set as a SECRET: wrangler secret put PAGES_DEPLOY_HOOK
+RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR = "5"
+MAX_ORDER_QUANTITY = "20"
+# Comma-separated CORS allowlist (see isOriginAllowed in src/app.ts). Never '*'.
+# Production: your domain plus the Pages domain, e.g.
+#   "https://yourdomain.com,https://yourproject.pages.dev"
+ALLOWED_ORIGINS = "https://yoursite.com"
+# OPay API root. Sandbox locally, then production for the live merchant:
+#   sandbox:     https://sandboxapi.opaycheckout.com
+#   production:  https://api.opaycheckout.com
+OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "skincare-media"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "replace-with-real-kv-namespace-id"
+
+# Secrets — set with `wrangler secret put <NAME>`, never committed:
+#   DATABASE_URL
+#   OPAY_PUBLIC_KEY
+#   OPAY_SECRET_KEY
+#   OPAY_MERCHANT_ID
+#   OPAY_WEBHOOK_SECRET
+#   TURNSTILE_SECRET_KEY
+#   RECONCILE_CRON_SECRET   (shared secret cron-job.org sends so /reconcile-pending isn't public)

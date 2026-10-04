@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /products/
+Disallow: /admin/
+Disallow: /thank-you.html
+
+Sitemap: https://yoursite.com/sitemap.xml

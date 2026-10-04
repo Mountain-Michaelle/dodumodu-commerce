@@ -1,0 +1,212 @@
+.quantity-stepper {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.quantity-stepper-btn {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.15s, color 0.15s;
+}
+
+.quantity-stepper-btn:hover:not(:disabled) { background: #fdf1ed; }
+.quantity-stepper-btn:active:not(:disabled) { background: #f7e2db; }
+.quantity-stepper-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
+.quantity-stepper-btn:disabled {
+  color: #c9bdb7;
+  background: #fbf8f7;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.quantity-stepper input[name="quantity"] {
+  width: 60px;
+  flex: 0 0 60px;
+  height: 46px;
+  padding: 0;
+  text-align: center;
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-bg);
+  font: inherit;
+  font-weight: 700;
+  font-size: 1rem;
+  -moz-appearance: textfield;
+}
+
+.quantity-stepper input[name="quantity"]:focus {
+  outline: none;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px rgba(194, 105, 79, 0.35);
+}
+
+.quantity-stepper input[name="quantity"]::-webkit-outer-spin-button,
+.quantity-stepper input[name="quantity"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ---- Live price beside the stepper ---- */
+/* The customer watches this number while tapping + / -, so it sits next to
+   the control instead of only in the itemised breakdown below. Wraps under
+   the stepper on narrow screens so nothing can overflow. */
+.quantity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.quantity-price {
+  flex: 1 1 190px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Nothing to show until price data arrives. */
+.quantity-price:empty { display: none; }
+
+.quantity-price-total {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-primary-dark);
+}
+
+.quantity-price-each {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* Appears the moment a discount tier applies to the chosen quantity. */
+.quantity-price-badge {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: rgba(47, 125, 79, 0.1);
+  color: var(--color-success);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* Every configured discount, listed so the customer can see what increasing
+   the quantity unlocks — the tier they're on is marked active. */
+.quantity-price-ladder-title {
+  margin-top: var(--space-2);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a99c95;
+}
+
+.quantity-price-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.quantity-price-tier {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.quantity-price-tier[data-active="true"] {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.price-breakdown {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 0.88rem;
+}
+
+/* Nothing to show until quantity/price data arrives. */
+.price-breakdown:empty { display: none; }
+
+.price-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  word-break: break-word;
+}
+
+.price-breakdown-row[data-emphasis="true"] {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-primary-dark);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.price-breakdown-discount {
+  color: var(--color-success);
+}
+
+.price-breakdown-saved {
+  color: var(--color-success);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tier-nudge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-primary-dark);
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(194, 105, 79, 0.08);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) 10px;
+}
+
+.tier-summary {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}

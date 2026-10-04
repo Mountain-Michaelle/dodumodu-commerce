@@ -1,0 +1,807 @@
+/* The admin console's own stylesheet. It ships ONLY with admin.js and never enters
+   the customer bundle - the build keeps two separate entry points and two separate
+   sheets for exactly that reason, so nothing here can make the storefront heavier.
+   That also means this file can afford to be as long as the console needs without
+   anybody having to think about a customer's download.
+
+   The look is a working tool, not a brand: dense rows, a fixed sidebar, a sticky
+   header, and colour used only where it carries meaning (a status, a destructive
+   action, a validation error). Everything is sized in rem so the whole console
+   scales with the browser's font size, which is the accessibility setting people
+   actually change. */
+
+:root {
+  --bg: #f4f5f7;
+  --surface: #fff;
+  --surface-alt: #fafbfc;
+  --text: #1c1e21;
+  --text-muted: #6b7280;
+  --border: #dfe3e8;
+  --border-strong: #c3c9d1;
+
+  --primary: #17494d;
+  --primary-hover: #0f383b;
+  --primary-soft: #e8f1f1;
+
+  --danger: #b42318;
+  --danger-soft: #fef3f2;
+  --warn: #b54708;
+  --warn-soft: #fffaeb;
+  --ok: #067647;
+  --ok-soft: #ecfdf3;
+  --info: #175cd3;
+  --info-soft: #eff8ff;
+
+  --topbar-h: 3.25rem;
+  --sidebar-w: 14rem;
+  --radius: 6px;
+  --radius-sm: 4px;
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, .1);
+  --shadow-lg: 0 20px 40px rgba(16, 24, 40, .18);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body.admin {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
+p { margin: 0 0 .5rem; }
+p:last-child { margin-bottom: 0; }
+
+.muted { color: var(--text-muted); }
+.strong { font-weight: 600; }
+.mono { font-family: var(--font-mono); font-size: .8125rem; }
+.nowrap { white-space: nowrap; }
+.stack { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Keyboard focus stays visible everywhere. A console where you cannot see where the
+   cursor is is unusable, and :focus-visible keeps it off mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------------ topbar */
+
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: .75rem;
+  height: var(--topbar-h); padding: 0 1rem;
+  background: var(--primary); color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.brand {
+  display: flex; align-items: baseline; gap: .5rem;
+  color: #fff; text-decoration: none; font-weight: 600; letter-spacing: -.01em;
+}
+.brand-mark {
+  display: grid; place-items: center;
+  width: 1.5rem; height: 1.5rem; border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .16); font-size: .8125rem; font-weight: 700;
+}
+.brand-text { font-size: .9375rem; }
+.brand-section {
+  font-size: .6875rem; font-weight: 500; text-transform: uppercase;
+  letter-spacing: .06em; opacity: .7;
+}
+
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: .875rem; }
+.topbar-link { color: rgba(255, 255, 255, .85); font-size: .8125rem; text-decoration: none; }
+.topbar-link:hover { color: #fff; text-decoration: underline; }
+.topbar-user {
+  max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .75rem; color: rgba(255, 255, 255, .7);
+}
+
+.nav-burger {
+  display: none; flex-direction: column; justify-content: center; gap: 3px;
+  width: 2.25rem; height: 2.25rem; padding: 0 .5rem;
+  background: none; border: 0; cursor: pointer;
+}
+.burger-line { display: block; height: 2px; background: #fff; border-radius: 1px; }
+
+/* ----------------------------------------------------------------- layout */
+
+.shell-body { display: flex; align-items: flex-start; min-height: calc(100vh - var(--topbar-h)); }
+
+.sidebar {
+  position: sticky; top: var(--topbar-h);
+  flex: 0 0 var(--sidebar-w); width: var(--sidebar-w);
+  height: calc(100vh - var(--topbar-h));
+  padding: 1rem .75rem;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.nav-group + .nav-group { margin-top: 1.25rem; }
+.nav-group-title {
+  margin: 0 0 .375rem .5rem;
+  font-size: .6875rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--text-muted);
+}
+.nav-list { list-style: none; margin: 0; padding: 0; }
+.nav-link {
+  display: block; padding: .4375rem .5rem; border-radius: var(--radius-sm);
+  color: var(--text); font-size: .8125rem; text-decoration: none;
+}
+.nav-link:hover { background: var(--surface-alt); }
+.nav-link.is-active {
+  background: var(--primary-soft); color: var(--primary); font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.nav-scrim { display: none; }
+
+.main {
+  flex: 1 1 auto; min-width: 0; padding: 1.25rem 1.5rem 3rem;
+}
+
+.page-head { margin-bottom: 1.125rem; }
+.breadcrumb { display: flex; align-items: center; gap: .375rem; font-size: .75rem; min-height: 1rem; }
+.crumb { color: var(--text-muted); text-decoration: none; }
+.crumb:hover { color: var(--primary); text-decoration: underline; }
+.crumb.is-current { color: var(--text); font-weight: 500; }
+.crumb-sep { color: var(--border-strong); }
+.page-title { margin-top: .125rem; font-size: 1.375rem; letter-spacing: -.02em; }
+.page-subtitle { margin-top: .125rem; color: var(--text-muted); font-size: .8125rem; }
+.page-toolbar:empty { display: none; }
+
+/* ------------------------------------------------------------------ panel */
+
+.list-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.panel-body { padding: 1.25rem; }
+
+.list-head {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .875rem 1rem; border-bottom: 1px solid var(--border);
+}
+.list-title { font-size: .9375rem; }
+.list-head > :last-child { margin-left: auto; }
+
+.list-controls {
+  display: flex; align-items: flex-end; gap: .75rem; flex-wrap: wrap;
+  padding: .75rem 1rem; background: var(--surface-alt); border-bottom: 1px solid var(--border);
+  /* The persistent half of a list screen. Never re-created after setup - see
+     listScaffold in ui.js - so a search box keeps focus and caret across every
+     keystroke. Its own bottom border is what separates it from the results. */
+}
+.list-results {
+  display: block; position: relative; min-height: 4rem;
+}
+/* While a search is in flight the previous rows stay on screen, dimmed, rather
+   than being replaced by a spinner. Blanking the list is what made the old
+   version feel like a page reload and lost the operator's scroll position. */
+.list-results.is-loading > *:not(.list-pending) { opacity: .45; transition: opacity .12s ease; }
+.list-pending {
+  position: absolute; top: .5rem; right: .75rem; z-index: 2;
+  padding: .125rem .5rem; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+  font-size: .6875rem; color: var(--text-muted);
+}
+/* Says why nothing is happening yet, rather than leaving a silent box that looks
+   like it is searching forever. */
+.search-status { font-size: .6875rem; color: var(--text-muted); white-space: nowrap; }
+.search-status:empty { display: none; }
+.list-summary {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .5rem 1rem; border-bottom: 1px solid var(--border);
+}
+.result-count { color: var(--text-muted); font-size: .8125rem; }
+.list-summary > :last-child { margin-left: auto; }
+
+/* align-items is what lets the new status note sit beside the box rather than
+   below it, so adding one did not change the height of the controls row and
+   therefore did not shift the table on every keystroke. */
+.search { position: relative; display: flex; align-items: center; gap: .375rem; min-width: 15rem; flex: 0 1 22rem; }
+.search-icon {
+  position: absolute; left: .625rem; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); pointer-events: none; font-size: 1rem;
+}
+.search-input { padding-left: 1.875rem; }
+
+/* ------------------------------------------------- storefront deployment */
+
+/* The status banner. The four states are distinguished by colour AND by the icon
+   in STATE_ICON, because colour alone is not an answer for anyone who cannot
+   separate red from green - and "is it live" is exactly the question where being
+   wrong is expensive. */
+.deploy-panel { display: flex; flex-direction: column; gap: .625rem; margin: .5rem 0 1rem; }
+.deploy-state {
+  display: flex; align-items: flex-start; gap: .625rem;
+  padding: .75rem .875rem; border: 1px solid var(--border); border-radius: .5rem;
+  background: var(--surface-alt);
+}
+.deploy-state .deploy-icon { font-size: 1rem; line-height: 1.4; font-weight: 700; }
+.deploy-state .deploy-text { display: flex; flex-direction: column; gap: .125rem; }
+.deploy-state strong { font-size: .8125rem; letter-spacing: .02em; }
+.deploy-state .muted { font-size: .75rem; }
+
+.deploy-state.is-live { border-color: var(--ok); background: var(--ok-soft); }
+.deploy-state.is-live .deploy-icon, .deploy-state.is-live strong { color: var(--ok); }
+.deploy-state.is-failed { border-color: var(--danger); background: var(--danger-soft); }
+.deploy-state.is-failed .deploy-icon, .deploy-state.is-failed strong { color: var(--danger); }
+.deploy-state.is-deploying .deploy-icon, .deploy-state.is-deploying strong { color: var(--warn, #b45309); }
+
+/* Published and currently live, side by side. The two are only ever shown together
+   when they DIFFER, which is the state an operator most needs read at a glance. */
+.deploy-versions { display: flex; flex-direction: column; gap: .25rem; }
+.deploy-version { display: flex; align-items: baseline; gap: .5rem; font-size: .8125rem; }
+.deploy-label { color: var(--text-muted); min-width: 10rem; }
+/* Stale means "this is what customers are seeing right now, and it is not what you
+   just published" - so it is marked, not hidden. */
+.reference.is-stale { color: var(--warn, #b45309); border-color: var(--warn, #b45309); }
+
+.deploy-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+@media (max-width: 30rem) {
+  .deploy-label { min-width: 0; }
+  .deploy-actions .button { flex: 1; min-height: 2.75rem; }
+}
+
+/* ------------------------------------------------------- image picker */
+
+/* The picker is the first screen in this panel that is mostly pictures, so it is
+   sized for a phone first: two columns on the narrowest screens, more as width
+   allows. A 4-across grid on a 360px phone makes each tile 78px, which is smaller
+   than the 44px minimum the rest of the console holds to and unusable with a thumb. */
+.picker { display: flex; flex-direction: column; gap: .75rem; }
+.picker-grid { min-height: 6rem; }
+.picker-grid-inner {
+  display: grid; gap: .5rem;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+}
+.picker-empty { padding: 1.5rem 0; text-align: center; }
+
+/* The tile is a BUTTON so it is focusable, activatable by keyboard and announced
+   with its pressed state, rather than a clickable div that is none of those. */
+.picker-tile {
+  position: relative; display: block; padding: 0; overflow: hidden;
+  aspect-ratio: 1 / 1;
+  border: 2px solid var(--border); border-radius: .5rem;
+  background: var(--surface-sunken, var(--surface-alt));
+  cursor: pointer;
+  /* A visible ring for keyboard users. The chosen state uses a border too, so the
+     two must not be confused: this one follows focus, that one does not. */
+  transition: border-color .1s ease, transform .1s ease;
+}
+.picker-tile:focus-visible { outline: 2px solid var(--focus, #1d4ed8); outline-offset: 2px; }
+.picker-tile:not(:disabled):hover { border-color: var(--text-muted); }
+.picker-tile:not(:disabled):active { transform: scale(.97); }
+.picker-tile.is-chosen { border-color: var(--ok); }
+.picker-tile:disabled { cursor: not-allowed; opacity: .45; }
+
+/* object-fit: cover is what makes a grid of mixed-aspect photos read as a grid. */
+.picker-thumb { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--surface-alt); }
+
+.picker-tick {
+  position: absolute; top: .25rem; right: .25rem;
+  display: flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: var(--ok); color: #fff; font-size: .75rem; font-weight: 700;
+}
+/* Empty when unchosen, so it is not a stray dot over every photograph. */
+.picker-tick:empty { display: none; }
+
+.picker-foot {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding-top: .75rem; border-top: 1px solid var(--border);
+}
+.picker-actions { display: flex; gap: .5rem; margin-left: auto; }
+.picker-count { font-size: .8125rem; }
+
+/* The current image on a one-image field, beside its two replacement routes. */
+.image-preview { flex: 0 0 auto; width: 4rem; }
+.image-preview .picker-thumb { border-radius: .375rem; border: 1px solid var(--border); aspect-ratio: 1 / 1; }
+
+@media (max-width: 30rem) {
+  .picker-grid-inner { grid-template-columns: repeat(2, 1fr); }
+  /* Two big buttons stacked, not two small ones side by side: on a phone the
+     thumb reaches the bottom of the screen, and "Cancel" beside "Use image" puts
+     the destructive-ish option under the same thumb as the confirming one. */
+  .picker-foot { flex-direction: column; align-items: stretch; }
+  .picker-actions { margin-left: 0; }
+  .picker-actions .button { flex: 1; min-height: 2.75rem; }
+  .picker-count { text-align: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker-tile { transition: none; }
+  .picker-tile:not(:disabled):active { transform: none; }
+}
+
+.filters { display: flex; align-items: flex-end; gap: .625rem; flex-wrap: wrap; }
+.filter { display: flex; flex-direction: column; gap: .1875rem; }
+.filter-label { font-size: .6875rem; font-weight: 600; color: var(--text-muted); }
+.date-range { display: flex; gap: .625rem; }
+
+/* ------------------------------------------------------- inputs & buttons */
+
+.input, .select {
+  font: inherit; color: var(--text);
+  padding: .4375rem .625rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  min-height: 2.125rem; width: 100%;
+}
+.input::placeholder { color: #9aa2ae; }
+.input:disabled, .select:disabled { background: var(--surface-alt); color: var(--text-muted); }
+.input-date { min-width: 8.5rem; }
+.input-narrow { min-width: 5rem; width: 5.5rem; }
+.select-small { min-height: 1.875rem; padding: .25rem .5rem; width: auto; }
+.textarea { resize: vertical; min-height: 4rem; line-height: 1.5; }
+.checkbox { width: 1rem; height: 1rem; accent-color: var(--primary); }
+
+.button {
+  display: inline-flex; align-items: center; justify-content: center; gap: .375rem;
+  font: inherit; font-weight: 500; white-space: nowrap;
+  padding: .4375rem .75rem; min-height: 2.125rem;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.button:hover:not(:disabled) { background: var(--surface-alt); }
+.button:disabled { opacity: .5; cursor: not-allowed; }
+.button-small { padding: .25rem .5rem; min-height: 1.875rem; font-size: .8125rem; }
+.button-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.button-primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+.button-danger { color: var(--danger); border-color: #f0b4ae; background: var(--surface); }
+.button-danger:hover:not(:disabled) { background: var(--danger-soft); }
+.button-link {
+  background: none; border: 0; color: var(--primary);
+  padding: .25rem; min-height: 0; text-decoration: underline;
+}
+
+.icon-button {
+  display: grid; place-items: center;
+  width: 1.875rem; height: 1.875rem; padding: 0; font-size: 1.125rem; line-height: 1;
+  background: none; border: 0; border-radius: var(--radius-sm);
+  color: var(--text-muted); cursor: pointer;
+}
+.icon-button:hover { background: var(--surface-alt); color: var(--text); }
+
+/* ----------------------------------------------------------------- badges */
+
+.badge {
+  display: inline-block; padding: .0625rem .4375rem;
+  border-radius: 999px; font-size: .6875rem; font-weight: 600;
+  text-transform: capitalize; white-space: nowrap;
+  background: #eef1f4; color: var(--text-muted);
+}
+.badge-ok { background: var(--ok-soft); color: var(--ok); }
+.badge-warn { background: var(--warn-soft); color: var(--warn); }
+.badge-bad { background: var(--danger-soft); color: var(--danger); }
+.badge-info { background: var(--info-soft); color: var(--info); }
+
+.reference { font-family: var(--font-mono); font-size: .75rem; color: var(--text-muted); }
+
+/* ------------------------------------------------------------------ table */
+
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table { width: 100%; border-collapse: collapse; font-size: .8125rem; }
+.table th {
+  position: sticky; top: 0; z-index: 1;
+  padding: .5rem .75rem; text-align: left; white-space: nowrap;
+  font-size: .6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-muted); background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+}
+.table td { padding: .5625rem .75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover { background: var(--surface-alt); }
+.table tr.is-clickable { cursor: pointer; }
+
+/* A customer with an active spam flag.
+ *
+ * Deliberately the quietest possible treatment. The order list is the operator''s
+ * main screen, and this is a warning about ONE row on it - so the tint is barely
+ * there, the left border is the real signal, and the reason is not shown here at
+ * all. A screen where flagged rows shouted would train the eye to ignore them. */
+.table tr.is-flagged { background: rgba(217, 119, 6, 0.06); }
+.table tr.is-flagged td:first-child { box-shadow: inset 3px 0 0 rgba(217, 119, 6, 0.55); }
+.table tr.is-flagged:hover { background: rgba(217, 119, 6, 0.1); }
+
+/* ---- order evidence badges ----------------------------------------------
+ *
+ * Four meanings, four treatments. The important one is that "Reordering customer"
+ * is GREEN: a repeat buyer is the good case, and styling it like a warning would
+ * teach an operator to distrust their best customers.
+ *
+ * These are deliberately small. A row with nothing to show renders as an empty
+ * span, so an ordinary order looks ordinary - if every row carried a badge, the
+ * badges would stop being information. */
+.badge-row { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; }
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+/* Positive: this customer has bought before and received the order. */
+.badge-repeat { background: rgba(22, 163, 74, 0.12); color: #15803d; border-color: rgba(22, 163, 74, 0.3); }
+/* Neutral: worth a glance, not a conclusion. */
+.badge-duplicate { background: rgba(202, 138, 4, 0.12); color: #a16207; border-color: rgba(202, 138, 4, 0.3); }
+/* The manual moderation state. */
+.badge-spam { background: rgba(220, 38, 38, 0.12); color: #b91c1c; border-color: rgba(220, 38, 38, 0.3); }
+.badge-activity { background: rgba(100, 116, 139, 0.12); color: #475569; border-color: rgba(100, 116, 139, 0.3); }
+
+.col-evidence { width: 12rem; }
+
+/* ---- shadow report --------------------------------------------------------
+ *
+ * Stat tiles and a "worth a look" row. The point of the layout is that
+ * successful orders sit NEXT TO the volume figures rather than in a separate
+ * section at the bottom: an operator should not be able to read a scary-looking
+ * request count without also seeing the real orders that came out of the same
+ * address, because that pairing is the whole judgement. */
+.stat-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
+.stat {
+  flex: 1 1 8rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.stat-value { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-hint { font-size: 0.72rem; color: #94a3b8; }
+
+/* Needs a look - NOT "this is abuse". Deliberately amber, never red. */
+.table tr.is-review { background: rgba(202, 138, 4, 0.07); }
+.table tr.is-review td:first-child { box-shadow: inset 3px 0 0 rgba(202, 138, 4, 0.5); }
+
+.notice { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+.notice-info { background: rgba(37, 99, 235, 0.07); border: 1px solid rgba(37, 99, 235, 0.25); }
+.evidence-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.evidence-item { padding: 0.6rem 0.8rem; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
+.field-inline { display: inline-flex; align-items: center; gap: 0.5rem; }
+.list-toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+
+.evidence-panel { margin: 1rem 0; }
+.evidence-block { margin-bottom: 1rem; }
+.evidence-block:last-child { margin-bottom: 0; }
+.detail-subheading { margin: 0.5rem 0 0.25rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+.reference-link { text-decoration: underline; cursor: pointer; }
+/* The detail panel, where the reason and the audit trail are actually readable. */
+.spam-flag-panel {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  border-radius: 8px;
+  background: rgba(217, 119, 6, 0.05);
+}
+.spam-flag-panel .detail-heading { margin-top: 0; color: #92400e; }
+.col-num { text-align: right; font-variant-numeric: tabular-nums; }
+.col-check { width: 2rem; }
+.col-when { white-space: nowrap; }
+.col-status { white-space: nowrap; }
+.col-actions { width: 1%; white-space: nowrap; }
+.col-thumb { width: 4rem; }
+.col-ref { white-space: nowrap; }
+.thumb {
+  width: 2.75rem; height: 2.75rem; object-fit: cover;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-alt);
+}
+
+.table-state { padding: 3rem 1.5rem; text-align: center; }
+.table-state-title { font-weight: 600; margin-bottom: .25rem; }
+.table-state-error .table-state-title { color: var(--danger); }
+.table-state .button { margin-top: .75rem; }
+
+.spinner {
+  width: 1.25rem; height: 1.25rem; margin: 0 auto .625rem;
+  border: 2px solid var(--border-strong); border-top-color: var(--primary);
+  border-radius: 50%; animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+  * { transition: none !important; }
+}
+
+/* ---------------------------------------------------------- action menus */
+
+.action-menu { position: relative; display: inline-block; }
+.action-menu-trigger {
+  display: inline-flex; align-items: center; gap: .25rem;
+  font: inherit; font-size: .8125rem;
+  padding: .25rem .5rem; min-height: 1.875rem;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--text);
+}
+.action-menu-trigger:hover { background: var(--surface-alt); }
+.caret { font-size: .625rem; color: var(--text-muted); }
+.action-menu-list {
+  position: absolute; right: 0; top: calc(100% + 3px); z-index: 20;
+  display: none; min-width: 12rem; padding: .25rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-md);
+}
+.action-menu.is-open .action-menu-list { display: block; }
+.action-menu-item {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: .8125rem;
+  padding: .4375rem .5rem; background: none; border: 0;
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--text);
+}
+.action-menu-item:hover { background: var(--primary-soft); color: var(--primary); }
+.action-menu-item.is-danger { color: var(--danger); }
+.action-menu-item.is-danger:hover { background: var(--danger-soft); color: var(--danger); }
+.action-buttons { display: flex; gap: .375rem; flex-wrap: wrap; }
+
+/* -------------------------------------------------------------- bulk bar */
+
+.bulk-bar {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .5rem .75rem;
+  background: var(--primary-soft); border: 1px solid #c7dedd; border-radius: var(--radius-sm);
+}
+.bulk-count { font-weight: 600; font-size: .8125rem; color: var(--primary); }
+
+/* ------------------------------------------------------------- pagination */
+
+.pagination {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .625rem 1rem; border-top: 1px solid var(--border); background: var(--surface-alt);
+}
+.pagination > :last-child { margin-left: auto; }
+.pager { display: flex; align-items: center; gap: .25rem; }
+.pager-numbers { display: flex; align-items: center; gap: .25rem; }
+.button.is-current { background: var(--primary); border-color: var(--primary); color: #fff; }
+.pager-gap { color: var(--text-muted); padding: 0 .125rem; }
+.page-size { display: flex; align-items: center; gap: .375rem; font-size: .8125rem; }
+
+/* ------------------------------------------------------------------ forms */
+
+.form { display: flex; flex-direction: column; gap: 1rem; }
+.fieldset { border: 0; padding: 0; margin: 0; }
+.fieldset-legend {
+  padding: 0 0 .5rem; font-size: .6875rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+}
+.field-grid { display: grid; gap: .875rem; }
+.field-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.field { display: flex; flex-direction: column; gap: .3125rem; }
+.field-checkbox { flex-direction: row; align-items: center; gap: .5rem; }
+.field-label { font-size: .8125rem; font-weight: 500; }
+.hint { font-size: .75rem; color: var(--text-muted); line-height: 1.4; }
+.field-error { font-size: .75rem; color: var(--danger); margin: 0; }
+.field-error:empty { display: none; }
+.field.has-error .input, .field.has-error .select { border-color: var(--danger); }
+.field-row:empty { display: none; }
+.form-note {
+  padding: .625rem .75rem; font-size: .8125rem; color: var(--text-muted);
+  background: var(--warn-soft); border: 1px solid #f5e0b5; border-radius: var(--radius-sm);
+}
+.form-inline { display: flex; gap: .5rem; }
+
+.save-bar {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .75rem 0 0; border-top: 1px solid var(--border);
+}
+.save-status { font-size: .8125rem; color: var(--text-muted); }
+.save-actions { margin-left: auto; display: flex; gap: .5rem; }
+
+/* --------------------------------------------------------- modal & dialog */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 4vh 1rem;
+  background: rgba(16, 24, 40, .45);
+  overflow-y: auto;
+}
+.modal, .dialog {
+  width: 100%; background: var(--surface);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  animation: rise .12s ease-out;
+}
+.modal-wide { max-width: 54rem; }
+.modal-narrow { max-width: 34rem; }
+.dialog { max-width: 30rem; padding: 1.25rem; }
+@keyframes rise { from { transform: translateY(4px); opacity: 0; } }
+
+.modal-head {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .875rem 1.25rem; border-bottom: 1px solid var(--border);
+}
+.modal-title { font-size: 1rem; flex: 1; }
+.modal-body { padding: 1.25rem; }
+
+.dialog-title { font-size: 1rem; margin-bottom: .625rem; }
+.dialog-body { font-size: .8125rem; }
+.dialog-body p { color: var(--text-muted); }
+.dialog-list { margin: .5rem 0 0; padding-left: 1.125rem; color: var(--text); }
+.dialog-list li { margin-bottom: .1875rem; }
+.dialog-subhead { font-size: .8125rem; margin: .875rem 0 .25rem; }
+.dialog-confirm { display: flex; flex-direction: column; gap: .3125rem; margin-top: .75rem; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.25rem; }
+
+/* ----------------------------------------------------------------- toasts */
+
+.toast-host {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 80;
+  display: flex; flex-direction: column; gap: .5rem;
+  max-width: min(26rem, calc(100vw - 2rem));
+}
+.toast {
+  padding: .625rem .75rem; font-size: .8125rem;
+  background: var(--text); color: #fff;
+  border-radius: var(--radius); box-shadow: var(--shadow-md);
+  animation: rise .12s ease-out;
+}
+.toast-success { background: var(--ok); }
+.toast-error { background: var(--danger); }
+.toast-warn { background: var(--warn); }
+.toast-leaving { opacity: 0; transition: opacity .2s; }
+
+/* ------------------------------------------------------------ detail view */
+
+.detail { display: flex; flex-direction: column; gap: 1.25rem; }
+.detail-header { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; }
+.detail-heading {
+  font-size: .6875rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-muted);
+  padding-bottom: .375rem; border-bottom: 1px solid var(--border);
+}
+.detail-list { display: grid; grid-template-columns: 10rem minmax(0, 1fr); gap: .5rem .875rem; margin: 0; }
+.detail-list dt { font-size: .8125rem; color: var(--text-muted); }
+.detail-list dd { margin: 0; font-size: .8125rem; min-width: 0; }
+.detail-actions {
+  display: flex; gap: .5rem; flex-wrap: wrap;
+  padding-top: 1rem; border-top: 1px solid var(--border);
+}
+
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline-item { padding: 0 0 .875rem .875rem; border-left: 2px solid var(--border); position: relative; }
+.timeline-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+.timeline-item::before {
+  content: ""; position: absolute; left: -5px; top: .3rem;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--border-strong); border: 2px solid var(--surface);
+}
+.timeline-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline-meta { margin: .1875rem 0 0; font-size: .75rem; }
+
+/* ---------------------------------------------------------------- uploader */
+
+.uploader { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; }
+.uploader-row { display: flex; align-items: center; gap: .625rem; flex-wrap: wrap; }
+.upload-status { font-size: .75rem; color: var(--text-muted); }
+/* A failed upload has to be visible where it happened. Before this existed the
+   rejection was re-thrown into the file input's change listener, so an operator
+   who picked a file got no message at all - indistinguishable from the upload
+   having worked. The server's own words, in the danger colour, in place. */
+.upload-status.is-error { color: var(--danger); }
+.upload-preview { display: flex; gap: .375rem; }
+/* The "Used by" chips in the media library: which product or category holds an
+   image. Small, quiet, and wrapping - a product with many images and a category
+   image can produce half a dozen, and a row that cannot wrap turns into a
+   horizontally scrolling table on a phone. */
+.chips { display: flex; flex-wrap: wrap; gap: .25rem; }
+.chip {
+  display: inline-block;
+  padding: .0625rem .375rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-sunken, var(--surface));
+  font-size: .6875rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.chip.muted { border-style: dashed; }
+
+.image-list { margin-bottom: .75rem; }
+.image-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .375rem; }
+.image-row {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .5rem; background: var(--surface-alt);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.image-row .input { flex: 1 1 12rem; width: auto; }
+.image-order {
+  display: grid; place-items: center; width: 1.5rem; height: 1.5rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: .75rem; font-weight: 600; color: var(--text-muted);
+}
+
+/* -------------------------------------------------------------------- boot */
+
+.boot { display: grid; place-items: center; min-height: 60vh; padding: 2rem; text-align: center; }
+.boot-blocked { align-content: center; gap: .5rem; }
+.boot-title { font-size: 1.25rem; }
+
+/* ------------------------------------------------------------- responsive */
+
+/* Tablet: the sidebar becomes a slide-over. It is the only navigation, so it gets
+   a scrim and a burger rather than being hidden behind a mystery icon row. */
+@media (max-width: 900px) {
+  .nav-burger { display: flex; }
+  .sidebar {
+    position: fixed; top: var(--topbar-h); left: 0; z-index: 50;
+    transform: translateX(-100%);
+    transition: transform .16s ease-out;
+    box-shadow: var(--shadow-lg);
+  }
+  body.nav-open .sidebar { transform: translateX(0); }
+  body.nav-open .nav-scrim {
+    display: block; position: fixed; inset: var(--topbar-h) 0 0 0; z-index: 40;
+    background: rgba(16, 24, 40, .35);
+  }
+  .main { padding: 1rem 1rem 3rem; }
+  .field-grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .detail-list { grid-template-columns: minmax(0, 1fr); gap: .125rem; }
+  .detail-list dt { font-weight: 600; margin-top: .5rem; }
+}
+
+/* Phone: the table scrolls sideways rather than collapsing into cards. Cardifying
+   a ten-column table means either hiding data the operator needs or writing a
+   second layout to keep in step; horizontal scroll keeps every column. */
+@media (max-width: 640px) {
+  body.admin { font-size: 0.9375rem; }
+  .main { padding: .75rem .625rem 3rem; }
+  .page-title { font-size: 1.1875rem; }
+  .topbar-user { display: none; }
+  .list-controls { padding: .625rem .75rem; }
+  .search { flex: 1 1 100%; min-width: 0; }
+  .filters, .date-range { width: 100%; }
+  .filter { flex: 1 1 8rem; }
+  .pagination { justify-content: center; }
+  .pager-numbers { display: none; }
+
+  /* Touch targets: 44px is the smallest reliably tappable control. */
+  .button, .input, .select { min-height: 2.75rem; font-size: 0.9375rem; }
+  .button-small { min-height: 2.375rem; }
+  .action-menu-trigger { min-height: 2.375rem; padding: .375rem .625rem; }
+  .action-menu-item { padding: .625rem .5rem; font-size: 0.9375rem; }
+  .nav-link { padding: .625rem .5rem; font-size: 0.9375rem; }
+  .table th, .table td { padding: .5rem; }
+  .overlay { padding: 0; }
+  .modal, .dialog { max-width: 100%; min-height: 100%; border-radius: 0; }
+  .modal-body, .dialog { padding: 1rem; }
+  .dialog { min-height: auto; margin: auto 0; }
+  .toast-host { right: .5rem; left: .5rem; bottom: .5rem; max-width: none; }
+}
+
+/* The sidebar sticks only while there is room for it. */
+@media (max-width: 900px) {
+  .sidebar { position: fixed; }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "skincare-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/node.ts",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx migrations/migrate.ts",
+    "db:baseline": "tsx migrations/migrate.ts --baseline",
+    "db:seed": "node scripts/seed.mjs",
+    "db:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 status",
+    "db:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 start",
+    "db:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 stop",
+    "db:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 init",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@neondatabase/serverless": "^0.10.1",
+    "drizzle-orm": "^0.36.1",
+    "hono": "^4.6.9",
+    "libphonenumber-js": "^1.11.20",
+    "pg": "^8.23.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241004.0",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.28.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "wrangler": "^3.90.0"
+  }
+}

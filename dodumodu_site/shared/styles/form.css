@@ -1,0 +1,259 @@
+.order-form {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  /* Rows sit close together so the form reads as one block. The validation
+     line under each field keeps its own reserved height (see .field-error):
+     tightening that would make errors shift the layout. */
+  gap: 7px;
+}
+
+.order-head { text-align: center; }
+.order-head p { font-size: 0.88rem; color: var(--color-text-muted); }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* A row of related fields: stacked on mobile, side by side on desktop. */
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+}
+
+.field fieldset { width: 100%; min-width: 0; border: 0; padding: 0; margin: 0; }
+.field fieldset legend { display: block; margin-bottom: 10px; }
+
+.field label,
+.field legend {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0;
+}
+
+.field input,
+.field select,
+.field textarea {
+  font: inherit;
+  font-size: 16px; /* 16px keeps iOS from zooming in on focus */
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.field input::placeholder,
+.field textarea::placeholder { color: #a99c95; }
+
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  cursor: pointer; /* the whole box opens the dropdown, so show it's tappable */
+  background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b5f59' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px;
+}
+
+.field textarea {
+  min-height: 96px;
+  line-height: 1.55;
+  resize: none; /* no resize grabber — the page grows it to fit the text */
+  overflow: hidden;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 3px rgba(194, 105, 79, 0.15);
+}
+
+.field-error {
+  color: var(--color-error);
+  font-size: 0.78rem;
+  line-height: 1.3;
+  min-height: 1em;
+}
+
+.field[data-invalid="true"] input,
+.field[data-invalid="true"] select,
+.field[data-invalid="true"] textarea {
+  border-color: var(--color-error);
+  background: #fff6f5;
+}
+
+.field[data-invalid="true"] label,
+.field[data-invalid="true"] legend { color: var(--color-error); }
+
+.radio-group {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--color-surface);
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.radio-option input[type="radio"] {
+  accent-color: var(--color-primary);
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  padding: 0;
+}
+
+.radio-option:has(input:checked) {
+  border-color: var(--color-primary);
+  background: rgba(194, 105, 79, 0.06);
+}
+
+.late-warning {
+  display: none;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fff4e5;
+  border: 1px solid #f2c894;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.late-warning[data-visible="true"] { display: flex; }
+
+.submit-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 0.12s, opacity 0.15s;
+}
+
+.submit-button:active:not(:disabled) { transform: scale(0.99); }
+.submit-button:focus-visible { outline: 3px solid rgba(194, 105, 79, 0.4); outline-offset: 2px; }
+
+.submit-button:disabled {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  color: #fff;
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* Spinner while the order is in flight — data-loading is set by the page
+   script (and mirrors orchestrate.js's disabled state). */
+.submit-button[data-loading="true"]::after {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: submit-spin 0.7s linear infinite;
+}
+
+@keyframes submit-spin { to { transform: rotate(360deg); } }
+
+.retry-banner {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff4e5;
+  border: 1px solid #f2c894;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  font-size: 0.85rem;
+}
+
+.retry-banner[data-visible="true"] { display: flex; }
+
+@media (min-width: 480px) {
+  .retry-banner { flex-direction: row; align-items: center; }
+}
+
+.manual-retry-button {
+  align-self: flex-start;
+  min-height: 42px;
+  padding: 9px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-status {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  min-height: 1.2em;
+}
+
+
+/* ---- Desktop overrides ----
+   Last in the file on purpose. These selectors have the same specificity as the
+   mobile-first base rules above, so source order is the only thing that decides
+   between them: a media block placed earlier in this file loses to the base
+   rules that follow it, and the desktop form silently stays stacked. */
+@media (min-width: 768px) {
+  .order-form {
+    max-width: 720px;
+    padding: var(--space-5);
+  }
+
+  /* Paired fields share a row; single fields stay full width. */
+  .field-row { grid-template-columns: 1fr 1fr; gap: 9px; }
+
+  /* Payment options sit side by side as one horizontal group. */
+  .radio-group { grid-template-columns: 1fr 1fr; gap: 6px; }
+}

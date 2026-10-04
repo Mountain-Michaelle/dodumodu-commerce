@@ -1,0 +1,10 @@
+# One .env for the whole repository — see .env.example for every key.
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+**/.media/
+*.log
+.wrangler/

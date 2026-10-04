@@ -1,0 +1,34 @@
+.testimonials-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.testimonial-card {
+  display: flex;
+  gap: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-card);
+}
+
+.testimonial-image {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.testimonial-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: var(--space-1);
+}
+
+.testimonial-description {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}

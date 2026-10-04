@@ -1,0 +1,8 @@
+node_modules/
+dist/
+# Local environment — never commit. The .env itself lives at the repository
+# root (one file for both packages); this ignores any local copy.
+.env
+.env.*
+!.env.example
+*.log

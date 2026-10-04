@@ -1,0 +1,89 @@
+// Shape of everything bound to a running instance of the app — vars, secrets,
+// and bindings. Import this type wherever a route/service/repo needs `env`;
+// never redeclare it.
+//
+// The same shape serves both runtimes. On the Worker the values come from
+// wrangler ([vars], secrets, R2/KV bindings); in local Node they are assembled
+// from the root .env plus the local shims in src/node/shims.ts. That is the
+// whole difference between the two environments: this type does not change.
+export type Env = {
+  // vars (wrangler.toml [vars] / .env)
+  R2_BUCKET_NAME: string;
+  ENVIRONMENT: "sandbox" | "production";
+  RATE_LIMIT_API_PER_MINUTE: string;
+  RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: string;
+  /**
+   * Admin console read ceiling, per operator per minute. Separate from
+   * RATE_LIMIT_API_PER_MINUTE on purpose - the console has its own budget and its
+   * own keyspace, so operator browsing never competes with customer traffic.
+   */
+  RATE_LIMIT_ADMIN_PER_MINUTE: string;
+  /**
+   * Admin console WRITE ceiling, per operator per minute. Deliberately tighter
+   * than the read ceiling: this covers order transitions, payment overrides, bulk
+   * actions, uploads and publishes.
+   */
+  RATE_LIMIT_ADMIN_WRITES_PER_MINUTE: string;
+
+  /* ---- image pipeline (see src/config/imageConfig.ts for what each does) ---- */
+
+  /** "transform" (Cloudflare /cdn-cgi/image) or "derivative" (admin-rendered). */
+  IMAGE_MODE: string;
+  MAX_UPLOAD_BYTES: string;
+  /** Cloudflare cannot transform past 12,000px per side. */
+  MAX_IMAGE_DIMENSION: string;
+  IMAGE_KEY_PREFIX: string;
+  IMAGE_WIDTHS_HERO: string;
+  IMAGE_WIDTHS_GALLERY: string;
+  IMAGE_WIDTHS_TESTIMONIAL: string;
+  IMAGE_WIDTHS_THUMBNAIL: string;
+  IMAGE_QUALITY_HERO: string;
+  IMAGE_QUALITY_GALLERY: string;
+  IMAGE_QUALITY_TESTIMONIAL: string;
+  IMAGE_QUALITY_THUMBNAIL: string;
+  /** s-maxage for public catalog JSON; the edge serves it without asking again. */
+  CATALOG_EDGE_TTL: string;
+  CATALOG_EDGE_SWR: string;
+  /**
+   * R2 custom domain that fronts the bucket, e.g. https://media.example.com.
+   * Required in BOTH delivery modes and NOT used as a Worker route: no Worker sits
+   * in the image path.
+   */
+  IMAGE_DELIVERY_BASE: string;
+  /** Cloudflare Pages deploy hook fired by the admin's Publish action. */
+  PAGES_DEPLOY_HOOK: string;
+  /**
+   * The PUBLIC storefront origin, e.g. https://yoursite.com.
+   *
+   * This is what the deployment verifier FETCHES to find out which publish is
+   * actually live. It must be the public origin, not the API origin: the whole
+   * point is to check the page a customer receives, and checking the API instead
+   * would confirm nothing about what is being served.
+   */
+  SITE_URL: string;
+  MAX_ORDER_QUANTITY: string;
+  /** Comma-separated CORS allowlist. See isOriginAllowed in app.ts. */
+  ALLOWED_ORIGINS: string;
+  /** OPay API root, e.g. the sandbox or production host. */
+  OPAY_BASE_URL: string;
+  /**
+   * Optional comma-separated operator allowlist. Empty means "anyone Cloudflare
+   * Access vouched for", which is correct while Access admits only the owner.
+   * See resolvePrincipal in src/auth/adminAuth.ts - this is configuration read in
+   * exactly one place, which is why no email address appears in a route file.
+   */
+  ADMIN_OPERATORS: string;
+
+  // secrets (wrangler secret put / .env)
+  DATABASE_URL: string;
+  OPAY_PUBLIC_KEY: string;
+  OPAY_SECRET_KEY: string;
+  OPAY_MERCHANT_ID: string;
+  OPAY_WEBHOOK_SECRET: string;
+  TURNSTILE_SECRET_KEY: string;
+  RECONCILE_CRON_SECRET: string;
+
+  // bindings — real R2/KV on the Worker, local shims under Node
+  MEDIA_BUCKET: R2Bucket;
+  RATE_LIMIT_KV: KVNamespace;
+};

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+# Local build artifacts and the media directory standing in for R2
+**/.media/
+*.log
+# Local environment — never commit. .env.example IS committed.
+.env
+.env.*
+!.env.example
+# Wrangler's local state
+.wrangler/
+# Node tooling caches
+.tsbuildinfo

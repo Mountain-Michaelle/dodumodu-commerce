@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Dodumodu</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="/__ADMIN_CSS__">
+</head>
+<body class="admin">
+<!-- ICONS -->
+<!--
+  The shell is deliberately almost empty. Every pixel of the console is drawn by
+  shared/scripts/admin.js from the data the API returns, which is what lets one
+  table component serve orders, categories, products and media instead of four
+  hand-written <table> blocks that drift apart.
+
+  #app is the only mount point; a failure to reach the API replaces its contents
+  with an explanation rather than leaving a blank page.
+-->
+<div id="app">
+  <div class="boot">
+    <div class="spinner" aria-hidden="true"></div>
+    <p class="muted">Loading the admin console…</p>
+  </div>
+</div>
+<noscript>
+  <div class="boot boot-blocked">
+    <h1 class="boot-title">JavaScript is required</h1>
+    <p class="muted">This console talks to the admin API from the browser, so it needs JavaScript enabled.</p>
+  </div>
+</noscript>
+<script src="/__ADMIN_JS__" defer></script>
+</body>
+</html>
+

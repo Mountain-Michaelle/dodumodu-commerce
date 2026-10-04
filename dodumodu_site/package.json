@@ -1,0 +1,18 @@
+{
+  "name": "skincare-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build/bundle.mjs",
+    "test": "npm run build && node test/form-ux.check.mjs && node test/css-single-source.mjs && node test/size-budget.mjs && node test/admin-ui.check.mjs && node test/pricing.smoke.mjs && node test/order-success.smoke.mjs",
+    "test:form": "node test/form-ux.check.mjs",
+    "test:order": "npm run build && node test/order-success.smoke.mjs",
+    "test:css": "npm run build && node test/css-single-source.mjs",
+    "test:size": "npm run build && node test/size-budget.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "jsdom": "^26.1.0"
+  }
+}
