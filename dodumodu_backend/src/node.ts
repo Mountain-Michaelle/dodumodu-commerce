@@ -77,6 +77,32 @@ const env: Env = {
   OPAY_BASE_URL: process.env.OPAY_BASE_URL ?? "",
   ADMIN_OPERATORS: process.env.ADMIN_OPERATORS ?? "",
 
+  // Abuse layer. Every one of these defaults to the SAFE value: shadow means
+  // "evaluate and log, refuse nobody", so a deployment that sets none of them
+  // observes rather than blocks. That default is deliberate and is why the local
+  // Env must carry them - without this, RL_AUTO_BLOCK=on in .env would be
+  // silently ignored here while working on the Worker, which is the worst kind of
+  // difference between the two runtimes.
+  RL_MODE: process.env.RL_MODE ?? "shadow",
+  RL_AUTO_BLOCK: process.env.RL_AUTO_BLOCK ?? "shadow",
+  RL_V2_ENABLED: process.env.RL_V2_ENABLED ?? "off",
+  RL_VELOCITY_WINDOW_SECONDS: process.env.RL_VELOCITY_WINDOW_SECONDS ?? "60",
+  RL_VELOCITY_BLOCK_SECONDS: process.env.RL_VELOCITY_BLOCK_SECONDS ?? "600",
+  RL_V1_MIN_ORDERS: process.env.RL_V1_MIN_ORDERS ?? "4",
+  RL_V1_MIN_PHONES: process.env.RL_V1_MIN_PHONES ?? "3",
+  RL_V2_MIN_ORDERS: process.env.RL_V2_MIN_ORDERS ?? "10",
+  RL_V2_MIN_PHONES: process.env.RL_V2_MIN_PHONES ?? "4",
+  RL_V2_DEVICE_RATIO: process.env.RL_V2_DEVICE_RATIO ?? "0.7",
+  RL_WINDOW_SECONDS: process.env.RL_WINDOW_SECONDS ?? "900",
+  RL_BLOCK_SECONDS: process.env.RL_BLOCK_SECONDS ?? "1800",
+  RL_ABUSE_IP_POSTS: process.env.RL_ABUSE_IP_POSTS ?? "120",
+  RL_ABUSE_DISTINCT_PHONES: process.env.RL_ABUSE_DISTINCT_PHONES ?? "40",
+  RL_ABUSE_FAILURES: process.env.RL_ABUSE_FAILURES ?? "60",
+  RL_ABUSE_SUCCESS_FLOOR: process.env.RL_ABUSE_SUCCESS_FLOOR ?? "3",
+  RL_IP_ALLOWLIST: process.env.RL_IP_ALLOWLIST ?? "",
+  RL_PHONE_MAX_OPEN: process.env.RL_PHONE_MAX_OPEN ?? "3",
+  SUPPORT_WHATSAPP_URL: process.env.SUPPORT_WHATSAPP_URL ?? "",
+
   DATABASE_URL: databaseUrl,
   OPAY_PUBLIC_KEY: process.env.OPAY_PUBLIC_KEY ?? "",
   OPAY_SECRET_KEY: process.env.OPAY_SECRET_KEY ?? "",

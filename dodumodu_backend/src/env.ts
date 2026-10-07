@@ -25,6 +25,32 @@ export type Env = {
    */
   RATE_LIMIT_ADMIN_WRITES_PER_MINUTE: string;
 
+  /* ---- abuse protection ---- */
+  //
+  // RL_AUTO_BLOCK is the only switch that can refuse an order automatically:
+  // "off" | "shadow" | "on", defaulting to shadow. RL_MODE governs the long-window
+  // volume rule, which never refuses anyone.
+  RL_MODE: string;
+  RL_AUTO_BLOCK: string;
+  RL_V2_ENABLED: string;
+  RL_VELOCITY_WINDOW_SECONDS: string;
+  RL_VELOCITY_BLOCK_SECONDS: string;
+  RL_V1_MIN_ORDERS: string;
+  RL_V1_MIN_PHONES: string;
+  RL_V2_MIN_ORDERS: string;
+  RL_V2_MIN_PHONES: string;
+  RL_V2_DEVICE_RATIO: string;
+  RL_WINDOW_SECONDS: string;
+  RL_BLOCK_SECONDS: string;
+  RL_ABUSE_IP_POSTS: string;
+  RL_ABUSE_DISTINCT_PHONES: string;
+  RL_ABUSE_FAILURES: string;
+  RL_ABUSE_SUCCESS_FLOOR: string;
+  RL_IP_ALLOWLIST: string;
+  RL_PHONE_MAX_OPEN: string;
+  /** Optional; validated against wa.me / api.whatsapp.com before it is ever rendered. */
+  SUPPORT_WHATSAPP_URL: string;
+
   /* ---- image pipeline (see src/config/imageConfig.ts for what each does) ---- */
 
   /** "transform" (Cloudflare /cdn-cgi/image) or "derivative" (admin-rendered). */

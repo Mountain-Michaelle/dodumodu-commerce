@@ -115,7 +115,10 @@ export async function listAll(db: Db, limit = 200): Promise<BlockRow[]> {
     ORDER BY blocked_at DESC
     LIMIT ${limit}
   `);
-  return result?.rows ?? [];
+  // Mapped for the same reason listActive is: an audit view whose rows are
+  // silently snake_case would show an operator `undefined` where the release
+  // details belong - the one thing the audit view exists to show.
+  return (result?.rows ?? []).map(toBlockRow);
 }
 /**
  * Create a block, or join the one that already exists.
@@ -175,7 +178,10 @@ export async function createBlock(
     ON CONFLICT (scope, value) WHERE active DO NOTHING
     RETURNING *
   `);
-  return result?.rows?.[0] ?? null;
+  const row = result?.rows?.[0];
+  // null stays null (another request won the race); a won row is mapped so the
+  // caller's `expiresAt` is the real column and not undefined.
+  return row ? toBlockRow(row) : null;
 }
 
 /**
@@ -205,7 +211,10 @@ export async function releaseBlock(
      WHERE id = ${id} AND active
     RETURNING *
   `);
-  return result?.rows?.[0] ?? null;
+  const row = result?.rows?.[0];
+  // Mapped so the response carries releasedAt/releasedBy as camelCase - the admin
+  // UI writes them straight into the row it just updated.
+  return row ? toBlockRow(row) : null;
 }
 
 /** Counts, for the Blocked screen header. */

@@ -83,19 +83,44 @@ spamRoutes.get("/shadow", async (c) => {
 spamRoutes.get("/suspects", async (c) => {
   requirePermissionOf(c, PERMISSIONS.ordersRead);
   const config = abuseConfigFrom(c.env as unknown as Record<string, string | undefined>);
-  const suspects = await spamService.listSuspects(createDb(c.env.DATABASE_URL), {
-    minOrders: config.softSuspectMinOrders,
-    windowDays: config.softSuspectWindowDays,
-  });
-  // A suggestion list, and it flags nothing. Masked for the same reason.
+
+  // --- optional query params: page, pageSize, q (search) ---
+  const pageParam = c.req.query("page");
+  const pageSizeParam = c.req.query("pageSize");
+  const searchRaw = c.req.query("q");
+
+  const page = pageParam !== null ? Math.max(1, Math.floor(Number(pageParam))) : 1;
+  const pageSize =
+    pageSizeParam !== null
+      ? Math.max(1, Math.min(200, Math.floor(Number(pageSizeParam))))
+      : config.softSuspectPageSize;
+  const normalized = searchRaw ? (typeof normalizeSearch === "function" ? normalizeSearch(searchRaw) : searchRaw) : null;
+  const phonePattern = normalized ? likePattern(normalized) : null;
+
+  const [suspects, total] = await Promise.all([
+    spamService.listSuspects(createDb(c.env.DATABASE_URL), {
+      minOrders: config.softSuspectMinOrders,
+      windowDays: config.softSuspectWindowDays,
+    }),
+    spamService.countSuspects(createDb(c.env.DATABASE_URL), { minOrders: config.softSuspectMinOrders, windowDays: config.softSuspectWindowDays, phonePattern }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageSuspects = suspects.slice((page - 1) * pageSize, page * pageSize);
+
   return c.json({
     notice: "Suggestions only. Nothing here has been flagged; deciding is a human judgement.",
-    suspects: suspects.map((s) => ({
+    suspects: pageSuspects.map((s) => ({
       phoneMasked: maskPhone(s.phoneNorm),
       orders: s.orders,
       oldest: s.oldest,
       newest: s.newest,
     })),
+    page,
+    pageSize,
+    total,
+    totalPages,
+    search: searchRaw ?? null,
   });
 });
 spamRoutes.post("/flag", async (c) => {
