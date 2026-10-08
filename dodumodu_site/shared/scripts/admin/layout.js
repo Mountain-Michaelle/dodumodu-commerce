@@ -22,6 +22,9 @@ export const NAV = [
     { id: "shadow", label: "Abuse (shadow)" },
     { id: "blocks", label: "Blocked" },
   ] },
+  { group: "Analytics", items: [
+    { id: "reports", label: "Reports" },
+  ] },
   { group: "Settings", items: [
     { id: "discounts", label: "Discount tiers" },
     { id: "payment", label: "Payment rules" },
@@ -30,6 +33,7 @@ export const NAV = [
 
 const TITLES = {
   orders: ["Orders", "Every order, newest first."],
+  reports: ["Reports", "Monthly delivery performance and order lifecycle."],
   categories: ["Categories", "How the catalogue is grouped."],
   products: ["Products", "What is sold, and where it sits."],
   media: ["Media", "Every image that has been uploaded."],

@@ -198,6 +198,11 @@ Then schedule a job (cron-job.org) for
 `POST https://<your-worker>/reconcile-pending` every 5 minutes with header
 `x-cron-secret: <RECONCILE_CRON_SECRET>`.
 
+Schedule a second job for
+`POST https://<your-worker>/internal/monthly-kpi-snapshots/close` once daily
+after midnight in Africa/Lagos, with the same `x-cron-secret` header. The endpoint
+captures the previous Lagos month once and never overwrites an existing snapshot.
+
 ### 6. Site (Cloudflare Pages)
 
 - Build command: `cd dodumodu_site && npm ci && npm run build`
@@ -259,7 +264,6 @@ cd dodumodu_site    && npm test        # form UX, CSS single source, size budget
 - Upload filenames are reduced to a safe character set before becoming a
   storage key.
 - Turnstile fails **closed** in production; it is only skipped locally.
-
 
 
 

@@ -95,6 +95,15 @@ export async function activePhoneSet(db: Db, phoneNorms: string[]): Promise<Set<
   return new Set(rows.map((r) => r.phoneNorm));
 }
 
+/** Every currently active canonical phone, for bounded report aggregation. */
+export async function activePhoneNorms(db: Db): Promise<Set<string>> {
+  const rows = await db
+    .select({ phoneNorm: spamFlags.phoneNorm })
+    .from(spamFlags)
+    .where(isNull(spamFlags.revertedAt));
+  return new Set(rows.map((row) => row.phoneNorm));
+}
+
 /**
  * Suspects: phones with several orders and ZERO legitimate progression.
  *
@@ -118,9 +127,12 @@ export async function activePhoneSet(db: Db, phoneNorms: string[]): Promise<Set<
  */
 export async function listSuspects(
   db: Db,
-  opts: { minOrders: number; windowDays: number; limit?: number },
+  opts: { minOrders: number; windowDays: number; limit?: number; offset?: number; phonePattern?: string | null },
 ): Promise<{ phoneNorm: string; orders: number; oldest: Date; newest: Date }[]> {
   const since = new Date(Date.now() - opts.windowDays * 86_400_000);
+  const limit = Math.max(1, Math.min(200, Math.floor(opts.limit ?? 100)));
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0));
+  const pattern = opts.phonePattern ?? null;
   const result = await db.execute(sql`
     SELECT phone_norm,
            count(*)::int AS orders,
@@ -136,15 +148,49 @@ export async function listSuspects(
           AND created_at >= ${since}
           AND status IN ('paid', 'confirmed_cod', 'delivered')
       )
+      ${pattern !== null ? sql`AND phone_norm LIKE ${pattern}` : sql``}
     GROUP BY phone_norm
     HAVING count(*) >= ${opts.minOrders}
     ORDER BY count(*) DESC
-    LIMIT ${opts.limit ?? 100}
+    LIMIT ${limit} OFFSET ${offset}
   `);
   const rows = (result as unknown as { rows: { phone_norm: string; orders: number; oldest: Date; newest: Date }[] }).rows;
   return rows.map((r) => ({
     phoneNorm: r.phone_norm, orders: Number(r.orders), oldest: r.oldest, newest: r.newest,
   }));
+}
+
+/** Count of suspect PHONES matching an optional phone pattern.
+ *
+ * Mirrors the listSuspects GROUP BY/HAVING exactly, then counts the groups — a
+ * plain COUNT(*) here would count order rows, not phones, and disagree with the
+ * list on every page after the first.
+ */
+export async function countSuspects(
+  db: Db,
+  opts: { minOrders: number; windowDays: number; phonePattern: string | null },
+): Promise<number> {
+  const since = new Date(Date.now() - opts.windowDays * 86_400_000);
+  const base = sql`SELECT count(*)::int AS n FROM (
+    SELECT phone_norm
+    FROM orders
+    WHERE phone_norm IS NOT NULL
+      AND created_at >= ${since}
+      AND status NOT IN ('paid', 'confirmed_cod', 'delivered')
+      AND phone_norm NOT IN (
+        SELECT DISTINCT phone_norm FROM orders
+        WHERE phone_norm IS NOT NULL
+          AND created_at >= ${since}
+          AND status IN ('paid', 'confirmed_cod', 'delivered')
+      )
+      ${opts.phonePattern !== null ? sql`AND phone_norm LIKE ${opts.phonePattern}` : sql``}
+    GROUP BY phone_norm
+    HAVING count(*) >= ${opts.minOrders}
+  ) AS suspects
+  `;
+  const result = await db.execute(base);
+  const rows = (result as unknown as { rows: { n: number }[] }).rows;
+  return rows.length > 0 ? Number(rows[0].n) : 0;
 }
 
 /**

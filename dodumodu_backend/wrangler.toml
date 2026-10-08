@@ -7,6 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 R2_BUCKET_NAME = "skincare-media"
 ENVIRONMENT = "sandbox" # 'sandbox' | 'production'
 RATE_LIMIT_API_PER_MINUTE = "20"
+ANALYTICS_IP_HMAC_VERSION = "1"
+ANALYTICS_WARMUP_ENABLED = "false"
 
 # ---- image pipeline ----
 # Every one of these has the same default in src/config/imageConfig.ts, so a missing
@@ -72,4 +74,5 @@ id = "replace-with-real-kv-namespace-id"
 #   OPAY_MERCHANT_ID
 #   OPAY_WEBHOOK_SECRET
 #   TURNSTILE_SECRET_KEY
-#   RECONCILE_CRON_SECRET   (shared secret cron-job.org sends so /reconcile-pending isn't public)
+#   RECONCILE_CRON_SECRET   (cron-job.org sends to reconcile and monthly KPI close routes)
+#   ANALYTICS_IP_HMAC_SECRET (dedicated key for visitor IP HMACs)

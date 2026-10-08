@@ -146,9 +146,9 @@ function jsonResponse(body) {
 const PAGE = { page: 1, pageSize: 50, total: 1, totalPages: 1, hasNext: false, hasPrev: false };
 const STUB = {
   "/admin/me": { email: "owner@example.com", permissions: ["orders:read", "orders:write", "orders:delete", "orders:payment-override", "categories:read", "categories:write", "products:read", "products:write", "media:read", "media:write", "settings:write"] },
-  "/admin/orders": { orders: [{ id: 1, reference: "ord-abc-12345678", createdAt: "2026-01-01T10:00:00Z", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", categoryName: "Skin", quantity: 1, unitPrice: 100, subtotal: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "paid", deliveredAt: null, updatedAt: "2026-01-01T10:00:00Z", actions: ["deliver"] }], page: PAGE },
+  "/admin/orders": { orders: [{ id: 1, reference: "ord-abc-12345678", createdAt: "2026-01-01T10:00:00Z", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", categoryName: "Skin", quantity: 1, unitPrice: 100, subtotal: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "paid", deliveredAt: null, updatedAt: "2026-01-01T10:00:00Z", actions: ["deliver", "cancel", "mark-not-picking"] }], page: PAGE },
   "/admin/orders/csv": { csv: "id,reference\n1,ord-abc-12345678" },
-  "/admin/orders/1": { order: { id: 1, reference: "ord-abc-12345678", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", quantity: 1, unitPrice: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "paid", deliveredAt: null, createdAt: "2026-01-01T10:00:00Z", updatedAt: "2026-01-01T10:00:00Z", actions: ["deliver"] }, history: [] },
+  "/admin/orders/1": { order: { id: 1, reference: "ord-abc-12345678", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", quantity: 1, unitPrice: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "cancelled", deliveredAt: null, createdAt: "2026-01-01T10:00:00Z", updatedAt: "2026-01-01T10:00:00Z", actions: ["revert-cancel"] }, history: [] },
   "/admin/categories": { categories: [{ id: 1, name: "Skin Cares", slug: "skin-cares", productCount: 1, sortOrder: 0, isActive: true, mediaR2Key: "", updatedAt: "2026-01-01T10:00:00Z" }], page: PAGE },
   "/admin/categories/tree": { tree: [{ id: 1, name: "Skin Cares", children: [] }] },
   "/admin/products": { products: [{ id: 1, slug: "glow", name: "Glow", price: 100, active: true, categoryId: 1, categoryName: "Skin Cares", updatedAt: "2026-01-01T10:00:00Z" }], page: PAGE },
@@ -156,9 +156,38 @@ const STUB = {
   "/admin/testimonials": { testimonials: [{ id: 1, title: "Works", kind: "review", productId: 1, r2Key: "", displayOrder: 0, active: true }] },
   "/admin/discount-tiers": { tiers: [{ minQuantity: 1, discountPercent: 0, label: "", active: true }] },
   "/admin/payment-rules": { paymentRules: { codStates: ["Lagos"], codBulkThreshold: 5 } },
+  "/admin/reports/monthly-kpis": {
+    reports: [{
+      month: "2026-09",
+      current: true,
+      totalOrders: 7,
+      totalValidOrders: 6,
+      deliveredOrders: 1,
+      deliveredRevenue: 150000,
+      deliveredInMonth: 1,
+      collectedAmount: null,
+      awaitingPaymentOrders: 1,
+      paidOrders: 1,
+      failedOrders: 1,
+      confirmedCodOrders: 1,
+      deliveredStatusOrders: 1,
+      cancelledOrders: 1,
+      notPickingOrders: 1,
+      spamFlaggedOrders: 1,
+      abuseEvidenceOrders: 2,
+      payNowOrders: 3,
+      codOrders: 4,
+      snapshot: null,
+    }],
+    collectionAvailable: false,
+    collectionUnavailableReason: "Collected cash is unavailable without a persisted collection record.",
+    deliveryTimingNote: "Legacy delivery times may be approximate.",
+  },
 };
 
 const requested = [];
+const requestedUrls = [];
+let reportDelay = 0;
 // Defined once as a factory, because `fetch` must be installed on EACH window the
 // bundle runs in. Setting it on globalThis is not enough: the bundle is evaluated
 // with window.eval, so its bare `fetch(...)` resolves against that window, not
@@ -170,12 +199,21 @@ const stubFetch = () => async (input) => {
   const url = String(input);
   const path = url.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
   requested.push(path);
+  requestedUrls.push(url);
+  if (path === "/admin/reports/monthly-kpis" && reportDelay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, reportDelay));
+  }
+  if (path === "/admin/reports/monthly-kpis" && url.includes("months=24")) {
+    return new Response(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "Report unavailable" } }), {
+      status: 500, headers: { "Content-Type": "application/json" },
+    });
+  }
   if (Object.prototype.hasOwnProperty.call(STUB, path)) return jsonResponse(STUB[path]);
   return jsonResponse({});
 };
 dom.window.fetch = stubFetch();
 
-const routeIds = ["orders", "categories", "products", "media", "testimonials", "discounts", "payment"];
+const routeIds = ["orders", "reports", "categories", "products", "media", "testimonials", "discounts", "payment"];
 // A fresh document per route, because each view module keeps its own state and
 // reusing one would let a leaked selection from a previous route look like a pass.
 for (const id of routeIds) {
@@ -208,6 +246,60 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
   ok(`#${id} draws real content, not a blank panel`,
     Boolean(main?.querySelector(".list-panel, .panel-body")),
     "the view mounted no panel");
+  if (id === "orders") {
+    const statusFilter = main.querySelector('select[aria-label="Status"]');
+    const actionFilter = main.querySelector('select[aria-label="Available action"]');
+    ok("order status filter includes Cancelled and Not Picking",
+      statusFilter?.querySelector('option[value="cancelled"]') !== null
+        && statusFilter?.querySelector('option[value="not_picking"]') !== null);
+    ok("orders can be filtered by available action",
+      actionFilter?.querySelector('option[value="cancel"]') !== null
+        && actionFilter?.querySelector('option[value="mark-not-picking"]') !== null);
+
+    main.querySelector(".action-menu-trigger")?.click();
+    const menuText = main.querySelector(".action-menu")?.textContent || "";
+    ok("Cancel and Not Picking are available in the row action dropdown",
+      menuText.includes("Cancel order") && menuText.includes("Mark Not Picking"));
+    ok("reversal actions stay out of the row action dropdown",
+      !menuText.includes("Revert"));
+
+    main.querySelector("tbody tr")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const detailActions = page.window.document.querySelector(".detail-actions");
+    const detailActionLabels = [...(detailActions?.querySelectorAll("button") || [])]
+      .map((button) => button.textContent.trim());
+    ok("the order detail modal offers a Revert control",
+      detailActionLabels.includes("Revert"));
+    ok("the detail modal does not offer forward cancellation or Not Picking actions",
+      !detailActionLabels.includes("Cancel order") && !detailActionLabels.includes("Mark Not Picking"));
+  }
+  if (id === "reports") {
+    ok("the report requests the monthly KPI API",
+      requested.includes("/admin/reports/monthly-kpis"));
+    ok("the report renders delivery rate and order value",
+      main.textContent.includes("Delivery rate") && main.textContent.includes("₦1,500"));
+    ok("the report states collected cash is unavailable rather than showing zero",
+      main.textContent.includes("Collected cash") && main.textContent.includes("Not reported")
+        && main.textContent.includes("persisted collection record"));
+    ok("the report shows each order lifecycle status separately",
+      ["Awaiting payment", "Failed", "Confirmed COD", "Paid", "Delivered (all)", "Cancelled", "Not Picking"]
+        .every((label) => main.textContent.includes(label)));
+
+    const windowSelect = main.querySelector("#report-month-window");
+    windowSelect.value = "24";
+    reportDelay = 100;
+    windowSelect.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    ok("the report shows a loading state while the API is pending",
+      Boolean(main.querySelector(".list-results.is-loading .list-pending")));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    reportDelay = 0;
+    ok("the report month filter requests the selected 24-month window",
+      requestedUrls.some((url) => url.includes("/admin/reports/monthly-kpis?months=24")));
+    ok("the report displays its API error state",
+      Boolean(main.querySelector(".table-state-error"))
+        || page.window.document.querySelector(".table-state-error")?.textContent.includes("Report unavailable"));
+  }
 }
 
 /* ---- the two defects that blanked the console ---- */

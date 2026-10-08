@@ -64,11 +64,15 @@ export const testimonialUpsertSchema = z.object({
 // `created_at <= 2026-01-03` excludes almost all of the 3rd and is the kind of
 // bug that makes a date filter look broken and get abandoned.
 const orderStatusFilter = z.enum([
-  "awaiting_payment", "paid", "failed", "confirmed_cod", "delivered",
+  "awaiting_payment", "paid", "failed", "confirmed_cod", "delivered", "cancelled", "not_picking",
 ]);
 
 export const orderListFiltersSchema = z.object({
   status: orderStatusFilter.optional(),
+  action: z.enum([
+    "deliver", "revert", "mark-paid", "mark-failed", "cancel", "revert-cancel",
+    "mark-not-picking", "revert-not-picking",
+  ]).optional(),
   paymentMethod: z.enum(["pay_now", "cod"]).optional(),
   productId: z.coerce.number().int().positive().optional(),
   categoryId: z.coerce.number().int().positive().optional(),
@@ -239,4 +243,3 @@ export type ProductPageUpdate = z.infer<typeof productPageUpsertSchema>;
 // already hold, so a body would only be a second, divergent way of saying what
 // the page contains — and the two would eventually disagree.
 export const publishRequestSchema = z.object({}).strict();
-

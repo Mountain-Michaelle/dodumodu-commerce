@@ -6,7 +6,21 @@
    tags survive as tags, and nothing that executes or reaches the network does. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { productPageUpsertSchema, publishRequestSchema, sanitizeSummaryHtml, testimonialUpsertSchema } from "./adminSchema";
+import {
+  orderListFiltersSchema,
+  productPageUpsertSchema,
+  publishRequestSchema,
+  sanitizeSummaryHtml,
+  testimonialUpsertSchema,
+} from "./adminSchema";
+
+test("order list filters accept lifecycle action filters and reject unknown actions", () => {
+  assert.equal(orderListFiltersSchema.safeParse({ status: "cancelled" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ status: "not_picking" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ action: "cancel" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ action: "mark-not-picking" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ action: "unknown-action" }).success, false);
+});
 
 test("an allowed tag survives as a tag", () => {
   assert.equal(sanitizeSummaryHtml("<strong>four weeks</strong>"), "<strong>four weeks</strong>");

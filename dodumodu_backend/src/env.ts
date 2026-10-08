@@ -11,6 +11,11 @@ export type Env = {
   R2_BUCKET_NAME: string;
   ENVIRONMENT: "sandbox" | "production";
   RATE_LIMIT_API_PER_MINUTE: string;
+  /** Visitor writes are HMAC-keyed with this dedicated secret; never reuse another key. */
+  ANALYTICS_IP_HMAC_SECRET: string;
+  ANALYTICS_IP_HMAC_VERSION: string;
+  /** Only the anonymous intent event is gated by this optimization switch. */
+  ANALYTICS_WARMUP_ENABLED: string;
   RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: string;
   /**
    * Admin console read ceiling, per operator per minute. Separate from
@@ -50,6 +55,8 @@ export type Env = {
   RL_PHONE_MAX_OPEN: string;
   /** Optional; validated against wa.me / api.whatsapp.com before it is ever rendered. */
   SUPPORT_WHATSAPP_URL: string;
+  /** Optional Slack webhook URL for §5.11 alerts. */
+  REFERRED_SLACK_WEBHOOK_URL: string;
 
   /* ---- image pipeline (see src/config/imageConfig.ts for what each does) ---- */
 

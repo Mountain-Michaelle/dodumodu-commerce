@@ -70,6 +70,13 @@ class FakeQuery {
     const store = this.db.table(this.tableName);
     if (this.operation === "insert") {
       const row: Row = { id: this.db.nextId(this.tableName), ...(this.payload as Row) };
+      const primary = this.tableName === "visitor_days"
+        ? ["visit_date", "hash_version", "ip_hash"]
+        : this.tableName === "visitor_analytics_meta" ? ["id"] : [];
+      if (primary.length > 0 && store.some((existing) =>
+        primary.every((key) => existing[key] === row[key]))) {
+        return [];
+      }
       store.push(row);
       return [row];
     }

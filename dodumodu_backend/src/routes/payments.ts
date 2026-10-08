@@ -3,6 +3,52 @@ import type { Env } from "../env";
 import { createDb } from "../db";
 import { paymentService } from "../services/paymentService";
 
+/** §5.11 — alert when something needs operator attention.
+ *
+ * Sends a notification through every configured channel:
+ *   - Slack webhook (REFERRED_SLACK_WEBHOOK_URL): the real push alert.
+ *   - WhatsApp contact (SUPPORT_WHATSAPP_URL): logged with the payload so the
+ *     operator thread has the context; WhatsApp has no server-send API here.
+ *
+ * Both channels are optional and independent: a channel that is not configured
+ * is skipped silently, so a deployment that wires only one of them still works.
+ */
+async function sendSection511Alert(env: Env, event: string, detail: Record<string, unknown>) {
+  const payload = {
+    event,
+    ...detail,
+    issuedAt: new Date().toISOString(),
+  };
+
+  // Slack webhook
+  const slackUrl = env.REFERRED_SLACK_WEBHOOK_URL;
+  if (slackUrl) {
+    try {
+      const res = await fetch(slackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: `§5.11 alert: ${event}`, details: payload }),
+      });
+      if (!res.ok) {
+        console.error(`[§5.11] Slack webhook failed: ${res.statusText}`);
+      }
+    } catch (error) {
+      console.error(`[§5.11] Slack webhook error:`, error);
+    }
+  }
+
+  // WhatsApp support link (informational)
+  if (env.SUPPORT_WHATSAPP_URL) {
+    console.log(
+      JSON.stringify({
+        event: "section511_whatsapp_contact",
+        whatsappUrl: env.SUPPORT_WHATSAPP_URL,
+        details: payload,
+      }),
+    );
+  }
+}
+
 export const paymentsRoute = new Hono<{ Bindings: Env }>();
 
 // §5.8 — always return 200 to OPay even on a bad signature/mismatch, so it
@@ -25,7 +71,10 @@ paymentsRoute.post("/opay-callback", async (c) => {
       console.log(JSON.stringify({
         event: "payment_amount_mismatch_flagged", reference: outcome.order.reference,
       }));
-      // TODO: send the §5.11 alert (Slack/email/WhatsApp webhook) here.
+      await sendSection511Alert(c.env, "payment_amount_mismatch_flagged", {
+        reference: outcome.order.reference,
+        orderId: outcome.order.id,
+      });
       return c.json({ received: true });
     case "applied":
       console.log(JSON.stringify({
@@ -53,7 +102,11 @@ paymentsRoute.post("/reconcile-pending", async (c) => {
   }
   for (const alert of result.alerts) {
     console.log(JSON.stringify({ event: "reconcile_alert_threshold", ...alert }));
-    // TODO: send the §5.11 alert (Slack/email/WhatsApp webhook) here.
+    await sendSection511Alert(c.env, "reconcile_alert_threshold", {
+      orderId: alert.orderId,
+      reference: alert.reference,
+      reason: alert.reason,
+    });
   }
 
   return c.json(result);

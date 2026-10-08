@@ -9,6 +9,7 @@ import { abuseConfigFrom } from "../../abuse/config";
 import { PERMISSIONS, type Principal } from "../../auth/adminAuth";
 import { buildShadowReport } from "../../abuse/shadowReport";
 import { requirePermissionOf, readBody, actorOf } from "./helpers";
+import { normalizeSearch, likePattern } from "../../shared/listQuery";
 // Admin moderation surface for spam flags.
 //
 // EVERY route here requires an authorized operator and is behind the Access gate
@@ -89,34 +90,38 @@ spamRoutes.get("/suspects", async (c) => {
   const pageSizeParam = c.req.query("pageSize");
   const searchRaw = c.req.query("q");
 
-  const page = pageParam !== null ? Math.max(1, Math.floor(Number(pageParam))) : 1;
-  const pageSize =
-    pageSizeParam !== null
-      ? Math.max(1, Math.min(200, Math.floor(Number(pageSizeParam))))
-      : config.softSuspectPageSize;
-  const normalized = searchRaw ? (typeof normalizeSearch === "function" ? normalizeSearch(searchRaw) : searchRaw) : null;
+  const parsedPage = pageParam === undefined ? 1 : Math.floor(Number(pageParam));
+  const page = Number.isFinite(parsedPage) ? Math.max(1, parsedPage) : 1;
+  const parsedSize = pageSizeParam === undefined ? 20 : Math.floor(Number(pageSizeParam));
+  const pageSize = Number.isFinite(parsedSize) ? Math.max(1, Math.min(200, parsedSize)) : 20;
+  const normalized = searchRaw ? normalizeSearch(searchRaw) : null;
   const phonePattern = normalized ? likePattern(normalized) : null;
 
-  const [suspects, total] = await Promise.all([
-    spamService.listSuspects(createDb(c.env.DATABASE_URL), {
-      minOrders: config.softSuspectMinOrders,
-      windowDays: config.softSuspectWindowDays,
-    }),
-    spamService.countSuspects(createDb(c.env.DATABASE_URL), { minOrders: config.softSuspectMinOrders, windowDays: config.softSuspectWindowDays, phonePattern }),
-  ]);
-
+  const total = await spamService.countSuspects(createDb(c.env.DATABASE_URL), {
+    minOrders: config.softSuspectMinOrders,
+    windowDays: config.softSuspectWindowDays,
+    phonePattern,
+  });
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const pageSuspects = suspects.slice((page - 1) * pageSize, page * pageSize);
+  const safePage = Math.min(page, totalPages);
+
+  const suspects = await spamService.listSuspects(createDb(c.env.DATABASE_URL), {
+    minOrders: config.softSuspectMinOrders,
+    windowDays: config.softSuspectWindowDays,
+    limit: pageSize,
+    offset: (safePage - 1) * pageSize,
+    phonePattern,
+  });
 
   return c.json({
     notice: "Suggestions only. Nothing here has been flagged; deciding is a human judgement.",
-    suspects: pageSuspects.map((s) => ({
+    suspects: suspects.map((s) => ({
       phoneMasked: maskPhone(s.phoneNorm),
       orders: s.orders,
       oldest: s.oldest,
       newest: s.newest,
     })),
-    page,
+    page: safePage,
     pageSize,
     total,
     totalPages,

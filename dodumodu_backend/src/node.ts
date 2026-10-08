@@ -40,6 +40,9 @@ const env: Env = {
   R2_BUCKET_NAME: process.env.R2_BUCKET_NAME ?? "skincare-media",
   ENVIRONMENT: process.env.ENVIRONMENT === "production" ? "production" : "sandbox",
   RATE_LIMIT_API_PER_MINUTE: process.env.RATE_LIMIT_API_PER_MINUTE ?? "20",
+  ANALYTICS_IP_HMAC_SECRET: process.env.ANALYTICS_IP_HMAC_SECRET ?? "",
+  ANALYTICS_IP_HMAC_VERSION: process.env.ANALYTICS_IP_HMAC_VERSION ?? "1",
+  ANALYTICS_WARMUP_ENABLED: process.env.ANALYTICS_WARMUP_ENABLED ?? "false",
   RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: process.env.RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR ?? "5",
   // Admin limits are separate keyspaces from the customer ones. 600 reads is a
   // runaway-script backstop, not a speed limit: the console legitimately issues a
@@ -113,6 +116,7 @@ const env: Env = {
 
   // The only local-only values in the whole Env: real bindings on the Worker.
   MEDIA_BUCKET: localBucket(mediaRoot),
+  REFERRED_SLACK_WEBHOOK_URL: process.env.REFERRED_SLACK_WEBHOOK_URL ?? "",
   RATE_LIMIT_KV: memoryKV(),
 };
 

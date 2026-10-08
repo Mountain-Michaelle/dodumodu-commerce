@@ -30,7 +30,7 @@ const PRE_DELIVERY_STATUS: Record<string, string> = {
   cod: "confirmed_cod",
 };
 
-export type OrderAction = "deliver" | "revert" | "mark-paid" | "mark-failed";
+export type OrderAction = "deliver" | "revert" | "mark-paid" | "mark-failed" | "cancel" | "revert-cancel" | "mark-not-picking" | "revert-not-picking";
 
 /**
  * The actions valid for one order, as the SERVER sees them. The panel renders
@@ -52,6 +52,25 @@ export function availableActions(order: OrderRow): OrderAction[] {
   if (order.status === "awaiting_payment") {
     actions.push("mark-paid", "mark-failed");
   }
+
+  // Cancellation: allowed on any order not yet terminal (delivered, cancelled, not_picking).
+  // A cancelled order can be reverted only if the previous status is preserved.
+  if (order.status !== "delivered" && order.status !== "cancelled" && order.status !== "not_picking") {
+    actions.push("cancel");
+  } else if (order.status === "cancelled" && order.preCancellationStatus) {
+    actions.push("revert-cancel");
+  }
+
+  // Not Picking: mark an order as unfulfillable. Once marked, reversal requires
+  // knowing what status it was before (set explicitly by the operator).
+  if (
+    DELIVERABLE_FROM.has(order.status)
+  ) {
+    actions.push("mark-not-picking");
+  } else if (order.status === "not_picking" && order.preNotPickingStatus) {
+    actions.push("revert-not-picking");
+  }
+
   return actions;
 }
 
@@ -321,6 +340,49 @@ export const orderCrmService = {
           }
           await ordersRepo.writeStatusHistory(db, id, "delivered", toStatus, actor, "bulk action");
           result.updated.push({ id, reference: updated.reference, action });
+        } else if (action === "cancel") {
+          if (current.status === "delivered" || current.status === "cancelled" || current.status === "not_picking") {
+            result.skipped.push({ id, reference: current.reference, reason: `Cannot cancel from ${current.status}` });
+            continue;
+          }
+          const updated = await ordersRepo.cancel(db, id, current.status, null);
+          if (!updated) {
+            result.skipped.push({ id, reference: current.reference, reason: "Changed while running" });
+            continue;
+          }
+          await ordersRepo.writeStatusHistory(db, id, current.status, "cancelled", actor, "bulk action");
+          result.updated.push({ id, reference: updated.reference, action });
+        } else if (action === "revert-cancel") {
+          if (current.status !== "cancelled" || !current.preCancellationStatus) {
+            result.skipped.push({ id, reference: current.reference, reason: "Not a revertible cancellation" });
+            continue;
+          }
+          const updated = await ordersRepo.revertCancellation(db, id, null);
+          if (!updated) {
+            result.skipped.push({ id, reference: current.reference, reason: "Changed while running" });
+            continue;
+          }
+          await ordersRepo.writeStatusHistory(
+            db,
+            id,
+            "cancelled",
+            current.preCancellationStatus,
+            actor,
+            "bulk action",
+          );
+          result.updated.push({ id, reference: updated.reference, action });
+        } else if (action === "mark-not-picking") {
+          if (!DELIVERABLE_FROM.has(current.status)) {
+            result.skipped.push({ id, reference: current.reference, reason: `Cannot mark as not picking from ${current.status}` });
+            continue;
+          }
+          const updated = await ordersRepo.markNotPicking(db, id, current.status, null);
+          if (!updated) {
+            result.skipped.push({ id, reference: current.reference, reason: "Changed while running" });
+            continue;
+          }
+          await ordersRepo.writeStatusHistory(db, id, current.status, "not_picking", actor, "bulk action");
+          result.updated.push({ id, reference: updated.reference, action });
         } else {
           const outcome = action === "mark-paid" ? "paid" : "failed";
           if (current.paymentMethod !== "pay_now" || current.status !== "awaiting_payment") {
@@ -350,6 +412,194 @@ export const orderCrmService = {
       updated: result.updated.length, skipped: result.skipped.length, errors: result.errors.length,
     }));
     return result;
+  },
+
+  /**
+   * Cancel an order. Stores the previous status so it can be reverted.
+   * Cancellation is not terminal; reversal is always available.
+   */
+  async cancel(
+    db: Db,
+    id: number,
+    expectedUpdatedAt: Date | null,
+    actor: string,
+    reason?: string,
+  ): Promise<OrderRow> {
+    const current = await ordersRepo.findById(db, id);
+    if (!current) throw new NotFoundError("Order", id);
+
+    if (current.status === "delivered" || current.status === "cancelled" || current.status === "not_picking") {
+      throw new ConflictError(
+        `An order with status ${current.status} cannot be cancelled`,
+        "reload",
+        current,
+      );
+    }
+
+    const updated = await ordersRepo.cancel(db, id, current.status, expectedUpdatedAt);
+    if (!updated) {
+      throw new ConflictError(
+        "This order changed while you were looking at it. Reload and try again.",
+        "reload",
+        await ordersRepo.findById(db, id),
+      );
+    }
+
+    await ordersRepo.writeStatusHistory(db, id, current.status, "cancelled", actor, reason);
+    console.log(JSON.stringify({ event: "order_cancelled", id, reference: updated.reference, by: actor }));
+    return updated;
+  },
+
+  /**
+   * Revert a cancellation. Restores the status that was current before cancellation.
+   */
+  async revertCancellation(
+    db: Db,
+    id: number,
+    expectedUpdatedAt: Date | null,
+    actor: string,
+    reason?: string,
+  ): Promise<OrderRow> {
+    const current = await ordersRepo.findById(db, id);
+    if (!current) throw new NotFoundError("Order", id);
+
+    if (current.status !== "cancelled") {
+      throw new ConflictError(
+        "This order is not cancelled",
+        "reload",
+        current,
+      );
+    }
+
+    if (!current.preCancellationStatus) {
+      throw new ValidationError(
+        "This cancellation has no stored previous status and cannot be reverted",
+      );
+    }
+
+    const updated = await ordersRepo.revertCancellation(db, id, expectedUpdatedAt);
+    if (!updated) {
+      throw new ConflictError(
+        "This order changed while you were looking at it. Reload and try again.",
+        "reload",
+        await ordersRepo.findById(db, id),
+      );
+    }
+
+    await ordersRepo.writeStatusHistory(
+      db,
+      id,
+      "cancelled",
+      current.preCancellationStatus,
+      actor,
+      reason,
+    );
+    console.log(JSON.stringify({
+      event: "order_cancellation_reverted",
+      id,
+      reference: updated.reference,
+      toStatus: current.preCancellationStatus,
+      by: actor,
+    }));
+    return updated;
+  },
+
+  /**
+   * Mark an order as Not Picking. This is a distinct fulfilment issue, separate
+   * from cancellation. The order remains in the month's valid-order cohort for
+   * reporting purposes.
+   */
+  async markNotPicking(
+    db: Db,
+    id: number,
+    expectedUpdatedAt: Date | null,
+    actor: string,
+    reason?: string,
+  ): Promise<OrderRow> {
+    const current = await ordersRepo.findById(db, id);
+    if (!current) throw new NotFoundError("Order", id);
+
+    if (
+      current.status === "awaiting_payment"
+      || current.status === "cancelled"
+      || current.status === "delivered"
+      || current.status === "not_picking"
+    ) {
+      throw new ConflictError(
+        `An order with status ${current.status} cannot be marked as not picking`,
+        "reload",
+        current,
+      );
+    }
+
+    const updated = await ordersRepo.markNotPicking(db, id, current.status, expectedUpdatedAt);
+    if (!updated) {
+      throw new ConflictError(
+        "This order changed while you were looking at it. Reload and try again.",
+        "reload",
+        await ordersRepo.findById(db, id),
+      );
+    }
+
+    await ordersRepo.writeStatusHistory(db, id, current.status, "not_picking", actor, reason);
+    console.log(JSON.stringify({
+      event: "order_not_picking",
+      id,
+      reference: updated.reference,
+      fromStatus: current.status,
+      by: actor,
+    }));
+    return updated;
+  },
+
+  /**
+   * Revert Not Picking. Requires explicit knowledge of the previous status,
+   * because Not Picking does not store it (it is a permanent mark, not a suspension).
+   * The caller must specify which status to return to.
+   */
+  async revertNotPicking(
+    db: Db,
+    id: number,
+    expectedUpdatedAt: Date | null,
+    actor: string,
+    reason?: string,
+  ): Promise<OrderRow> {
+    const current = await ordersRepo.findById(db, id);
+    if (!current) throw new NotFoundError("Order", id);
+
+    if (current.status !== "not_picking") {
+      throw new ConflictError(
+        "This order is not marked as not picking",
+        "reload",
+        current,
+      );
+    }
+
+    const previousStatus = current.preNotPickingStatus;
+    if (!previousStatus) {
+      throw new ValidationError(
+        "This Not Picking order has no saved previous status and cannot be reverted",
+      );
+    }
+
+    const updated = await ordersRepo.revertNotPicking(db, id, expectedUpdatedAt);
+    if (!updated) {
+      throw new ConflictError(
+        "This order changed while you were looking at it. Reload and try again.",
+        "reload",
+        await ordersRepo.findById(db, id),
+      );
+    }
+
+    await ordersRepo.writeStatusHistory(db, id, "not_picking", previousStatus, actor, reason);
+    console.log(JSON.stringify({
+      event: "order_not_picking_reverted",
+      id,
+      reference: updated.reference,
+      toStatus: previousStatus,
+      by: actor,
+    }));
+    return updated;
   },
 
   /**

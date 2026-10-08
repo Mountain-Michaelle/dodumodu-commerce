@@ -11,6 +11,8 @@ import { catalogRoute } from "./routes/catalog";
 import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
+import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
+import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -70,6 +72,8 @@ app.route("/", ordersRoute);
 // general per-IP limiter — OPay's own retry behavior and cron-job.org's fixed
 // schedule shouldn't compete with customer traffic for the same bucket.
 app.route("/", paymentsRoute);
+app.route("/", monthlyKpiSnapshotsRoute);
+app.route("/", visitorAnalyticsRoute);
 
 // The admin console gets its OWN limits, not the customer ones.
   //

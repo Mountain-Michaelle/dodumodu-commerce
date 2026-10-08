@@ -10,6 +10,7 @@ import { testimonialsView } from "./admin/views/testimonials.js";
 import { discountsView, paymentView } from "./admin/views/settings.js";
 import { shadowView } from "./admin/views/shadow.js";
 import { blocksView } from "./admin/views/blocks.js";
+import { reportsView } from "./admin/views/reports.js";
 
 // The admin entry point, and the only module the build names.
 //
@@ -25,6 +26,7 @@ import { blocksView } from "./admin/views/blocks.js";
 
 const ROUTES = {
   orders: ordersView,
+  reports: reportsView,
   categories: categoriesView,
   products: productsView,
   media: mediaView,

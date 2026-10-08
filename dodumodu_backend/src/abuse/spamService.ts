@@ -134,8 +134,19 @@ export const spamService = {
   },
 
   /** Suspects for the admin review list. Never flags anything by itself. */
-  listSuspects(db: Db, opts: { minOrders: number; windowDays: number }) {
+  listSuspects(
+    db: Db,
+    opts: { minOrders: number; windowDays: number; limit?: number; offset?: number; phonePattern?: string | null },
+  ) {
     return spamRepo.listSuspects(db, opts);
+  },
+
+  /** Count of active suspects matching an optional phone pattern. */
+  async countSuspects(
+    db: Db,
+    opts: { minOrders: number; windowDays: number; phonePattern: string | null },
+  ): Promise<number> {
+    return spamRepo.countSuspects(db, { ...opts });
   },
 
   listActive(db: Db) {

@@ -29,6 +29,19 @@ const STATUSES = [
   { value: "confirmed_cod", label: "Confirmed COD" },
   { value: "delivered", label: "Delivered" },
   { value: "failed", label: "Failed" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "not_picking", label: "Not Picking" },
+];
+
+const ACTIONS = [
+  { value: "deliver", label: "Mark delivered" },
+  { value: "revert", label: "Revert delivery" },
+  { value: "mark-paid", label: "Mark paid" },
+  { value: "mark-failed", label: "Mark failed" },
+  { value: "cancel", label: "Cancel" },
+  { value: "revert-cancel", label: "Revert cancellation" },
+  { value: "mark-not-picking", label: "Mark Not Picking" },
+  { value: "revert-not-picking", label: "Revert Not Picking" },
 ];
 
 // How each server action verb is worded, and how dangerous it is. The set of verbs
@@ -38,11 +51,15 @@ const ACTION_COPY = {
   revert: { label: "Revert to pending" },
   "mark-paid": { label: "Mark paid (override)", danger: true },
   "mark-failed": { label: "Mark failed (override)", danger: true },
+  cancel: { label: "Cancel order", danger: true },
+  "revert-cancel": { label: "Revert" },
+  "mark-not-picking": { label: "Mark Not Picking", danger: true },
+  "revert-not-picking": { label: "Revert" },
 };
 
 export function ordersView({ shell, identity }) {
   const state = {
-    page: 1, pageSize: 50, q: "", status: "", paymentMethod: "", from: "", to: "",
+    page: 1, pageSize: 50, q: "", status: "", action: "", paymentMethod: "", from: "", to: "",
     selected: new Set(),
   };
   let tableHost;
@@ -53,7 +70,7 @@ export function ordersView({ shell, identity }) {
   async function load() {
     try {
       const data = await ui.load((signal) => api.get(`/orders${qs({
-        q: state.q, status: state.status, paymentMethod: state.paymentMethod,
+        q: state.q, status: state.status, action: state.action, paymentMethod: state.paymentMethod,
         from: state.from, to: state.to, page: state.page, pageSize: state.pageSize,
       })}`, signal), { pending: "Loading orders…" });
       if (!data) return;
@@ -155,6 +172,9 @@ export function ordersView({ shell, identity }) {
     // These come from order.actions. If the server did not offer it, it is not
     // rendered - which is the whole point of not keeping a copy of the rules here.
     for (const verb of row.actions || []) {
+      if (verb === "revert" || verb === "revert-cancel" || verb === "revert-not-picking") continue;
+      if (!can("orders:write")) continue;
+      if ((verb === "mark-paid" || verb === "mark-failed") && !can("orders:payment-override")) continue;
       const copy = ACTION_COPY[verb];
       if (!copy) continue;
       items.push({ label: copy.label, danger: copy.danger, onSelect: () => runOrderAction(row, verb) });
@@ -173,14 +193,38 @@ export function ordersView({ shell, identity }) {
    * audit entry - not as an ordinary CRM transition.
    */
   async function runOrderAction(row, verb) {
-    if (verb.startsWith("mark-")) {
+    if (["mark-paid", "mark-failed", "cancel", "mark-not-picking", "revert-cancel", "revert-not-picking", "revert"].includes(verb)) {
+      const titles = {
+        "mark-paid": "Override this payment to paid?",
+        "mark-failed": "Override this payment to failed?",
+        cancel: "Cancel this order?",
+        "mark-not-picking": "Mark this order Not Picking?",
+        "revert-cancel": "Revert this cancellation?",
+        "revert-not-picking": "Revert Not Picking?",
+        revert: "Revert delivery?",
+      };
+      const labels = {
+        "mark-paid": "Mark paid",
+        "mark-failed": "Mark failed",
+        cancel: "Cancel order",
+        "mark-not-picking": "Mark Not Picking",
+        "revert-cancel": "Revert",
+        "revert-not-picking": "Revert",
+        revert: "Revert delivery",
+      };
+      const isPaymentOverride = verb === "mark-paid" || verb === "mark-failed";
+      const isReversal = verb.startsWith("revert");
       const ok = await confirmDialog({
-        title: verb === "mark-paid" ? "Override this payment to paid?" : "Override this payment to failed?",
-        danger: true,
-        confirmLabel: verb === "mark-paid" ? "Mark paid" : "Mark failed",
-        body: el("div", {},
-          el("p", { text: `This records that YOU are asserting money ${verb === "mark-paid" ? "was" : "was not"} collected for order ${row.reference}.` }),
-          el("p", { class: "muted", text: "The payment provider is not consulted. The history entry is recorded as an admin override, never as a webhook confirmation." })),
+        title: titles[verb],
+        danger: !isReversal,
+        confirmLabel: labels[verb],
+        body: isPaymentOverride
+          ? el("div", {},
+            el("p", { text: `This records that YOU are asserting money ${verb === "mark-paid" ? "was" : "was not"} collected for order ${row.reference}.` }),
+            el("p", { class: "muted", text: "The payment provider is not consulted. The history entry is recorded as an admin override, never as a webhook confirmation." }))
+          : isReversal
+            ? el("p", { text: `Order ${row.reference} will return to its status immediately before this action.` })
+            : el("p", { text: `Order ${row.reference} will be marked ${verb === "cancel" ? "cancelled" : "Not Picking"}. You can revert this from the order details.` }),
       });
       if (!ok) return;
     }
@@ -283,7 +327,7 @@ export function ordersView({ shell, identity }) {
   async function copyPageCsv() {
     try {
       const { csv } = await api.get(`/orders/csv${qs({
-        q: state.q, status: state.status, paymentMethod: state.paymentMethod,
+        q: state.q, status: state.status, action: state.action, paymentMethod: state.paymentMethod,
         from: state.from, to: state.to, page: state.page, pageSize: state.pageSize,
       })}`);
       await copyCsv(csv, "this page");
@@ -377,11 +421,13 @@ export function ordersView({ shell, identity }) {
             entry.reason ? el("p", { class: "muted", text: entry.reason }) : null))),
 
         el("div", { class: "detail-actions" },
-          (order.actions || []).map((verb) => el("button", {
+          can("orders:write")
+            ? (order.actions || []).filter((verb) => verb === "revert" || verb === "revert-cancel" || verb === "revert-not-picking").map((verb) => el("button", {
             class: `button${ACTION_COPY[verb]?.danger ? " button-danger" : " button-primary"}`,
             type: "button", text: ACTION_COPY[verb]?.label || verb,
             onclick: async () => { close(); await runOrderAction(order, verb); },
-          })),
+            }))
+            : [],
           el("button", { class: "button", type: "button", text: "Close", onclick: close }))),
     });
   }
@@ -468,13 +514,14 @@ export function ordersView({ shell, identity }) {
       mount(ui.controls,
         adminSearch({
           value: state.q,
-          placeholder: "Search reference, name or phone",
+          placeholder: "Search reference, name, phone or status",
           onSearch: (value) => { state.q = value; state.page = 1; load(); },
         }),
         adminFilters({
-          value: { status: state.status, paymentMethod: state.paymentMethod },
+          value: { status: state.status, action: state.action, paymentMethod: state.paymentMethod },
           filters: [
             { key: "status", label: "Status", options: STATUSES },
+            { key: "action", label: "Available action", options: ACTIONS },
             { key: "paymentMethod", label: "Payment", options: [
               { value: "pay_now", label: "Paid up front" },
               { value: "cod", label: "Pay on delivery" },
@@ -482,6 +529,7 @@ export function ordersView({ shell, identity }) {
           ],
           onChange: (next) => {
             state.status = next.status || "";
+            state.action = next.action || "";
             state.paymentMethod = next.paymentMethod || "";
             state.page = 1;
             load();

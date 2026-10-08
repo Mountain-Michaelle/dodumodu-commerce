@@ -40,7 +40,7 @@ const actionSchema = z.object({
 
 const bulkSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(1000),
-  action: z.enum(["deliver", "revert", "mark-paid", "mark-failed"]),
+  action: z.enum(["deliver", "revert", "mark-paid", "mark-failed", "cancel", "revert-cancel", "mark-not-picking"]),
 });
 
 const editSchema = z.object({
@@ -133,6 +133,7 @@ export function orderRoutes() {
       const item = evidence.get(o.id);
       return {
         ...o,
+        actions: availableActions(o),
         // A boolean only. The reason lives on the detail screen, where there is room
         // to read it; the list carries only enough to tint the row.
         spamFlagged: spamById.get(o.id) === true,
@@ -306,6 +307,46 @@ export function orderRoutes() {
     return c.json({ order: { ...order, actions: availableActions(order) } });
   });
 
+  route.post("/:id/cancel", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersWrite);
+    const body = await readBody(c, actionSchema, "cancellation");
+    const order = await orderCrmService.cancel(
+      createDb(c.env.DATABASE_URL), Number(c.req.param("id")), versionOf(body), actorOf(c), body.reason,
+    );
+    return c.json({ order: { ...order, actions: availableActions(order) } });
+  });
+
+  route.post("/:id/revert-cancel", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersWrite);
+    const body = await readBody(c, actionSchema, "cancel reversion");
+    const order = await orderCrmService.revertCancellation(
+      createDb(c.env.DATABASE_URL), Number(c.req.param("id")), versionOf(body), actorOf(c), body.reason,
+    );
+    return c.json({ order: { ...order, actions: availableActions(order) } });
+  });
+
+  route.post("/:id/mark-not-picking", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersWrite);
+    const body = await readBody(c, actionSchema, "not picking");
+    const order = await orderCrmService.markNotPicking(
+      createDb(c.env.DATABASE_URL), Number(c.req.param("id")), versionOf(body), actorOf(c), body.reason,
+    );
+    return c.json({ order: { ...order, actions: availableActions(order) } });
+  });
+
+  route.post("/:id/revert-not-picking", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersWrite);
+    const body = await readBody(c, actionSchema, "not picking reversion");
+    const order = await orderCrmService.revertNotPicking(
+      createDb(c.env.DATABASE_URL),
+      Number(c.req.param("id")),
+      versionOf(body),
+      actorOf(c),
+      body.reason,
+    );
+    return c.json({ order: { ...order, actions: availableActions(order) } });
+  });
+
   route.delete("/:id", async (c) => {
     requirePermissionOf(c, PERMISSIONS.ordersDelete);
     // `confirm: true` is required in the body, so a stray DELETE from a
@@ -319,4 +360,3 @@ export function orderRoutes() {
 
   return route;
 }
-

@@ -31,6 +31,7 @@ import { orderRoutes } from "./admin/orders";
 import { mediaRoutes } from "./admin/media";
 import { spamRoutes } from "./admin/spam";
 import { blockRoutes } from "./admin/blocks";
+import { reportRoutes } from "./admin/reports";
 
 // The admin surface. Three kinds of route live here and the distinction is the
 // point of the file:
@@ -116,6 +117,7 @@ adminRoute.route("/media", mediaRoutes());
 // or fulfilment state, and no public route can reach it.
 adminRoute.route("/spam", spamRoutes);
 adminRoute.route("/blocks", blockRoutes);
+adminRoute.route("/reports", reportRoutes);
 
 /** The operator, for the panel's own header. */
 adminRoute.get("/me", (c) => {
@@ -449,4 +451,3 @@ adminRoute.get("/products/:id/publishes", async (c) => {
   if (!product) return c.json({ error: "Product not found" }, 404);
   return c.json({ publishes: await publishesRepo.listForProduct(db, product.id) });
 });
-

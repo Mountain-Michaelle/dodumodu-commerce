@@ -1,7 +1,7 @@
 // Single source of truth for the DB shape. Mirrors §4 of the build spec exactly.
 // Run `npm run db:generate` after any change here, then apply the migration.
 import {
-  pgTable, serial, text, integer, boolean, timestamp, jsonb, pgEnum, bigint, primaryKey,
+  pgTable, serial, text, integer, boolean, timestamp, jsonb, pgEnum, bigint, primaryKey, date, smallint,
 } from "drizzle-orm/pg-core";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
@@ -9,7 +9,7 @@ export const deliveryFeeTypeEnum = pgEnum("delivery_fee_type", ["free", "waybill
 export const deliveryDateChoiceEnum = pgEnum("delivery_date_choice", ["today", "tomorrow", "next_tomorrow"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["pay_now", "cod"]);
 export const orderStatusEnum = pgEnum("order_status", [
-  "awaiting_payment", "paid", "failed", "confirmed_cod", "delivered",
+  "awaiting_payment", "paid", "failed", "confirmed_cod", "delivered", "cancelled", "not_picking",
 ]);
 
 // The catalogue's grouping, in the database instead of in everyone's memory.
@@ -168,6 +168,13 @@ export const orders = pgTable("orders", {
   // reverted. Not null-able-but-defaulted-to-a-date: "has never been delivered"
   // and "delivered at the epoch" are different facts and only one of them is true.
   deliveredAt: timestamp("delivered_at"),
+  // When an order is cancelled, stores the status before cancellation so it can
+  // be restored on reversal. NULL for non-cancelled orders and for permanent
+  // cancellations (no reversal allowed).
+  preCancellationStatus: text("pre_cancellation_status"),
+  // Not Picking has its own previous state so cancellation and Not Picking
+  // reversals each restore the state immediately before that action.
+  preNotPickingStatus: text("pre_not_picking_status"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -348,4 +355,63 @@ export const media = pgTable("media", {
   productId: integer("product_id").references(() => products.id, { onDelete: "set null" }),
   uploadedBy: text("uploaded_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Phase 7a: Monthly KPI snapshots (immutable, written once per closed month).
+// The current month is always computed live from orders; closed months use
+// snapshot rows. Each snapshot captures the metrics as they were when the
+// snapshot was taken. One row per month, keyed by month string (YYYY-MM).
+export const monthlyKpiSnapshots = pgTable("monthly_kpi_snapshots", {
+  id: serial("id").primaryKey(),
+  month: text("month").notNull().unique(), // YYYY-MM format
+  // Group A: real, non-spam order cohort and delivery metrics.
+  totalValidOrders: integer("total_valid_orders").notNull().default(0),
+  deliveredOrders: integer("delivered_orders").notNull().default(0), // non-spam delivered orders
+  deliveredRevenue: integer("delivered_revenue").notNull().default(0), // kobo, order value, not collected cash
+  // Group B: timing-based metrics
+  deliveredInMonth: integer("delivered_in_month").notNull().default(0), // delivered during the month, regardless of creation month
+  collectedAmount: integer("collected_amount"), // kobo; NULL until an authoritative collection source exists
+  // Other metrics
+  totalOrders: integer("total_orders").notNull().default(0),
+  awaitingPaymentOrders: integer("awaiting_payment_orders").notNull().default(0),
+  paidOrders: integer("paid_orders").notNull().default(0),
+  failedOrders: integer("failed_orders").notNull().default(0),
+  confirmedCodOrders: integer("confirmed_cod_orders").notNull().default(0),
+  deliveredStatusOrders: integer("delivered_status_orders").notNull().default(0),
+  cancelledOrders: integer("cancelled_orders").notNull().default(0),
+  notPickingOrders: integer("not_picking_orders").notNull().default(0),
+  spamFlaggedOrders: integer("spam_flagged_orders").notNull().default(0),
+  abuseEvidenceOrders: integer("abuse_evidence_orders").notNull().default(0),
+  payNowOrders: integer("pay_now_orders").notNull().default(0),
+  codOrders: integer("cod_orders").notNull().default(0),
+  // Snapshot metadata
+  source: text("source").notNull(), // 'close' | 'lazy'
+  definitionVersion: integer("definition_version").notNull().default(1),
+  takenAt: timestamp("taken_at").notNull(),
+  takenBy: text("taken_by"), // actor who triggered it, null for automatic close
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const visitorAnalyticsMeta = pgTable("visitor_analytics_meta", {
+  id: smallint("id").primaryKey(),
+  startedOn: date("started_on", { mode: "string" }).notNull(),
+});
+
+export const visitorDays = pgTable("visitor_days", {
+  visitDate: date("visit_date", { mode: "string" }).notNull(),
+  ipHash: text("ip_hash").notNull(),
+  hashVersion: smallint("hash_version").notNull(),
+  country: text("country"),
+  region: text("region"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.visitDate, table.hashVersion, table.ipHash] }),
+}));
+
+export const visitorYearSnapshots = pgTable("visitor_year_snapshots", {
+  year: integer("year").primaryKey(),
+  uniqueVisitors: integer("unique_visitors").notNull(),
+  complete: boolean("complete").notNull(),
+  definitionVersion: integer("definition_version").notNull().default(1),
+  takenAt: timestamp("taken_at").notNull(),
 });

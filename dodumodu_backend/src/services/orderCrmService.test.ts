@@ -67,6 +67,26 @@ function stub() {
     current = next;
     return next;
   };
+  ordersRepo.markNotPicking = async (_db, _id, expectedStatus) => {
+    const next = {
+      ...current!,
+      status: "not_picking",
+      preNotPickingStatus: expectedStatus,
+    } as OrderRow;
+    current = next;
+    return next;
+  };
+  ordersRepo.revertNotPicking = async () => {
+    const previousStatus = current?.preNotPickingStatus;
+    if (!previousStatus) return null;
+    const next = {
+      ...current!,
+      status: previousStatus,
+      preNotPickingStatus: null,
+    } as OrderRow;
+    current = next;
+    return next;
+  };
   ordersRepo.guardedStatusUpdate = async (_db, _id, _from, to) => {
     statusUpdates.push({ to });
     const next = { ...current!, status: to as OrderRow["status"] } as OrderRow;
@@ -93,12 +113,12 @@ beforeEach(() => {
 /* ---- which actions exist ---- */
 
 test("a paid order can be delivered; a failed one cannot", () => {
-  assert.deepEqual(availableActions(order({ status: "paid" })), ["deliver"]);
-  assert.deepEqual(availableActions(order({ status: "confirmed_cod" })), ["deliver"]);
+  assert.deepEqual(availableActions(order({ status: "paid" })), ["deliver", "cancel", "mark-not-picking"]);
+  assert.deepEqual(availableActions(order({ status: "confirmed_cod" })), ["deliver", "cancel", "mark-not-picking"]);
   // The claim "the parcel arrived" is not available on an order whose payment
   // failed or that is still awaiting one.
-  assert.deepEqual(availableActions(order({ status: "failed" })), []);
-  assert.deepEqual(availableActions(order({ status: "awaiting_payment" })), ["mark-paid", "mark-failed"]);
+  assert.deepEqual(availableActions(order({ status: "failed" })), ["cancel"]);
+  assert.deepEqual(availableActions(order({ status: "awaiting_payment" })), ["mark-paid", "mark-failed", "cancel"]);
 });
 
 test("a delivered order offers revert, and never a second deliver", () => {
@@ -111,6 +131,39 @@ test("payment overrides are offered only while a pay-now order is unpaid", () =>
   // Already settled: an override here is a no-op that would only write a false
   // history entry.
   assert.ok(!availableActions(order({ status: "paid", paymentMethod: "pay_now" })).includes("mark-paid"));
+});
+
+test("cancellation reversal is offered in the detail action set only when its previous status exists", () => {
+  assert.deepEqual(availableActions(order({ status: "cancelled" })), []);
+  assert.deepEqual(
+    availableActions(order({ status: "cancelled", preCancellationStatus: "paid" })),
+    ["revert-cancel"],
+  );
+});
+
+test("Not Picking is offered only for deliverable orders and has a reversal when its prior state exists", () => {
+  assert.ok(availableActions(order({ status: "paid" })).includes("mark-not-picking"));
+  assert.ok(!availableActions(order({ status: "failed" })).includes("mark-not-picking"));
+  assert.deepEqual(availableActions(order({ status: "not_picking" })), []);
+  assert.deepEqual(
+    availableActions(order({ status: "not_picking", preNotPickingStatus: "confirmed_cod" })),
+    ["revert-not-picking"],
+  );
+});
+
+test("reverting Not Picking restores the exact status saved when it was marked", async () => {
+  current = order({ status: "paid" });
+  await orderCrmService.markNotPicking(db, 1, null, "admin@x.test");
+  assert.equal(current?.status, "not_picking");
+  assert.equal(current?.preNotPickingStatus, "paid");
+
+  await orderCrmService.revertNotPicking(db, 1, null, "admin@x.test");
+  assert.equal(current?.status, "paid");
+  assert.equal(current?.preNotPickingStatus, null);
+  assert.deepEqual(history.map((entry) => [entry.oldStatus, entry.newStatus]), [
+    ["paid", "not_picking"],
+    ["not_picking", "paid"],
+  ]);
 });
 
 /* ---- delivering ---- */

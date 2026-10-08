@@ -3,15 +3,27 @@ import type { Db } from "../db";
 import { categories, orders, orderStatusHistory, products } from "../schema";
 
 // §5.4b — the only transitions legal in V1. Checked here, not trusted from callers.
+// Phase 7a additions: cancelled and not_picking are terminal except for reversal,
+// which restores the pre_cancellation_status atomically in one statement.
 const LEGAL_TRANSITIONS: Record<string, string[]> = {
-  awaiting_payment: ["paid", "failed"],
-  paid: ["delivered"],
-  confirmed_cod: ["delivered"],
-  failed: [],
+  awaiting_payment: ["paid", "failed", "cancelled"],
+  paid: ["delivered", "cancelled"],
+  confirmed_cod: ["delivered", "cancelled"],
+  failed: ["cancelled"],
   delivered: [],
+  cancelled: [],
+  not_picking: [],
 };
 
 export type OrderRow = typeof orders.$inferSelect;
+
+function updatedAtVersionCondition(expectedUpdatedAt: Date): SQL {
+  // PostgreSQL timestamps retain microseconds, while Date/JSON preserve only
+  // milliseconds. Match the millisecond bucket sent to the browser instead of
+  // comparing against a timestamp whose remaining precision was truncated.
+  const nextMillisecond = new Date(expectedUpdatedAt.getTime() + 1);
+  return sql`${orders.updatedAt} >= ${expectedUpdatedAt} AND ${orders.updatedAt} < ${nextMillisecond}`;
+}
 
 export const ordersRepo = {
   async findByIdempotencyKey(db: Db, idempotencyKey: string): Promise<OrderRow | null> {
@@ -202,7 +214,7 @@ export const ordersRepo = {
   ): Promise<OrderRow | null> {
     const where = expectedUpdatedAt === null
       ? eq(orders.id, id)
-      : sql`${orders.id} = ${id} and ${orders.updatedAt} = ${expectedUpdatedAt}`;
+      : and(eq(orders.id, id), updatedAtVersionCondition(expectedUpdatedAt));
     const [row] = await db.update(orders).set({ ...patch, updatedAt: new Date() }).where(where).returning();
     return row ?? null;
   },
@@ -233,7 +245,7 @@ export const ordersRepo = {
       sql`${orders.id} = ${id}`,
       sql`${orders.status} = ${expectedStatus}`,
     ];
-    if (expectedUpdatedAt !== null) conditions.push(sql`${orders.updatedAt} = ${expectedUpdatedAt}`);
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
     const [row] = await db.update(orders)
       .set({ ...extraPatch, status: toStatus as OrderRow["status"], updatedAt: new Date() })
       .where(and(...conditions))
@@ -266,7 +278,7 @@ export const ordersRepo = {
       sql`${orders.id} = ${id}`,
       sql`${orders.status} = ${expectedStatus}`,
     ];
-    if (expectedUpdatedAt !== null) conditions.push(sql`${orders.updatedAt} = ${expectedUpdatedAt}`);
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
     const [row] = await db.update(orders)
       .set({ status: "delivered", deliveredAt, updatedAt: new Date() })
       .where(and(...conditions))
@@ -292,9 +304,114 @@ export const ordersRepo = {
       sql`${orders.id} = ${id}`,
       sql`${orders.status} = 'delivered'`,
     ];
-    if (expectedUpdatedAt !== null) conditions.push(sql`${orders.updatedAt} = ${expectedUpdatedAt}`);
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
     const [row] = await db.update(orders)
       .set({ status: toStatus as OrderRow["status"], deliveredAt: null, updatedAt: new Date() })
+      .where(and(...conditions))
+      .returning();
+    return row ?? null;
+  },
+
+  /**
+   * Cancel an order. Stores the current status so reversal can restore it.
+   * Cancellation is allowed from any non-terminal state.
+   */
+  async cancel(
+    db: Db,
+    id: number,
+    expectedStatus: string,
+    expectedUpdatedAt: Date | null = null,
+  ): Promise<OrderRow | null> {
+    const conditions: SQL[] = [
+      sql`${orders.id} = ${id}`,
+      sql`${orders.status} = ${expectedStatus}`,
+    ];
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
+    const [row] = await db.update(orders)
+      .set({
+        status: "cancelled" as OrderRow["status"],
+        preCancellationStatus: expectedStatus,
+        updatedAt: new Date(),
+      })
+      .where(and(...conditions))
+      .returning();
+    return row ?? null;
+  },
+
+  /**
+   * Revert a cancellation: restore the status that was current when cancelled.
+   * This is the only way to undo a cancellation - it restores exactly what came before.
+   */
+  async revertCancellation(
+    db: Db,
+    id: number,
+    expectedUpdatedAt: Date | null = null,
+  ): Promise<OrderRow | null> {
+    const conditions: SQL[] = [
+      sql`${orders.id} = ${id}`,
+      sql`${orders.status} = 'cancelled'`,
+      sql`${orders.preCancellationStatus} IS NOT NULL`,
+    ];
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
+    const [row] = await db.update(orders)
+      .set({
+        status: sql`${orders.preCancellationStatus}::order_status`,
+        preCancellationStatus: null,
+        updatedAt: new Date(),
+      })
+      .where(and(...conditions))
+      .returning();
+    return row ?? null;
+  },
+
+  /**
+   * Mark an order as Not Picking. This is a terminal fulfilment state, distinct
+   * from cancellation. Once set, it stays unless admin explicitly reverts it.
+   */
+  async markNotPicking(
+    db: Db,
+    id: number,
+    expectedStatus: string,
+    expectedUpdatedAt: Date | null = null,
+  ): Promise<OrderRow | null> {
+    const conditions: SQL[] = [
+      sql`${orders.id} = ${id}`,
+      sql`${orders.status} = ${expectedStatus}`,
+    ];
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
+    const [row] = await db.update(orders)
+      .set({
+        status: "not_picking" as OrderRow["status"],
+        preNotPickingStatus: expectedStatus,
+        updatedAt: new Date(),
+      })
+      .where(and(...conditions))
+      .returning();
+    return row ?? null;
+  },
+
+  /**
+   * Revert Not Picking back to the previous state. Unlike cancellation reversal,
+   * this requires explicit knowledge of the previous status because Not Picking
+   * does not store it (it is a permanent mark, not a suspension).
+   */
+  async revertNotPicking(
+    db: Db,
+    id: number,
+    expectedUpdatedAt: Date | null = null,
+  ): Promise<OrderRow | null> {
+    const conditions: SQL[] = [
+      sql`${orders.id} = ${id}`,
+      sql`${orders.status} = 'not_picking'`,
+      sql`${orders.preNotPickingStatus} IS NOT NULL`,
+    ];
+    if (expectedUpdatedAt !== null) conditions.push(updatedAtVersionCondition(expectedUpdatedAt));
+    const [row] = await db.update(orders)
+      .set({
+        status: sql`${orders.preNotPickingStatus}::order_status`,
+        preNotPickingStatus: null,
+        updatedAt: new Date(),
+      })
       .where(and(...conditions))
       .returning();
     return row ?? null;
@@ -403,6 +520,7 @@ export const ORDER_SORT_FIELDS = [
 
 export type OrderListFilters = {
   status: string | null;
+  action: string | null;
   paymentMethod: "pay_now" | "cod" | null;
   phone: string | null;
   from: Date | null;
@@ -423,6 +541,7 @@ export type OrderListFilters = {
  */
 export function filtersFromQuery(input: {
   status?: string;
+  action?: string;
   paymentMethod?: "pay_now" | "cod";
   phone?: string;
   productId?: number;
@@ -432,6 +551,7 @@ export function filtersFromQuery(input: {
 }): OrderListFilters {
   return {
     status: input.status ?? null,
+    action: input.action ?? null,
     paymentMethod: input.paymentMethod ?? null,
     phone: input.phone?.trim() || null,
     productId: input.productId ?? null,
@@ -478,9 +598,24 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
       sql`lower(${orders.reference}) like ${search + "%"}`,
       sql`${orders.phone} like ${search + "%"}`,
       sql`lower(${orders.customerName}) like ${"%" + search + "%"}`,
+      sql`replace(lower(${orders.status}::text), '_', ' ') like ${"%" + search.replace(/[_-]+/g, " ") + "%"}`,
     ));
   }
   if (filters.status) conditions.push(eq(orders.status, filters.status as OrderRow["status"]));
+  if (filters.action) {
+    const actionConditions: Record<string, SQL> = {
+      deliver: inArray(orders.status, ["paid", "confirmed_cod"]),
+      revert: eq(orders.status, "delivered"),
+      "mark-paid": and(eq(orders.status, "awaiting_payment"), eq(orders.paymentMethod, "pay_now"))!,
+      "mark-failed": and(eq(orders.status, "awaiting_payment"), eq(orders.paymentMethod, "pay_now"))!,
+      cancel: inArray(orders.status, ["awaiting_payment", "paid", "confirmed_cod", "failed"]),
+      "revert-cancel": and(eq(orders.status, "cancelled"), sql`${orders.preCancellationStatus} IS NOT NULL`)!,
+      "mark-not-picking": inArray(orders.status, ["paid", "confirmed_cod"]),
+      "revert-not-picking": and(eq(orders.status, "not_picking"), sql`${orders.preNotPickingStatus} IS NOT NULL`)!,
+    };
+    const actionCondition = actionConditions[filters.action];
+    if (actionCondition) conditions.push(actionCondition);
+  }
   if (filters.paymentMethod) conditions.push(eq(orders.paymentMethod, filters.paymentMethod));
   if (filters.phone) conditions.push(like(orders.phone, filters.phone + "%"));
   if (filters.from) conditions.push(gte(orders.createdAt, filters.from));
