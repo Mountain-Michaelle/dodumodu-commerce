@@ -24,7 +24,14 @@ export function normalizeEmail(raw: unknown): string | null {
   const e = raw.trim().toLowerCase();
   if (e.length < 3 || e.length > 254 || !/^[\x21-\x7e]+$/.test(e)) return null;
   const parts = e.split("@");
-  return parts.length === 2 && parts[0] && parts[1] ? e : null;
+  if (parts.length !== 2) return null;
+  const [local, domain] = parts;
+  if (!local || !domain) return null;
+  // A dot somewhere in the middle of the domain: rejects "owner@example" and
+  // "owner@.com" while still accepting single-label-dot forms like "o@x.co".
+  const dot = domain.indexOf(".");
+  if (dot <= 0 || dot === domain.length - 1) return null;
+  return e;
 }
 
 export const maskEmail = (e: string): string => {
