@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   toB64, fromB64, loadKey, normalizeEmail, maskEmail, emailHmac, deriveCode, codeMac,
   sha256, safeEqual, encryptSecret, decryptSecret, b64u, newTotpSecret, b32decode, hotp, totpMatch,
+  toHex, fromHex,
 } from "./crypto";
 import { hashPhrase, verifyPhrase, verifyDummyPhrase } from "./argon2";
 
@@ -182,4 +183,16 @@ test("verifyDummyPhrase", async () => {
   assert.equal(await verifyDummyPhrase("dummy-phrase-for-timing-only"), true);
   assert.equal(await verifyDummyPhrase("wrong"), false);
 });
+
+test("toHex/fromHex round-trips every byte value (DB bytea boundary)", () => {
+  for (let b = 0; b < 256; b++) {
+    assert.equal(toHex(new Uint8Array([b])), b.toString(16).padStart(2, "0"));
+  }
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 37 + 5) & 0xff;
+  assert.deepEqual(fromHex(toHex(bytes)), bytes);
+  // Empty input must not throw.
+  assert.deepEqual(fromHex(""), new Uint8Array(0));
+});
+
 

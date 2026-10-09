@@ -144,3 +144,25 @@ export async function totpMatch(
   for (let d = -window; d <= window; d++) if (safeEqual(await hotp(secretB32, step + d), code)) return step + d;
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Hex helpers: the ONLY safe way to move a hash across the DB boundary.
+//
+// The migration stores every token/hash as bytea, but drizzle's raw `sql`
+// binding sends parameters as text, so a Buffer/Uint8Array param fails with
+// "invalid byte sequence for encoding UTF8: 0x00" on BOTH drivers (node-postgres
+// binary protocol and neon-http JSON). Hex is plain ASCII, so it serialises
+// identically everywhere. The rule: crypto returns bytes; toHex() at the edge;
+// SQL uses decode($n,'hex') on input and encode(col,'hex') on output. Never
+// bind a raw byte array. (Verified against local Postgres; see scripts note.)
+// ---------------------------------------------------------------------------
+export const toHex = (u8: Uint8Array): string => {
+  let s = "";
+  for (const b of u8) s += b.toString(16).padStart(2, "0");
+  return s;
+};
+export const fromHex = (hex: string): Uint8Array => {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+};
