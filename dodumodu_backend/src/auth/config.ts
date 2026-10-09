@@ -30,6 +30,14 @@ export const SESSION_IDLE_SECS_ADMIN = 3600;
 export const SESSION_IDLE_SECS_STRICT = 600;
 export const SESSION_ABSOLUTE_SECS = 18000;
 export const SESSION_ABSOLUTE_SECS_STRICT = 14400;
+// Largest idle value — SESSION_LOOKUP is called with this so the query never
+// prematurely filters; the Worker enforces the per-role/tier limit from the
+// idle_secs it returns and never deletes an idle row (spec §5.8 / §5.11).
+export const SESSION_LOOKUP_MAX_IDLE_SECS = Math.max(
+  3600,
+  3600,
+  600,
+);
 export const RESUME_COOKIE_MAX_SECS = 18000;
 export const STEPUP_WINDOW_SECS = 300;
 export const STEPUP_WINDOW_SECS_STRICT = 120;
