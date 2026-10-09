@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Order received</title>
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#fff8f5">
 <link rel="stylesheet" href="/__SITE_CSS__">
 <style>
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff8f5;color:#2b2320}
-  .confirm-page{max-width:480px;margin:0 auto;padding:56px 20px 72px;text-align:center}
+  /* Top padding is smaller than before (56px -> 28px): the brand header above now
+     provides the breathing room, and the confirmation stays on the first screen. */
+  .confirm-page{max-width:480px;margin:0 auto;padding:28px 20px 72px;text-align:center}
   .confirm-icon{width:56px;height:56px;color:#2f7d4f;margin:0 auto 16px}
   .confirm-status{font-size:0.9rem;color:#6b5f59;margin-top:10px}
   .order-summary{text-align:left;margin-top:24px}
@@ -28,10 +31,62 @@
   .back-link:focus-visible{outline:3px solid #1d4d2f;outline-offset:3px}
   .back-hint{margin:0;font-size:0.85rem;color:#8a7b74}
   .pay-link{color:#2f7d4f;font-weight:600}
+
+  /* ---------------------------------------------------------------------
+     BRAND - DODUMODU logo. Inline SVG sprite (see <body>): no request, paints
+     with the HTML, navy follows CSS `color`. pointer-events:none leaves no
+     Save-image / drag target on the artwork.
+     --------------------------------------------------------------------- */
+  .brand-link{display:inline-flex;align-items:center;min-height:44px;line-height:0;color:#1f2a44;text-decoration:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+  .brand-link:focus-visible{outline:3px solid rgba(194,105,79,.45);outline-offset:3px;border-radius:8px}
+  .brand-logo{display:block;height:auto;aspect-ratio:2364/505;color:#1f2a44;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+
+  /* Top: the brand sits quietly above the confirmation. Its job is reassurance
+     ("I'm still on the store I ordered from"), not promotion, so it is
+     centered and modest, and it is the only link above the fold other than
+     the payment link when one is needed. */
+  .confirm-brand{display:flex;justify-content:center;max-width:480px;margin:0 auto;padding:18px 20px 0}
+  .confirm-brand .brand-logo{width:clamp(150px,48vw,196px)}
+
+  /* Bottom: a sign-off, deliberately NOT a link, so the green "Back to the
+     store" button stays the single clear next action. */
+  .confirm-signoff{margin-top:44px;padding-top:26px;border-top:1px solid #f0e2dc;display:flex;flex-direction:column;align-items:center;gap:12px}
+  .confirm-signoff-text{margin:0;font-size:0.8rem;letter-spacing:0.02em;color:#8a7b74}
+  .confirm-signoff .brand-logo{width:clamp(120px,38vw,150px);opacity:.92}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* A single, gentle pop on the success tick. Skipped for anyone who has asked
+     their device to reduce motion. The logo itself is never animated, so it
+     paints immediately and never delays the first meaningful paint. */
+  @media (prefers-reduced-motion:no-preference){
+    .confirm-icon{animation:confirm-pop .45s cubic-bezier(.2,.9,.3,1.2) both}
+    @keyframes confirm-pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+  }
+  @media (min-width:768px){
+    .confirm-brand{padding-top:28px}
+    .confirm-brand .brand-logo{width:210px}
+    .confirm-page{padding-top:36px}
+  }
 </style>
 </head>
 <body>
+
+<!-- =====================================================================
+     BRAND SPRITE - the DODUMODU logo, defined once, used by <use href="#dm-logo">.
+     Zero-size (NOT display:none, which breaks <use> references in Safari).
+     Colours: navy = currentColor (set via CSS `color`), orange = #F7A21B.
+     Identical to the sprite on the product page.
+     ===================================================================== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><symbol id="dm-logo" viewBox="118 0 2364 505"><defs><path id="dm-w" fill-rule="evenodd" fill="currentColor" d="M-32 0a32 32 0 1 0 64 0a32 32 0 1 0-64 0M-12 0a12 12 0 1 0 24 0a12 12 0 1 0-24 0z"/><g id="dm-d"><path fill="#F7A21B" fill-rule="evenodd" d="M0 208H194a8 8 0 0 1 8 8V406a8 8 0 0 1-8 8H34a8 8 0 0 1-7.9-6.6L-7.9 217.4A8 8 0 0 1 0 208zM14 273.5h156a4.5 4.5 0 0 1 0 9H14a4.5 4.5 0 0 1 0-9zM30 337.5h140a4.5 4.5 0 0 1 0 9H30a4.5 4.5 0 0 1 0-9zM57.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM57.5 282.5h9v55h-9zM57.5 346.5h9V382a4.5 4.5 0 0 1-9 0zM113.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM113.5 282.5h9v55h-9zM113.5 346.5h9V382a4.5 4.5 0 0 1-9 0z"/><path d="M218 382V30h22" fill="none" stroke="#F7A21B" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="55" y="441"/><use href="#dm-w" x="155" y="441"/></g><g id="dm-o"><circle cx="130" cy="346" r="112" fill="none" stroke="currentColor" stroke-width="36"/><path d="M47 298l166 96M130 250v192M213 298L47 394" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><circle cx="130" cy="346" r="26" fill="#F7A21B"/><circle cx="130" cy="346" r="10" fill="currentColor"/></g><g id="dm-u"><path d="M24 240V356q0 26 26 26h138q26 0 26-26V240" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="62" y="441"/><use href="#dm-w" x="176" y="441"/></g><g id="dm-m"><path d="M24 382V305a65 65 0 0 1 130 0V382M154 305a65 65 0 0 1 130 0V382" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="24" y="441"/><use href="#dm-w" x="154" y="441"/><use href="#dm-w" x="284" y="441"/></g></defs><use href="#dm-d" x="126"/><use href="#dm-o" x="426"/><use href="#dm-d" x="722"/><use href="#dm-u" x="1022"/><use href="#dm-m" x="1296"/><use href="#dm-o" x="1640"/><use href="#dm-d" x="1936"/><use href="#dm-u" x="2236"/><path d="M304 494h230M1694 494h230" stroke="#F7A21B" stroke-width="10" stroke-linecap="round"/></symbol></svg>
+
 <!-- ICONS -->
+
+<header class="confirm-brand" role="banner">
+  <a class="brand-link" href="/" aria-label="DODUMODU - back to the store">
+    <svg class="brand-logo" viewBox="0 0 2364 505" aria-hidden="true" focusable="false"><use href="#dm-logo"/></svg>
+  </a>
+</header>
+
 <main class="confirm-page">
   <svg class="confirm-icon" aria-hidden="true"><use href="#icon-check"></use></svg>
   <h1>We've received your order</h1>
@@ -52,6 +107,11 @@
     <a class="back-link" href="/products/glow-serum/">&larr; Back to the store</a>
     <p class="back-hint">Ordering again? Your form comes back empty and ready.</p>
   </div>
+
+  <footer class="confirm-signoff">
+    <p class="confirm-signoff-text">Thank you for shopping with <span class="sr-only">DODUMODU</span></p>
+    <svg class="brand-logo" viewBox="0 0 2364 505" aria-hidden="true" focusable="false"><use href="#dm-logo"/></svg>
+  </footer>
 </main>
 
 <script>

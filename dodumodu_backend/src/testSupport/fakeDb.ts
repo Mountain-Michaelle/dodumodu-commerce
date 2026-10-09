@@ -71,7 +71,7 @@ class FakeQuery {
     if (this.operation === "insert") {
       const row: Row = { id: this.db.nextId(this.tableName), ...(this.payload as Row) };
       const primary = this.tableName === "visitor_days"
-        ? ["visit_date", "hash_version", "ip_hash"]
+        ? ["visitDate", "hashVersion", "ipHash"]
         : this.tableName === "visitor_analytics_meta" ? ["id"] : [];
       if (primary.length > 0 && store.some((existing) =>
         primary.every((key) => existing[key] === row[key]))) {
@@ -95,11 +95,17 @@ class FakeQuery {
   }
 }
 
-/** The drizzle table object carries its SQL name; that is how a call is routed. */
+/** The drizzle table object carries its SQL name; that is how a call is routed.
+ *  drizzle 0.36 keeps it under Symbol.for("drizzle:Name"), not a plain `.name`
+ *  property - and on a table that has a `name` column the plain property is the
+ *  COLUMN, not the table, so both have to be checked in order. */
+const DRIZZLE_NAME = Symbol.for("drizzle:Name");
 function tableNameOf(table: unknown): string {
   if (typeof table === "string") return table;
-  const name = (table as { name?: unknown })?.name;
-  return typeof name === "string" ? name : "";
+  const plain = (table as { name?: unknown } | null)?.name;
+  if (typeof plain === "string") return plain;
+  const named = (table as Record<symbol, unknown> | null)?.[DRIZZLE_NAME];
+  return typeof named === "string" ? named : "";
 }
 
 /**

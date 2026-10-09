@@ -38,6 +38,15 @@ const actionSchema = z.object({
   reason: z.string().trim().max(300).optional(),
 });
 
+// Cancellation is the one action that MUST say why. The schema validates and
+// trims independently of the UI (a hand-made request is held to the same rule),
+// and the service re-checks it, so no future caller can skip the reason by
+// bypassing the panel. 12 characters is the same bar the block/release dialogs
+// set: enough that the history entry explains itself months later.
+const cancelSchema = actionSchema.extend({
+  reason: z.string().trim().min(12).max(300),
+});
+
 const bulkSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(1000),
   action: z.enum(["deliver", "revert", "mark-paid", "mark-failed", "cancel", "revert-cancel", "mark-not-picking"]),
@@ -309,7 +318,7 @@ export function orderRoutes() {
 
   route.post("/:id/cancel", async (c) => {
     requirePermissionOf(c, PERMISSIONS.ordersWrite);
-    const body = await readBody(c, actionSchema, "cancellation");
+    const body = await readBody(c, cancelSchema, "cancellation");
     const order = await orderCrmService.cancel(
       createDb(c.env.DATABASE_URL), Number(c.req.param("id")), versionOf(body), actorOf(c), body.reason,
     );

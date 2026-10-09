@@ -6,6 +6,7 @@ import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
 import { categoriesRepo } from "../data/categoriesRepo";
 import { ConflictError, NotFoundError, ValidationError } from "../shared/httpError";
+import { updatedAtBucketCondition } from "../shared/versionGuard";
 
 // Product rules: what may be saved, when a category is required, and why a
 // product with orders behind it is archived rather than destroyed.
@@ -102,10 +103,13 @@ export const productService = {
     const clean = await productService.validate(db, input, id);
     // The version guard lives in the WHERE, not in a check above it: a read then a
     // write is a window, and two admins saving the same product would otherwise
-    // end with one edit silently gone.
+    // end with one edit silently gone. The millisecond bucket rather than `=
+    // expected`: a Date parameter is serialised in process-local time while the
+    // naive column stores the digits the browser was shown, so equality could
+    // never match. See shared/versionGuard.
     const where = expectedUpdatedAt === null
       ? eq(productsTable.id, id)
-      : sql`${productsTable.id} = ${id} and ${productsTable.updatedAt} = ${expectedUpdatedAt}`;
+      : sql`${productsTable.id} = ${id} and ${updatedAtBucketCondition(productsTable.updatedAt, expectedUpdatedAt)}`;
 
     const [row] = await db.update(productsTable)
       .set({ ...clean, updatedAt: new Date() })
@@ -140,7 +144,7 @@ export const productService = {
 
     const where = expectedUpdatedAt === null
       ? eq(productsTable.id, id)
-      : sql`${productsTable.id} = ${id} and ${productsTable.updatedAt} = ${expectedUpdatedAt}`;
+      : sql`${productsTable.id} = ${id} and ${updatedAtBucketCondition(productsTable.updatedAt, expectedUpdatedAt)}`;
     const [row] = await db.update(productsTable)
       .set({ active: false, updatedAt: new Date() })
       .where(where)

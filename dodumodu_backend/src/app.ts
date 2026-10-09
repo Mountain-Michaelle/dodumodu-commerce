@@ -13,6 +13,7 @@ import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
 import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
+import { visitorRetentionRoute } from "./routes/visitorRetention";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -74,6 +75,7 @@ app.route("/", ordersRoute);
 app.route("/", paymentsRoute);
 app.route("/", monthlyKpiSnapshotsRoute);
 app.route("/", visitorAnalyticsRoute);
+app.route("/", visitorRetentionRoute);
 
 // The admin console gets its OWN limits, not the customer ones.
   //

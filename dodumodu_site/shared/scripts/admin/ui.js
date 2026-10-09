@@ -88,6 +88,99 @@ export function confirmDialog({ title, body, confirmLabel = "Confirm", danger = 
   });
 }
 
+/**
+ * A confirmation that records WHY, for decisions that must be auditable
+ * (cancelling an order). Same shape as confirmDialog, with three differences
+ * that come from what typing in a dialog is like on a real keyboard:
+ *
+ *   - Enter never submits. Inside the textarea it inserts a newline; the dialog
+ *     only ever closes from a button, so a half-typed reason can't be sent or
+ *     lost to an accidental keypress.
+ *   - Escape and outside-clicks only close the dialog while the reason box is
+ *     EMPTY. Once text exists, discarding it needs an explicit click on Close.
+ *   - The confirm button stays disabled until the reason meets `minLength` and
+ *     for the whole in-flight request, so a double-click can't fire twice. If
+ *     the request fails the dialog STAYS OPEN with the text intact; only a
+ *     version conflict (the row moved under the operator) closes it, because
+ *     the correct next step there is a reload, not another try.
+ *
+ * Resolves `{ ok: true }` after a successful submit, `{ ok: false }` on an
+ * ordinary dismissal, or `{ ok: false, conflict: true }` when the server
+ * reported the record changed concurrently.
+ */
+export function reasonDialog({
+  title, body, confirmLabel = "Confirm", danger = false,
+  placeholder = "", minLength = 12, submit,
+}) {
+  return new Promise((resolve) => {
+    let textarea, error, confirmButton, closeButton;
+    let inFlight = false;
+    const done = (value) => { overlay.remove(); document.removeEventListener("keydown", onKey); resolve(value); };
+    const text = () => (textarea.value || "").trim().replace(/\s+/g, " ");
+    const valid = () => text().length >= minLength;
+    const validate = () => {
+      const problem = valid() ? null : `At least ${minLength} characters, so this can be reviewed later.`;
+      error.textContent = problem || "";
+      confirmButton.disabled = inFlight || !valid();
+      return valid();
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape" && !inFlight && text() === "") done({ ok: false });
+      // Enter is deliberately not handled: in a textarea it must insert a line.
+    };
+
+    textarea = el("textarea", { class: "input", rows: "4", placeholder, oninput: validate });
+    error = el("p", { class: "field-error" });
+    closeButton = el("button", {
+      class: "button", type: "button", text: "Close",
+      onclick: () => { if (!inFlight) done({ ok: false }); },
+    });
+    confirmButton = el("button", {
+      class: danger ? "button button-danger" : "button button-primary",
+      type: "button", text: confirmLabel, disabled: true,
+      onclick: async () => {
+        if (inFlight || !validate()) return;
+        inFlight = true;
+        confirmButton.disabled = true;
+        confirmButton.textContent = "Working…";
+        closeButton.disabled = true;
+        try {
+          await submit(text());
+          done({ ok: true });
+        } catch (err) {
+          inFlight = false;
+          confirmButton.textContent = confirmLabel;
+          closeButton.disabled = false;
+          if (err instanceof ApiError && err.isConflict) {
+            done({ ok: false, conflict: true });
+            return;
+          }
+          error.textContent = err instanceof ApiError ? err.message : String(err?.message || err);
+          validate();
+        }
+      },
+    });
+
+    const overlay = el("div", {
+      class: "overlay",
+      // With typed text, a stray backdrop click does nothing - the text survives.
+      onclick: (e) => { if (e.target === overlay && text() === "" && !inFlight) done({ ok: false }); },
+    },
+      el("div", { class: "dialog", role: "dialog", "aria-modal": "true" },
+        el("h2", { class: "dialog-title", text: title }),
+        el("div", { class: "dialog-body" },
+          typeof body === "string" ? el("p", { text: body }) : body,
+          el("label", { class: "stack" },
+            el("span", { class: "muted", text: "Reason (required)" }), textarea),
+          error),
+        el("div", { class: "dialog-actions" }, closeButton, confirmButton)));
+
+    document.body.append(overlay);
+    document.addEventListener("keydown", onKey);
+    textarea.focus();
+  });
+}
+
 /* ----------------------------------------------------------------- modal */
 
 /**
@@ -441,27 +534,68 @@ export function listScaffold(host) {
  * A row of selects, each writing one key of the query object. Declared as data so
  * a screen defines its filter bar in one line and every screen gets the same
  * markup, the same "All" default and the same reset behaviour.
+ *
+ * `value` carries only APPLIED filters: `""` or an omitted key means "no filter",
+ * because the primitive's own first option IS the reset state. A view-level no-op
+ * value ("all") counts as active here - it shows "Clear filters" on a list nothing
+ * is filtered, and clicking it re-sends the same query: the button vanishes while
+ * nothing on screen changes, which reads as a broken control.
+ *
+ * The controls are built ONCE per screen (that is what keeps the search box's
+ * focus alive), so `value` is a build-time snapshot: anything closed over here
+ * is frozen at build time. `current` is the live copy of what the operator has
+ * picked. Without it, a second change spread the ORIGINAL value and silently
+ * reset every other key to its initial value - while the other selects still
+ * displayed the operator's choices. The list quietly stopped honouring a filter
+ * the bar still claimed was on, which is exactly how a filter reads as "not
+ * functional". Single-filter screens (Categories, Media) never showed it;
+ * Orders (three filters) and Products (two) lost one filter per extra pick.
  */
 export function adminFilters({ filters, value = {}, onChange }) {
-  const controls = filters.map((filter) => el("label", { class: "filter" },
-    el("span", { class: "filter-label", text: filter.label }),
-    el("select", {
+  const current = { ...value };
+  const selects = new Map();
+
+  const active = () => Object.values(current).some((v) => v !== undefined && v !== "" && v !== null);
+
+  // Present in the DOM from the start and only hidden. Rendering it only when a
+  // filter was active AT BUILD TIME - the old behaviour - meant it could never
+  // appear at all: the controls are built before the operator has picked anything.
+  const clear = el("button", {
+    class: "button button-link", type: "button", text: "Clear filters", hidden: !active(),
+    onclick: () => {
+      for (const key of Object.keys(current)) delete current[key];
+      // The selects hold their own displayed value, so clearing the state
+      // without resetting them leaves a bar showing filters the list is no
+      // longer applying.
+      for (const select of selects.values()) select.value = "";
+      clear.hidden = true;
+      onChange({});
+    },
+  });
+
+  const controls = filters.map((filter) => {
+    const select = el("select", {
       class: "select", "aria-label": filter.label,
-      onchange: (event) => onChange({ ...value, [filter.key]: event.target.value || undefined }),
+      onchange: (event) => {
+        const picked = event.target.value || undefined;
+        if (picked === undefined) delete current[filter.key];
+        else current[filter.key] = picked;
+        clear.hidden = !active();
+        onChange({ ...current });
+      },
     }, [
       el("option", { value: "", text: filter.allLabel || "All" }),
       ...filter.options.map((option) => el("option", {
         value: String(option.value), text: option.label,
         selected: String(value[filter.key] ?? "") === String(option.value),
       })),
-    ])));
+    ]);
+    selects.set(filter.key, select);
+    return el("label", { class: "filter" },
+      el("span", { class: "filter-label", text: filter.label }), select);
+  });
 
-  const active = Object.values(value).some((v) => v !== undefined && v !== "" && v !== null);
-  return el("div", { class: "filters" }, controls,
-    active ? el("button", {
-      class: "button button-link", type: "button", text: "Clear filters",
-      onclick: () => onChange({}),
-    }) : null);
+  return el("div", { class: "filters" }, controls, clear);
 }
 
 /* -------------------------------------------------------- image picker */
@@ -506,7 +640,7 @@ export function adminImagePicker({
 }
 
 function openPicker({ title = "Choose an uploaded image", max = 1, onSelect, onCancel } = {}) {
-  const state = { page: 1, pageSize: 24, q: "", filter: "all" };
+  const state = { page: 1, pageSize: 24, q: "", filter: "" };
   // A Map keyed by id: choosing the same image twice is impossible, and the order
   // chosen is the order attached.
   const chosen = new Map();
@@ -605,12 +739,14 @@ function openPicker({ title = "Choose an uploaded image", max = 1, onSelect, onC
     // exactly the ones someone means when they ask "have I already got that?".
     adminFilters({
       value: { filter: state.filter },
-      filters: [{ key: "filter", label: "Show", options: [
-        { value: "all", label: "All images" },
+      // "" (the primitive's own first option, labelled via allLabel) is the
+      // no-filter state; a view-level "all" would read as an applied filter and
+      // show Clear filters on a picker nothing is filtered.
+      filters: [{ key: "filter", label: "Show", allLabel: "All images", options: [
         { value: "unused", label: "Not in use" },
         { value: "unattached", label: "Never attached" },
       ] }],
-      onChange: (next) => { state.filter = next.filter || "all"; state.page = 1; load(); },
+      onChange: (next) => { state.filter = next.filter || ""; state.page = 1; load(); },
     }));
 
   // `resultsNode` is the DOM node; `results(...)` is the method that fills it. Using

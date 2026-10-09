@@ -178,6 +178,15 @@ p:last-child { margin-bottom: 0; }
   box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
+/* The Reports panel holds headings, notices, stat rows, charts and tables as
+   direct children, so — unlike the list screens, which get their breathing room
+   from .list-head plus table cell padding — it needs its own inset or every
+   element sits flush against the card edge. Scoped to .report-panel so the other
+   list views keep their edge-to-edge tables. */
+.report-panel { padding: 1.25rem 1.5rem 1.5rem; }
+.report-panel > .table-wrap { margin: 0 -0.25rem; }
+.report-panel h2.detail-heading:not(:first-child) { margin-top: 1.5rem; }
+.report-panel h3.detail-heading { margin-top: 1.25rem; }
 .panel-body { padding: 1.25rem; }
 
 .list-head {
@@ -217,6 +226,9 @@ p:last-child { margin-bottom: 0; }
 }
 .result-count { color: var(--text-muted); font-size: .8125rem; }
 .list-summary > :last-child { margin-left: auto; }
+/* The export pair sits as ONE last child so the space-between lands on the
+   group, not between the two buttons. */
+.list-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 
 /* align-items is what lets the new status note sit beside the box rather than
    below it, so adding one did not change the height of the controls row and
@@ -380,6 +392,9 @@ p:last-child { margin-bottom: 0; }
   background: none; border: 0; color: var(--primary);
   padding: .25rem; min-height: 0; text-decoration: underline;
 }
+/* .button's display: inline-flex would otherwise beat the browser's own
+   [hidden] rule, so a hidden button would still be shown. */
+.button[hidden] { display: none; }
 
 .icon-button {
   display: grid; place-items: center;
@@ -508,6 +523,66 @@ p:last-child { margin-bottom: 0; }
   background: rgba(217, 119, 6, 0.05);
 }
 .spam-flag-panel .detail-heading { margin-top: 0; color: #92400e; }
+
+/* ---- Reports charts (inline SVG, no chart library) ---- */
+.report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+/* Below the two-column breakpoint the summary stacks under the chart rather
+   than forcing a horizontal scroll on a phone. */
+@media (max-width: 52rem) {
+  .report-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.chart {
+  margin: 0;
+  padding: 0.875rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.chart-caption { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: 0.5rem; }
+.chart-title { font-weight: 600; font-size: 0.8125rem; }
+.chart-subtitle { font-size: 0.75rem; }
+.chart-svg { display: block; width: 100%; height: auto; }
+.chart-line { fill: none; stroke: var(--primary); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-dot { fill: var(--primary); }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis-label { fill: var(--text-muted); font-size: 10px; }
+.chart-note { margin: 0.5rem 0 0; font-size: 0.75rem; }
+.chart-empty { margin: 0.5rem 0 0; font-size: 0.8125rem; }
+.report-side {
+  padding: 0.875rem 1rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.status-list { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; gap: 0.35rem; }
+.status-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem;
+  padding-bottom: 0.3rem; border-bottom: 1px solid var(--border);
+}
+.status-label { font-size: 0.8125rem; }
+.status-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.status-money { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 0.75rem; }
+.status-money dt { font-size: 0.75rem; color: var(--text-muted); }
+.status-money dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Visitor daily-window controls: paging + date filter, one wrapping row. */
+.visit-controls {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem;
+  margin: .25rem 0 .75rem;
+}
+.visit-range { font-variant-numeric: tabular-nums; font-size: .8125rem; color: var(--text); min-width: 11rem; text-align: center; }
+.visit-filter { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
+.visit-filter .input { width: auto; }
+.button-small:disabled { opacity: .5; cursor: not-allowed; }
+
 .col-num { text-align: right; font-variant-numeric: tabular-nums; }
 .col-check { width: 2rem; }
 .col-when { white-space: nowrap; }

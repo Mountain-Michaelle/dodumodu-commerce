@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Env } from "../env";
 import { createDb } from "../db";
 import { ordersRepo } from "../data/ordersRepo";
@@ -24,6 +25,7 @@ import {
   resolvePrincipal, ACCESS_EMAIL_HEADER, PERMISSIONS, type Principal,
 } from "../auth/adminAuth";
 import { errorShape } from "../shared/httpError";
+import { parseListQuery, pageMeta } from "../shared/listQuery";
 import { requirePermissionOf } from "./admin/helpers";
 import { categoryRoutes } from "./admin/categories";
 import { productRoutes } from "./admin/products";
@@ -201,8 +203,22 @@ adminRoute.patch("/orders/:id/status", async (c) => {
 
 adminRoute.get("/testimonials", async (c) => {
   requirePermissionOf(c, PERMISSIONS.productsRead);
+  // Server-side pages: a testimonial list grows without limit, and an endpoint
+  // that returns every row turns one long page into one long query. page/pageSize
+  // go through the shared parser, so the same 1..1000 ceiling applies here as on
+  // every other admin list.
+  const query = parseListQuery(c.req.query(), {
+    filters: z.object({}),
+    sortable: ["displayOrder"],
+    defaultSort: "displayOrder",
+    defaultOrder: "asc",
+  });
+  if (!query) {
+    return c.json({ error: { code: "INVALID_QUERY", message: "That paging request is not valid" } }, 400);
+  }
   const db = createDb(c.env.DATABASE_URL);
-  return c.json({ testimonials: await testimonialsRepo.listAll(db) });
+  const { rows, total } = await testimonialsRepo.listPaged(db, query.limit, query.offset);
+  return c.json({ testimonials: rows, page: pageMeta(query, total) });
 });
 
 adminRoute.put("/testimonials/:id?", async (c) => {

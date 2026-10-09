@@ -1,9 +1,9 @@
 import { el, mount } from "../dom.js";
-import { api, ApiError } from "../api.js";
+import { api, ApiError, qs } from "../api.js";
 import {
-  adminTable, adminField, fieldset, saveBar, readForm, applyFieldErrors,
+  adminTable, adminPagination, adminField, fieldset, saveBar, readForm, applyFieldErrors,
   actionButtons, statusBadge, toast, toastError, openModal, errorState, adminImageUploader,
-  adminImagePicker, imageBase,
+  adminImagePicker, imageBase, resultCount, listScaffold,
 } from "../ui.js";
 
 // Testimonials. Product-scoped, because a page must never show a review that
@@ -11,38 +11,39 @@ import {
 //
 // The `kind` distinction is the rule with teeth: a WhatsApp screenshot without an
 // image renders a broken frame on a live product page, so the server refuses it.
-// This form shows the image field only for screenshots, and says why a written
-// review does not need one.
+// A written review takes an OPTIONAL photo: text-only cards stay cheap on weak
+// networks, and a supplied photo renders as the 64px avatar on the storefront.
+//
+// Paging is SERVER-side (page/pageSize on /admin/testimonials) through the same
+// scaffold and paginator every other list uses: a testimonial table that grows
+// past one screen must not turn into an unbounded download.
 
 export function testimonialsView({ shell, identity }) {
   let host;
   let products = [];
+  let ui;
+  const state = { page: 1, pageSize: 20 };
 
   const can = (permission) => (identity?.permissions || []).includes(permission);
 
   async function load() {
-    mount(host, el("div", { class: "table-state" },
-      el("div", { class: "spinner", "aria-hidden": "true" }),
-      el("p", { class: "muted", text: "Loading testimonials…" })));
     try {
-      const [data, prods] = await Promise.all([
-        api.get("/testimonials"),
-        api.get("/products?pageSize=100").catch(() => ({ products: [] })),
-      ]);
-      products = prods.products || [];
-      render(data.testimonials || []);
+      const data = await ui.load((signal) => api.get(`/testimonials${qs({
+        page: state.page, pageSize: state.pageSize,
+      })}`, signal), { pending: "Loading testimonials…" });
+      if (!data) return;
+      render(data);
     } catch (err) {
-      mount(host, errorState(err, load));
+      ui.results(errorState(err, load));
     }
   }
 
-  function render(rows) {
-    mount(host,
-      el("div", { class: "list-summary" },
-        el("span", { class: "result-count", text: `${rows.length} testimonial${rows.length === 1 ? "" : "s"}` })),
+  function render({ testimonials, page }) {
+    ui.results(
+      el("div", { class: "list-summary" }, resultCount({ page, noun: "testimonial" })),
       adminTable({
         caption: "Testimonials",
-        rows,
+        rows: testimonials || [],
         rowKey: (row) => row.id,
         onRowClick: (row) => openForm(row),
         columns: [
@@ -58,6 +59,12 @@ export function testimonialsView({ shell, identity }) {
             { label: "Edit", onSelect: () => openForm(row) },
           ]) },
         ],
+      }),
+      adminPagination({
+        page,
+        pageSizeOptions: [20, 50, 100],
+        onPage: (n) => { state.page = n; load(); },
+        onPageSize: (n) => { state.pageSize = n; state.page = 1; load(); },
       }));
   }
 
@@ -73,9 +80,15 @@ export function testimonialsView({ shell, identity }) {
     // server enforces that regardless, so this is clarity, not the control.
     const imageField = el("div", { class: "field-row" });
     function paintImageRow() {
-      mount(imageField, item.kind === "whatsapp"
-        ? el("div", { class: "field" },
-          el("span", { class: "field-label", text: "Screenshot image" }),
+      // One uploader for both kinds: required for a WhatsApp screenshot (the
+      // server refuses a screenshot without one — a broken frame on a live
+      // product page), OPTIONAL for a written review, where the photo becomes
+      // the small avatar beside the quote. A text-only review renders its
+      // initial-letter tile instead, so it stays cheap on weak networks.
+      const isScreenshot = item.kind === "whatsapp";
+      mount(imageField,
+        el("div", { class: "field" },
+          el("span", { class: "field-label", text: isScreenshot ? "Screenshot image" : "Review photo (optional)" }),
           el("div", { class: "uploader-row" },
             // Showing the storage key told an operator an image was set and gave them
             // no way to change it except uploading a duplicate. Now the current
@@ -98,10 +111,12 @@ export function testimonialsView({ shell, identity }) {
             }),
             item.r2Key ? el("button", { class: "button button-small", type: "button", text: "Remove", onclick: () => { item.r2Key = ""; paintImageRow(); } }) : null),
           el("p", { class: "field-error", dataset: { errorFor: "r2Key" } }),
-          el("span", { class: "hint", text: "A screenshot testimonial must have an image, or the product page renders a broken frame." }))
-        : el("div", { class: "field" },
-          el("span", { class: "field-label", text: "Screenshot image" }),
-          el("span", { class: "hint", text: "Not needed for a written review." })));
+          el("span", {
+            class: "hint",
+            text: isScreenshot
+              ? "A screenshot testimonial must have an image, or the product page renders a broken frame."
+              : "Optional. Leave empty for a text-only review — nothing breaks, and the card stays light on slow networks.",
+          })));
     }
     paintImageRow();
 
@@ -160,7 +175,7 @@ export function testimonialsView({ shell, identity }) {
 
   return {
     start() {
-      host = el("div", { class: "list" });
+      host = el("div");
       mount(shell.content,
         el("div", { class: "list-panel" },
           el("div", { class: "list-head" },
@@ -169,6 +184,14 @@ export function testimonialsView({ shell, identity }) {
               ? el("button", { class: "button button-primary", type: "button", text: "+ Add testimonial", onclick: () => openForm(null) })
               : null),
           host));
+      // Persistent scaffold like every other list: the paginator lives in
+      // ui.results and is swapped per page without rebuilding anything above it.
+      ui = listScaffold(host);
+      // No search or filters on this list yet - an empty control bar would be a
+      // decorated dead zone, so it is removed (same as the reports view).
+      ui.controls.remove();
+      // The product dropdown inside the form still needs the full product list.
+      api.get("/products?pageSize=100").then((prods) => { products = prods.products || []; }).catch(() => {});
       load();
     },
   };

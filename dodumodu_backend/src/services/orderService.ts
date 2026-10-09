@@ -29,10 +29,13 @@ function computeUnitPrice(product: { price: number; packageOptions: unknown }, p
 }
 
 function generateReference(): string {
-  // Human-glanceable + collision-resistant enough for a UNIQUE constraint to be the real guard.
-  // Lowercase: a reference is something a customer reads back to us over the phone
-  // or types into WhatsApp, and mixed case is a transcription risk for no gain.
-  return `ord-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  // Always `ddmd-` + 15 unique lowercase hex chars: recognizable in a WhatsApp
+  // thread or a pasted sheet, and with 16^15 (~1.15 quintillion) possibilities
+  // it is non-guessable and id conflicts are practically impossible - about a
+  // billion-in-a-billion chance only after ~1.2 billion orders. crypto.randomUUID
+  // is the entropy source; the orders.reference UNIQUE constraint in 0000_init
+  // stays the final authority, which is why creation retries on conflict.
+  return `ddmd-${crypto.randomUUID().replaceAll("-", "").slice(0, 15)}`;
 }
 
 export const orderService = {

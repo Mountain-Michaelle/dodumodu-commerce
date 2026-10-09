@@ -125,7 +125,6 @@ test("missing IP fails open without database writes", async () => {
 });
 
 test("analytics database failures return an explicit error without a success-shaped response", async () => {
-  const database = new FakeDatabase();
   const failingDriver: DbDriver = () => {
     const db = {
       select: () => ({ then: (resolve: (rows: Row[]) => unknown) => Promise.resolve(resolve([])) }),

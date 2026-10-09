@@ -5,6 +5,7 @@ import { adminRoute } from "../admin";
 import { registerDbDriver } from "../../db";
 import { FakeDatabase, fakeDriver } from "../../testSupport/fakeDb";
 import { monthlyKpiService } from "../../services/monthlyKpiService";
+import { visitorAnalyticsService } from "../../services/visitorAnalyticsService";
 import { ACCESS_EMAIL_HEADER } from "../../auth/adminAuth";
 import type { Env } from "../../env";
 
@@ -33,6 +34,12 @@ beforeEach(() => {
 
 afterEach(() => {
   monthlyKpiService.report = originalReport;
+});
+
+const originalVisitorReport = visitorAnalyticsService.report;
+
+afterEach(() => {
+  visitorAnalyticsService.report = originalVisitorReport;
 });
 
 test("monthly KPI report requires an authenticated operator", async () => {
@@ -104,4 +111,109 @@ test("monthly KPI report maps service failures to the shared internal error resp
   } finally {
     monthlyKpiService.report = original;
   }
+});
+
+test("visitor report requires an authenticated operator and exposes distinct visitor data", async () => {
+  visitorAnalyticsService.report = async () => ({
+    trackingStartedOn: "2026-10-01",
+    daily: [{ date: "2026-10-01", visitors: 3 }],
+    monthly: [{ month: "2026-10", visitors: 5 }],
+    yearly: [{ year: 2026, visitors: 5, complete: false, current: true }],
+    geographyApproximate: true,
+    geography: [],
+  }) as never;
+
+  const unauthorized = await app.fetch(
+    new Request("http://localhost/admin/reports/visitors"),
+    env as never,
+  );
+  assert.equal(unauthorized.status, 401);
+
+  const response = await app.fetch(
+    new Request("http://localhost/admin/reports/visitors", {
+      headers: { [ACCESS_EMAIL_HEADER]: "owner@example.com" },
+    }),
+    env as never,
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    daily: { date: string; visitors: number }[];
+    monthly: { month: string; visitors: number }[];
+    yearly: { year: number; visitors: number }[];
+    geographyApproximate: boolean;
+    notice: string;
+  };
+  assert.deepEqual(body.daily, [{ date: "2026-10-01", visitors: 3 }]);
+  assert.deepEqual(body.monthly, [{ month: "2026-10", visitors: 5 }]);
+  assert.equal(body.yearly[0].visitors, 5);
+  assert.equal(body.geographyApproximate, true);
+  assert.match(body.notice, /not additive/i);
+  // Raw IPs are never surfaced by the report.
+  assert.ok(!JSON.stringify(body).match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/));
+});
+
+test("visitor report validates the daily from/to window before querying the service", async () => {
+  let seenRanges: ({ from: string; to: string } | null)[] = [];
+  visitorAnalyticsService.report = async (_db, _now, range = null) => {
+    seenRanges.push(range);
+    return {
+      trackingStartedOn: "2026-10-01",
+      today: "2026-10-09",
+      dailyRange: { from: "2026-09-30", to: "2026-10-08" },
+      daily: [],
+      monthly: [],
+      yearly: [],
+      geographyApproximate: true,
+      geography: [],
+    } as never;
+  };
+
+  // Missing partner, malformed dates, inverted ranges and over-long spans are all
+  // rejected before the service ever runs — this is what keeps the daily series
+  // (the paged part of the report) bounded to at most 93 Lagos days.
+  const invalid = [
+    "from=2026-10-01",
+    "to=2026-10-09",
+    "from=01-10-2026&to=2026-10-09",
+    "from=2026-10-09&to=2026-10-01",
+    "from=2026-01-01&to=2026-06-01",
+  ];
+  for (const query of invalid) {
+    const response = await app.fetch(
+      new Request(`http://localhost/admin/reports/visitors?${query}`, {
+        headers: { [ACCESS_EMAIL_HEADER]: "owner@example.com" },
+      }),
+      env as never,
+    );
+    assert.equal(response.status, 400, query);
+  }
+  assert.deepEqual(seenRanges, []);
+
+  // A valid 10-day paging window reaches the service verbatim, and the echoed
+  // dailyRange/today are what the UI's Prev/Next controls page against.
+  const response = await app.fetch(
+    new Request("http://localhost/admin/reports/visitors?from=2026-09-30&to=2026-10-08", {
+      headers: { [ACCESS_EMAIL_HEADER]: "owner@example.com" },
+    }),
+    env as never,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(seenRanges, [{ from: "2026-09-30", to: "2026-10-08" }]);
+  const body = await response.json() as { dailyRange: { from: string; to: string }; today: string };
+  assert.deepEqual(body.dailyRange, { from: "2026-09-30", to: "2026-10-08" });
+  assert.equal(body.today, "2026-10-09");
+});
+
+test("visitor report maps service failures to the shared internal error response", async () => {
+  visitorAnalyticsService.report = async () => { throw new Error("database details"); };
+  const response = await app.fetch(
+    new Request("http://localhost/admin/reports/visitors", {
+      headers: { [ACCESS_EMAIL_HEADER]: "owner@example.com" },
+    }),
+    env as never,
+  );
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), {
+    error: { code: "INTERNAL_ERROR", message: "Something went wrong on our side. Nothing was changed." },
+  });
 });

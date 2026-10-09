@@ -5,8 +5,10 @@
 // repeating a list that could quietly stop matching.
 //
 // Order is load-bearing: tokens.css first because every later sheet reads its
-// custom properties, and product.css last because it is page chrome refining
-// the shared sheets without needing !important.
+// custom properties, product.css near the end because it is page chrome refining
+// the shared sheets without needing !important, and brand.css LAST because it
+// refines header/footer chrome over everything else - which is exactly the
+// cascade position its former after-the-sheet inline block had.
 export const SITE_STYLES = [
   "tokens.css",
   "base.css",
@@ -16,6 +18,7 @@ export const SITE_STYLES = [
   "carousel.css",
   "testimonials.css",
   "product.css",
+  "brand.css",
 ];
 
 // The admin console ships its own sheet and never the customer bundle's.

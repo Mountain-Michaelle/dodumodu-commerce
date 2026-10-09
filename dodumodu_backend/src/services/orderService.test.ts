@@ -71,14 +71,15 @@ test("a COD order in an eligible state is accepted and written", async () => {
   assert.equal(inserted.length, 1);
 });
 
-test("the reference written is lowercase, and shaped the way the thank-you page shows it", async () => {
+test("the reference is always ddmd- plus 15 unique hex chars: recognizable, non-guessable", async () => {
   await orderService.createOrder(db, env, order({ state: "Lagos" }));
   const reference = (inserted[0] as { reference: string }).reference;
-  // A customer reads this back over the phone or types it into WhatsApp. Mixed
-  // case is a transcription risk for no benefit, and the storefront renders the
-  // reference in lowercase monospace, so what is stored and what is shown agree.
+  // A customer reads this back over the phone or types it into WhatsApp. The
+  // fixed `ddmd-` prefix makes it recognizable in a thread or pasted sheet,
+  // and 15 random hex chars (~1.15 quintillion) mean the sequence cannot be
+  // walked and id conflicts are practically impossible.
   assert.equal(reference, reference.toLowerCase(), `reference must be lowercase: ${reference}`);
-  assert.match(reference, /^ord-[a-z0-9]+-[a-z0-9]{8}$/);
+  assert.match(reference, /^ddmd-[0-9a-f]{15}$/, `reference must be ddmd- + 15 hex chars: ${reference}`);
 });
 
 test("references do not repeat, so the UNIQUE constraint is a backstop not a lottery", async () => {

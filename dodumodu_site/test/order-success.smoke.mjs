@@ -34,7 +34,7 @@ const MOCK_PAGE_DATA = {
 const UNIT_PRICE_NAIRA = 15000; // ₦15,000, from the price above (which is in kobo)
 
 const CONFIRMED_COD = {
-  reference: "ord-mfkk2r8-4b1c9ad2",
+  reference: "ddmd-9f2c41ab07e5d30",
   status: "confirmed_cod",
   unitPrice: 1500000,
   quantity: 3,
@@ -252,7 +252,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
   assert.equal(reference.textContent, CONFIRMED_COD.reference);
   assert.equal(reference.textContent, reference.textContent.toLowerCase(), "the reference is lowercase");
   assert.ok(
-    /^ord-[a-z0-9]+-[a-z0-9]{8}$/.test(reference.textContent),
+    /^ddmd-[0-9a-f]{15}$/.test(reference.textContent),
     "and shaped the way the order service writes it",
   );
   console.log("PASS: thank-you offers a way back, explains next steps, and shows a lowercase reference");

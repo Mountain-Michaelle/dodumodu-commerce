@@ -188,9 +188,12 @@ test("monthly KPI API, aggregation, snapshots and immutable closed month", {
   assert.equal(closedReport.snapshot?.source, "close");
   assert.equal(closedReport.totalValidOrders, 7);
   const emptyMonth = lagosMonthKey(new Date(previousRange.from.getTime() - 1));
-  const emptyReport = body.reports.find((row) => row.month === emptyMonth)!;
-  assert.equal(emptyReport.totalOrders, 0);
-  assert.equal(emptyReport.snapshot?.source, "lazy");
+  const emptyReport = body.reports.find((row) => row.month === emptyMonth);
+  // Empty months are no longer surfaced nor snapshotted: the report window
+  // clamps to the first order's month, so a pre-launch month with no orders is
+  // absent rather than persisted as an all-zero lazy snapshot.
+  assert.equal(emptyReport, undefined);
+  assert.equal(body.reports.length, 2);
   const liveReport = body.reports.find((row) => row.month === currentMonth)!;
   assert.equal(liveReport.current, true);
   assert.equal(liveReport.totalValidOrders, 1);

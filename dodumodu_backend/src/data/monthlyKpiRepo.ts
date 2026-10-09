@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import type { Db } from "../db";
 import { monthlyKpiSnapshots, orders, orderStatusHistory } from "../schema";
 
@@ -44,6 +44,16 @@ export const monthlyKpiRepo = {
         gte(orders.deliveredAt, from),
         lt(orders.deliveredAt, to),
       ));
+  },
+
+  async earliestOrder(db: Db) {
+    // The oldest stored order, so the report window can start at the month the
+    // business actually began trading instead of blindly covering the requested
+    // 12/24 months and surfacing phantom pre-launch months.
+    const [row] = await db.select({ createdAt: orders.createdAt }).from(orders)
+      .orderBy(asc(orders.createdAt))
+      .limit(1);
+    return row?.createdAt ?? null;
   },
 
   async snapshotsForMonths(db: Db, months: string[]) {

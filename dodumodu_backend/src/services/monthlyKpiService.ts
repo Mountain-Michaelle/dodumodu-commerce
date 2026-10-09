@@ -117,6 +117,20 @@ function monthKeysEndingAt(monthCount: number, now: Date): string[] {
   return Array.from({ length: monthCount }, (_, index) => shiftMonth(current, index - monthCount + 1));
 }
 
+/**
+ * The requested window, clamped so it never starts before the month the
+ * business first took an order. Without this the report pads out the full
+ * 12/24 months with empty pre-launch rows — the "recording months I didn't
+ * use" defect. The current Lagos month is always the last entry. When no order
+ * exists yet the window is just the current month.
+ */
+function monthKeysClamped(monthCount: number, now: Date, earliestMonth: string | null): string[] {
+  const months = monthKeysEndingAt(monthCount, now);
+  const current = lagosMonthKey(now);
+  if (!earliestMonth || earliestMonth >= current) return [current];
+  return months.filter((month) => month >= earliestMonth);
+}
+
 function addStatusMetric(metrics: KpiMetrics, status: Status): void {
   const field = STATUS_FIELDS[status];
   metrics[field] = Number(metrics[field]) + 1;
@@ -249,14 +263,20 @@ export const monthlyKpiService = {
     now = new Date(),
     takenBy: string | null = null,
   ): Promise<MonthlyKpiReport[]> {
-    const months = monthKeysEndingAt(monthCount, now);
+    const earliest = await monthlyKpiRepo.earliestOrder(db);
+    const months = monthKeysClamped(monthCount, now, earliest ? lagosMonthKey(earliest) : null);
     const currentMonth = lagosMonthKey(now);
     const existing = await monthlyKpiRepo.snapshotsForMonths(db, months);
     const byMonth = new Map(existing.map((snapshot) => [snapshot.month, snapshot]));
     const toCalculate = months.filter((month) => month === currentMonth || !byMonth.has(month));
     const metrics = await calculateMetrics(db, toCalculate);
     const takenAt = new Date();
-    const missingClosed = toCalculate.filter((month) => month !== currentMonth);
+    // A closed month is only snapshotted when the business actually took orders
+    // in it. Empty months are neither persisted nor surfaced: a month with no
+    // orders is not a month the operator "used", and writing all-zero rows for
+    // every pre-launch month was the reported defect.
+    const missingClosed = toCalculate.filter((month) =>
+      month !== currentMonth && Number(metrics.get(month)?.totalOrders ?? 0) > 0);
 
     await monthlyKpiRepo.insertSnapshots(db, missingClosed.map((month) =>
       snapshotValue(month, metrics.get(month)!, "lazy", takenAt, takenBy)));
@@ -264,19 +284,23 @@ export const monthlyKpiService = {
     const afterInsert = await monthlyKpiRepo.snapshotsForMonths(db, missingClosed);
     for (const snapshot of afterInsert) byMonth.set(snapshot.month, snapshot);
 
-    return months.map((month) => {
-      if (month !== currentMonth) {
+    return months
+      .map((month) => {
+        if (month === currentMonth) {
+          return {
+            ...metrics.get(month)!,
+            month,
+            current: true,
+            snapshot: null,
+          };
+        }
         const snapshot = byMonth.get(month);
-        if (!snapshot) throw new Error(`Monthly KPI snapshot was not persisted for ${month}`);
+        // Drop closed months with no orders, including any legacy zero-value
+        // snapshot a prior version may have written.
+        if (!snapshot || Number(snapshot.totalOrders) === 0) return null;
         return reportFromSnapshot(snapshot);
-      }
-      return {
-        ...metrics.get(month)!,
-        month,
-        current: true,
-        snapshot: null,
-      };
-    });
+      })
+      .filter((row): row is MonthlyKpiReport => row !== null);
   },
 
   async closePreviousMonth(db: Db, now = new Date()) {
