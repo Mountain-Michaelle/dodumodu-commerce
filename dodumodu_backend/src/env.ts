@@ -16,6 +16,13 @@ export type Env = {
   ANALYTICS_IP_HMAC_VERSION: string;
   /** Only the anonymous intent event is gated by this optimization switch. */
   ANALYTICS_WARMUP_ENABLED: string;
+  /**
+   * Order Assignment Mode (fulfilment routing). "false" (the default) keeps the
+   * feature dark: the assign/unassign actions and the staff endpoint refuse,
+   * and the panel hides the toggle. Flip to "true" to enable without a deploy
+   * where the runtime allows it. Strictly additive and independently revertible.
+   */
+  ASSIGNMENT_MODE_ENABLED: string;
   RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: string;
   /**
    * Admin console read ceiling, per operator per minute. Separate from

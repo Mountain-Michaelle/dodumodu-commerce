@@ -649,6 +649,17 @@ p:last-child { margin-bottom: 0; }
 }
 .bulk-count { font-weight: 600; font-size: .8125rem; color: var(--primary); }
 
+/* In the orders list the bar sits directly under the toolbar, ABOVE the table:
+   full width and flush, so it reads as part of the toolbar rather than a rounded
+   box floating over the rows. Direct-child selector: elsewhere the bar rides
+   inside .pagination, which keeps its own border. */
+.list-results > .bulk-bar {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+}
+
 /* ------------------------------------------------------------- pagination */
 
 .pagination {
@@ -880,3 +891,132 @@ p:last-child { margin-bottom: 0; }
 @media (max-width: 900px) {
   .sidebar { position: fixed; }
 }
+
+/* ---- order assignment (fulfilment routing) ---- */
+
+/* Assignment Mode lives in the toolbar beside export, as a real switch: gray pill
+   with the knob left when off, green with the knob rolled right when on - readable
+   at a glance, not just by its label. */
+.assignment-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  align-items: flex-end;
+  grid-column: 1 / -1;
+}
+.assignment-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line, #d7dbe0);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #1a1d21);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.assignment-switch:hover { border-color: var(--accent, #2f6f4f); }
+.assignment-switch-track {
+  position: relative;
+  width: 1.9rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: #b6bcc6;
+  transition: background 0.18s ease;
+}
+.assignment-switch-knob {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.1rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s ease;
+}
+.assignment-switch-icon, .toolbar-icon { display: inline-flex; }
+.assignment-switch-icon svg, .toolbar-icon svg { display: block; }
+.assignment-switch.is-on {
+  background: var(--accent, #2f6f4f);
+  border-color: var(--accent, #2f6f4f);
+  color: #fff;
+}
+.assignment-switch.is-on .assignment-switch-track { background: rgba(255, 255, 255, 0.4); }
+.assignment-switch.is-on .assignment-switch-knob { transform: translateX(0.9rem); }
+
+/* Medium and below: the toolbar goes icon-only - the switch keeps its pill and
+   glyph, Export/Copy keep theirs, and the labels (still in the DOM for screen
+   readers) hide. One breakpoint, the same one the sidebar collapses at. */
+@media (max-width: 900px) {
+  .list-actions .button-label,
+  .assignment-switch-label { display: none; }
+  .list-actions .button { padding-left: .6rem; padding-right: .6rem; }
+}
+
+/* The "Assigned to" column: the owner as a quiet green staff tag (hovering shows
+   the email), muted "not yet assigned", or the duplicate tag. */
+.col-assigned { white-space: nowrap; }
+.tag-assigned {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #e7f4ec;
+  color: #1f6f4a;
+  border: 1px solid #bfe3cf;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* A duplicate order: excluded from staff performance, shown as a quiet tag so it
+   is obvious at a glance without shouting like the spam tint. */
+.tag-duplicate {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #fdf0e3;
+  color: #9a5b12;
+  border: 1px solid #f0d3ac;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* The staff picker: a searchable list in a modal, reusing the modal primitive. */
+.staff-picker { display: flex; flex-direction: column; gap: 0.6rem; }
+.staff-picker-list { display: flex; flex-direction: column; gap: 0.25rem; max-height: 50vh; overflow: auto; }
+.staff-picker-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem;
+  padding: 0.5rem 0.6rem; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; font: inherit; text-align: left; cursor: pointer;
+}
+.staff-picker-item:hover { background: var(--surface-2, #f4f6f8); border-color: var(--line, #d7dbe0); }
+/* The chosen person, inside the assign confirmation dialog. */
+.staff-picker-item.is-selected {
+  border-color: var(--accent, #2f6f4f);
+  background: var(--surface-2, #f4f6f8);
+  box-shadow: inset 0 0 0 1px var(--accent, #2f6f4f);
+}
+
+/* The highlighted "you are about to assign N orders to <name>" line. */
+.assign-confirm-highlight {
+  font-weight: 700;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  background: var(--surface-2, #f4f6f8);
+  border: 1px solid var(--line, #d7dbe0);
+}
+
+/* The snapshot of exactly which orders the assign will touch - reference and
+   customer, capped, with an honest "+N more" when the selection is larger. */
+.assign-snapshot { display: flex; flex-direction: column; }
+.assign-snapshot ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.assign-snapshot li { font-size: 0.85rem; }
+.assign-snapshot li.muted { font-size: 0.8rem; }

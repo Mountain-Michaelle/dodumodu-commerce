@@ -120,7 +120,7 @@ beforeEach(() => {
     current = { ...current!, ...patch };
     return current as never;
   };
-  ordersRepo.deleteById = async () => true;
+  ordersRepo.softDelete = async () => true;
   ordersRepo.listForAdmin = async () => ({ rows: [], total: 0 });
   ordersRepo.applyStatusTransition = async () => ({ applied: true, order: current as never });
   ordersRepo.findPotentialDuplicates = async () => [];
@@ -349,4 +349,25 @@ test("the testimonial list is paged server-side and reports page metadata", asyn
 test("an unbounded testimonial page size is refused like every other list", async () => {
   const res = await call("/admin/testimonials?pageSize=100000");
   assert.equal(res.status, 400);
+});
+
+/* ---- Assignment Mode ships dark, and the panel learns that from the list ---- */
+
+test("the orders list reports Assignment Mode off unless the env turns it on", async () => {
+  const res = await call("/admin/orders");
+  assert.equal(res.status, 200);
+  const body = await res.json() as { assignmentEnabled?: boolean };
+  assert.equal(body.assignmentEnabled, false, "default deployment: flag dark");
+});
+
+test("the flag rides the env, so Assignment Mode needs no deploy to switch on", async () => {
+  const res = await testApp.fetch(
+    new Request("http://localhost/admin/orders", {
+      headers: { [ACCESS_EMAIL_HEADER]: "owner@example.com" },
+    }),
+    { ...env, ASSIGNMENT_MODE_ENABLED: "true" } as unknown as Env as never,
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json() as { assignmentEnabled?: boolean };
+  assert.equal(body.assignmentEnabled, true);
 });

@@ -43,6 +43,7 @@ const env: Env = {
   ANALYTICS_IP_HMAC_SECRET: process.env.ANALYTICS_IP_HMAC_SECRET ?? "",
   ANALYTICS_IP_HMAC_VERSION: process.env.ANALYTICS_IP_HMAC_VERSION ?? "1",
   ANALYTICS_WARMUP_ENABLED: process.env.ANALYTICS_WARMUP_ENABLED ?? "false",
+  ASSIGNMENT_MODE_ENABLED: process.env.ASSIGNMENT_MODE_ENABLED ?? "false",
   RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: process.env.RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR ?? "5",
   // Admin limits are separate keyspaces from the customer ones. 600 reads is a
   // runaway-script backstop, not a speed limit: the console legitimately issues a

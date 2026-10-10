@@ -78,6 +78,18 @@ export const orderListFiltersSchema = z.object({
   categoryId: z.coerce.number().int().positive().optional(),
   from: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
   to: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
+  // Assignment (fulfilment routing). assignedTo is an operator email; unassigned
+  // is the assignment-mode view of orders with no owner. They are independent
+  // keys with "absence means no filter": if both are sent the two conditions
+  // AND together and simply match nothing, which is the truthful answer rather
+  // than a guess. The schema stays a plain object so orderListQuerySchema can
+  // still .extend() it.
+  assignedTo: z.string().trim().toLowerCase().max(320).optional(),
+  unassigned: z.enum(["true", "false"]).optional(),
+  // Soft-delete visibility. Absent = hide deleted (the normal list). "true"
+  // shows ONLY soft-deleted orders; "false" is the explicit default. The list
+  // query owns the rule so a deleted order is invisible unless asked for.
+  deleted: z.enum(["true", "false"]).optional(),
 });
 
 export type OrderListFiltersInput = z.infer<typeof orderListFiltersSchema>;

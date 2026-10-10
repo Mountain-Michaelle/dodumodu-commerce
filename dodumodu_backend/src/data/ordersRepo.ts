@@ -488,22 +488,28 @@ export const ordersRepo = {
   },
 
   /**
-   * Deletes one order and its status history.
-   *
-   * The history rows go first, explicitly, rather than relying on a cascade.
-   * order_status_history.order_id has no ON DELETE CASCADE (0000 created it long
-   * before deleting an order was a thing anyone could do), so without this the
-   * second statement fails on the foreign key and the order survives - which
-   * looks like a successful delete to the operator while nothing happened.
-   *
-   * order_status_history is small and bounded (one row per transition), so this
-   * is a plain indexed delete rather than a cascade worth depending on being
-   * present in every environment.
+   * Soft-deletes one order by stamping deleted_at. Reversible and non-
+   * destructive: the row, its status history and its payment record all survive,
+   * because a delivered order is the only evidence a parcel arrived and a hard
+   * DELETE would erase it. The list hides a soft-deleted order unless an
+   * operator filters for it (see buildOrderWhere). Idempotent: deleting an
+   * already-deleted order is a no-op that still reports success.
    */
-  async deleteById(db: Db, id: number): Promise<boolean> {
-    await db.delete(orderStatusHistory).where(eq(orderStatusHistory.orderId, id));
-    const deleted = await db.delete(orders).where(eq(orders.id, id)).returning();
+  async softDelete(db: Db, id: number): Promise<boolean> {
+    const deleted = await db.update(orders)
+      .set({ deletedAt: sql`now()` })
+      .where(and(eq(orders.id, id), sql`${orders.deletedAt} IS NULL`))
+      .returning();
     return deleted.length !== 0;
+  },
+
+  /** Restores a soft-deleted order (clears deleted_at). Idempotent. */
+  async restore(db: Db, id: number): Promise<boolean> {
+    const restored = await db.update(orders)
+      .set({ deletedAt: null })
+      .where(and(eq(orders.id, id), sql`${orders.deletedAt} IS NOT NULL`))
+      .returning();
+    return restored.length !== 0;
   },
 };
 // ---------------------------------------------------------------------------
@@ -530,6 +536,14 @@ export type OrderListFilters = {
   to: Date | null;
   productId: number | null;
   categoryId: number | null;
+  // Assignment (fulfilment routing). assignedTo = one staff member's orders;
+  // unassigned = the assignment-mode view of ownerless orders.
+  assignedTo: string | null;
+  unassigned: boolean;
+  // Soft-delete visibility. false (the default) hides deleted orders from the
+  // list; true shows ONLY deleted orders (the "Deleted" filter). Never both in
+  // one result - the WHERE enforces whichever is set.
+  deleted: boolean;
 };
 
 /**
@@ -551,6 +565,9 @@ export function filtersFromQuery(input: {
   categoryId?: number;
   from?: string;
   to?: string;
+  assignedTo?: string;
+  unassigned?: "true" | "false";
+  deleted?: "true" | "false";
 }): OrderListFilters {
   return {
     status: input.status ?? null,
@@ -561,6 +578,9 @@ export function filtersFromQuery(input: {
     categoryId: input.categoryId ?? null,
     from: input.from ? new Date(input.from + 'T00:00:00.000') : null,
     to: input.to ? new Date(input.to + 'T23:59:59.999') : null,
+    assignedTo: input.assignedTo ?? null,
+    unassigned: input.unassigned === "true",
+    deleted: input.deleted === "true",
   };
 }
 
@@ -627,6 +647,18 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
   // The only condition that reaches outside the orders table, and the reason the
   // count query has to repeat the joins rather than skip them.
   if (filters.categoryId) conditions.push(eq(products.categoryId, filters.categoryId));
+  // Assignment filters (fulfilment routing). assignedTo is one staff member's
+  // orders; unassigned is the assignment-mode view of ownerless orders. Both are
+  // direct half-open-safe equality/IS NULL on an indexed column - never a
+  // function on the column - so idx_orders_assigned_to serves them.
+  if (filters.assignedTo) conditions.push(eq(orders.assignedTo, filters.assignedTo));
+  if (filters.unassigned) conditions.push(sql`${orders.assignedTo} IS NULL`);
+  // Soft-delete visibility. Default (deleted=false) hides deleted orders from
+  // the list entirely; the explicit "Deleted" filter (deleted=true) shows ONLY
+  // them. This is why the list query, not the UI, owns the rule: a deleted order
+  // must be invisible unless an operator asks for it, and asking is one filter.
+  if (filters.deleted) conditions.push(sql`${orders.deletedAt} IS NOT NULL`);
+  else conditions.push(sql`${orders.deletedAt} IS NULL`);
 
   return conditions.length === 0 ? undefined : and(...conditions);
 }

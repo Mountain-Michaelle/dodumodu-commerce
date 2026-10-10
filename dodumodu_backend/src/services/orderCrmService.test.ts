@@ -104,7 +104,7 @@ function stub() {
     current = next;
     return next;
   };
-  ordersRepo.deleteById = async () => { current = null; return true; };
+  ordersRepo.softDelete = async () => { current = null; return true; };
 }
 stub();
 
