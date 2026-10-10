@@ -25,7 +25,7 @@ import { createPhraseReset, consumePhraseReset, grantStepup, listSessions,
   revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm,
   deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
-import { q1, sql } from "./sql";
+import { q, q1, sql } from "./sql";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { sha256, toHex, decryptSecret, totpMatch } from "./crypto";
 import { providerFor, sendLoginCode, sendInBackground } from "./email";
@@ -451,4 +451,65 @@ adminRoute.post("/users/:id/force-logout", async (c) => guarded(c, async () => {
   await forceLogout(s.db, target.id);
   return c.json({ ok: true });
 }));
+
+// --- Cleanup janitor (spec §5.10). Batched, safe (never an active lock or
+// session). Exposed as a cron-secret-guarded route so the SAME external
+// scheduler that drives reconcile can call it — no Cron Trigger assumed.
+const CLEAN_TASKS: Array<[string, string]> = [
+  ["flows", `delete from aa_auth_flows where id in (
+     select id from aa_auth_flows where expires_at < now() - interval '1 day'
+     order by expires_at limit $1) returning 1`],
+  ["sessions", `delete from aa_sessions where id_hash in (
+     select id_hash from aa_sessions where absolute_expires_at < now()
+     order by absolute_expires_at limit $1) returning 1`],
+  ["challenges", `delete from aa_login_challenges where user_id in (
+     select user_id from aa_login_challenges where expires_at < now() - interval '1 day'
+     limit $1) returning 1`],
+  ["throttle", `delete from aa_auth_throttle where key in (
+     select key from aa_auth_throttle
+      where last_fail_at < now() - interval '48 hours'
+        and (locked_until is null or locked_until < now())
+      limit $1) returning 1`],
+  ["resets", `delete from aa_phrase_resets where token_hash in (
+     select token_hash from aa_phrase_resets where expires_at < now() - interval '7 days'
+     limit $1) returning 1`],
+  ["devices", `delete from aa_admin_devices where id in (
+     select id from aa_admin_devices
+      where (status = 'revoked' and revoked_at < now() - interval '30 days')
+         or (status = 'pending' and pending_until < now() - interval '1 day')
+      limit $1) returning 1`],
+  ["invites", `delete from aa_device_invites where token_hash in (
+     select token_hash from aa_device_invites where expires_at < now() - interval '7 days'
+     limit $1) returning 1`],
+];
+
+/** Run every clean task in bounded batches until drained. Returns per-label counts. */
+export async function runCleanup(db: Db, batch = 500): Promise<Record<string, number>> {
+  const limit = Math.max(1, Math.min(5000, Math.floor(batch))); // server-controlled int
+  const out: Record<string, number> = {};
+  for (const [label, stmt] of CLEAN_TASKS) {
+    let total = 0;
+    for (;;) {
+      // The only variable is the batch size, an int we just clamped — safe to
+      // inline. Everything else in the statement is fixed.
+      const rows = await q<Record<string, unknown>>(db, sql.raw(stmt.replace("$1", String(limit))));
+      total += rows.length;
+      if (rows.length < limit) break;
+    }
+    out[label] = total;
+  }
+  return out;
+}
+
+// POST /admin-v2/internal/cleanup -> batched janitor, guarded by the shared
+// cron secret (same mechanism as reconcile; no Cron Trigger assumed).
+adminRoute.post("/internal/cleanup", async (c) => guarded(c, async () => {
+  const secret = c.req.header("x-cron-secret");
+  const expected = (c.env as unknown as { RECONCILE_CRON_SECRET?: string }).RECONCILE_CRON_SECRET;
+  if (!expected || secret !== expected) return c.json({ error: "Not found" }, 404);
+  const s = authInit(c);
+  const counts = await runCleanup(s.db, 500);
+  return c.json({ ok: true, counts });
+}));
+
 
