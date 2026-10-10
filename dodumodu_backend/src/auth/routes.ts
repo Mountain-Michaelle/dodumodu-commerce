@@ -28,7 +28,7 @@ import { tokenHashHex, emailTag } from "./keys";
 import { q, q1, sql } from "./sql";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { sha256, toHex, decryptSecret, totpMatch } from "./crypto";
-import { providerFor, sendLoginCode, sendInBackground } from "./email";
+import { providerForEnv, sendLoginCode, sendInBackground, testMailbox } from "./email";
 import { setFlowCookie, setSidCookie, setDidCookie, clearSidCookie, clearFlowCookie,
   getFlowToken } from "./ctx";
 import { loadFlow } from "./flows";
@@ -98,6 +98,21 @@ adminRoute.use("*", flagGate);
 adminRoute.use("*", originGuard);
 adminRoute.use("*", securityHeaders);
 
+// GET /auth/test/mailbox/:email -> last captured email for a recipient.
+// EXISTS ONLY when ALLOW_TEST_IP=1 (a .dev.vars-only var). Returns 404 otherwise,
+// so it is unreachable in any deployed config. Used by Playwright + attack tests
+// to read the emailed code without a real Resend call.
+authRoute.get("/test/mailbox/:email", (c) => {
+  if ((c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP !== "1") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const email = decodeURIComponent(c.req.param("email") ?? "").toLowerCase();
+  const mail = testMailbox.get(email);
+  if (!mail) return c.json({ error: "Not found" }, 404);
+  // The test extracts the code from text; we return the raw body only here.
+  return c.json({ to: email, subject: mail.subject, text: mail.text, at: mail.at });
+});
+
 // POST /auth/request {email} -> always 202 + flow cookie.
 authRoute.post("/request", async (c) => guarded(c, async () => {
   const s = authInit(c);
@@ -105,12 +120,12 @@ authRoute.post("/request", async (c) => guarded(c, async () => {
   const secrets = secretsOf(c);
   const out = await requestCode(s.db, secrets, email, s.ctx, s.deviceToken);
   if (out.sendCode) {
-    const provider = providerFor(secrets.resendApiKey);
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
     c.executionCtx?.waitUntil?.(
       sendLoginCode(provider, out.sendCode.to, out.sendCode.code).catch(() => {}));
   }
   if (out.sendDeniedAlert) {
-    const provider = providerFor(secrets.resendApiKey);
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
     sendInBackground(c as never, provider, out.sendDeniedAlert.to,
       "Sign-in attempt on an unrecognized device",
       "Someone just tried to sign in to your admin account from a device we do not recognize. " +
@@ -131,7 +146,7 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
   const secrets = secretsOf(c);
   const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken);
   if (out.sendCode) {
-    const provider = providerFor(secrets.resendApiKey);
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
     c.executionCtx?.waitUntil?.(
       sendLoginCode(provider, out.sendCode.to, out.sendCode.code).catch(() => {}));
   }

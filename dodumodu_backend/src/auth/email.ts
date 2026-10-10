@@ -41,8 +41,30 @@ export const nullProvider: EmailProvider = {
   async send() {},
 };
 
+/**
+ * In-memory mailbox for tests (spec §9/§10): keeps the last code per recipient
+ * so a Playwright/attack test can read it without a real Resend call. Only wired
+ * in when ALLOW_TEST_IP=1, and only read through a test-gated endpoint. Never
+ * used in production (no key + flag off => nullProvider).
+ */
+export const testMailbox = new Map<string, { subject: string; text: string; at: number }>();
+
+export const captureProvider: EmailProvider = {
+  async send(to, subject, text) {
+    testMailbox.set(to.toLowerCase(), { subject, text, at: Date.now() });
+  },
+};
+
 export function providerFor(apiKey: string | null, from = "auth@example.com"): EmailProvider {
   return apiKey ? resendProvider(apiKey, from) : nullProvider;
+}
+
+/** The provider the routes use: capture in tests, else Resend/null. */
+export function providerForEnv(
+  apiKey: string | null, allowTestIp: string | undefined, from = "auth@example.com",
+): EmailProvider {
+  if (allowTestIp === "1") return captureProvider;
+  return providerFor(apiKey, from);
 }
 
 /** Send inside waitUntil; never throws into the request path. */
