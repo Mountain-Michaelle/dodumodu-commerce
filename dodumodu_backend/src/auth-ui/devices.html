@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trusted devices</title>
+  <link rel="stylesheet" href="/auth-ui/auth.css" />
+</head>
+<body>
+  <main class="card">
+    <h1>Trusted devices</h1>
+    <p class="muted small">Admins only. Revoke a device to end its sessions at once.</p>
+    <div id="list" class="once"><span class="muted">Loading…</span></div>
+    <div class="links" style="margin-top:16px">
+      <button class="small-btn" id="invite" type="button">Add a device</button>
+      <a href="/auth-ui/login.html">Back</a>
+    </div>
+    <div id="invite-box" class="once" hidden></div>
+    <p class="note" id="note" hidden></p>
+  </main>
+  <script src="/auth-ui/devices.js" defer></script>
+</body>
+</html>

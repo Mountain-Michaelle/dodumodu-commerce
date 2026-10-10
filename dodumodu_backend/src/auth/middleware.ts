@@ -124,3 +124,21 @@ export async function requireStepUp(c: Context<{ Bindings: AuthEnv }>) {
   if (!s.stepupOk) throw new AuthForbiddenError("Step-up required");
   return s;
 }
+
+/**
+ * Security headers for the auth surface only (spec §5 middleware order). Scoped
+ * to /auth and /admin-v2 so no existing route is touched. CSP is same-origin
+ * with external script files only (no inline) — the UI is vanilla JS in
+ * src/auth-ui/**. nosniff + frame-deny close MIME-sniffing and clickjacking.
+ */
+export async function securityHeaders(c: Context<{ Bindings: AuthEnv }>, next: Next) {
+  await next();
+  const h = c.res.headers;
+  h.set("X-Content-Type-Options", "nosniff");
+  h.set("X-Frame-Options", "DENY");
+  h.set("Referrer-Policy", "no-referrer");
+  h.set("Content-Security-Policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; " +
+    "base-uri 'none'; object-src 'none'");
+}

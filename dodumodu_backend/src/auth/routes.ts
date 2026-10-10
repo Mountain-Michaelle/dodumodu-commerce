@@ -9,7 +9,7 @@ import { AuthRejectError, AuthLockedError, AuthServerFaultError,
   AuthUnauthorizedError, AuthForbiddenError } from "./errors";
 import type { AuthEnv } from "./middleware";
 import { flagGate, originGuard, authInit,
-  requireSession, requireAdmin, requireStepUp } from "./middleware";
+  requireSession, requireAdmin, requireStepUp, securityHeaders } from "./middleware";
 import { loadAuthSecrets } from "./secrets";
 import { FLOW_TTL_SECS, DEVICE_TTL_SECS, SESSION_ABSOLUTE_SECS, isV2Perm } from "./config";
 import { requestCode } from "./entry";
@@ -90,11 +90,13 @@ async function resolveUser(db: Db, idOrEmail: string): Promise<{ id: string; rol
 export const authRoute = new Hono<AppEnv>();
 export const adminRoute = new Hono<AppEnv>();
 
-// Order: flag, then origin/content-type guard for unsafe methods.
+// Order: flag, then origin/content-type guard for unsafe methods, then headers.
 authRoute.use("*", flagGate);
 authRoute.use("*", originGuard);
+authRoute.use("*", securityHeaders);
 adminRoute.use("*", flagGate);
 adminRoute.use("*", originGuard);
+adminRoute.use("*", securityHeaders);
 
 // POST /auth/request {email} -> always 202 + flow cookie.
 authRoute.post("/request", async (c) => guarded(c, async () => {
