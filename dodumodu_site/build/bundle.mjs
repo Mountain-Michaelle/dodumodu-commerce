@@ -421,18 +421,9 @@ async function main() {
   copyStaticFile("sitemap.xml", replacements);
   copyStaticFile("robots.txt", replacements);
 
-  // admin-auth v2 UI (additive; its own folder, external scripts, no inline).
-  // Copied verbatim from the backend source so the served origin is unchanged.
-  const authUiSrc = join(siteRoot, "..", "dodumodu_backend", "src", "auth-ui");
-  if (existsSync(authUiSrc)) {
-    const authUiDst = join(distDir, "auth-ui");
-    mkdirSync(authUiDst, { recursive: true });
-    for (const f of readdirSync(authUiSrc)) {
-      const src = join(authUiSrc, f);
-      if (statSync(src).isFile()) copyFileSync(src, join(authUiDst, f));
-    }
-    console.log("  auth-ui/ (login, sessions, devices)");
-  }
+  // admin-auth v2 UI is served from the backend source (src/auth-ui) behind the
+  // server-side admin guard (/admin/sign-in/, /admin/assets/*). It is NOT
+  // copied to dist (no /auth-ui/ route) — see currentwork.md step C.
 
   emitHeaders();
 

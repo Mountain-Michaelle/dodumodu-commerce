@@ -59,8 +59,7 @@ export function mountMedia(app: App, mediaRoot: string): void {
  * is a single origin on a single port: no CORS to configure, no second server
  * to keep running, and the frontend's API_BASE can simply be empty.
  */
-export function mountStatic(app: App, distRoot: string, homePath = "/products/glow-serum/"): void {
-  const root = resolve(distRoot);
+export function mountStatic(app: App, distRoot: string, homePath = "/products/glow-serum/"): void {  const root = resolve(distRoot);
 
   const serveFile = (c: Context, urlPath: string) => {
     const relative = urlPath.replace(/^\/+/, "");
@@ -78,11 +77,55 @@ export function mountStatic(app: App, distRoot: string, homePath = "/products/gl
   };
 
   app.get("/", (c) => serveFile(c, homePath));
+  app.get("/", (c) => serveFile(c, homePath));
   // Registered last, so every API route above wins its own path first.
   app.get("*", (c) => {
     const requested = c.req.path;
     // A traversal attempt is rejected before the fallback is even considered.
     if (!resolveWithinRoot(root, requested.replace(/^\/+/, ""))) return c.text("Not found", 404);
     return serveFile(c, requested);
+  });
+}
+
+/**
+ * Guarded static files for the admin console (currentwork.md step A).
+ *
+ * Same resolution semantics as mountStatic (traversal-safe, clean-URL
+ * index.html, immutable hashed bundles), but each request first passes an
+ * async guard. Guard fail => 302 to /admin/sign-in/ for document navigations
+ * (HTML), 401 JSON for XHR/fetch asset loads — so an unauthenticated browser
+ * can never receive admin page bytes, with or without JavaScript.
+ */
+export function mountGuardedStatic(
+  app: App,
+  distRoot: string,
+  guard: (c: Context) => Promise<boolean>,
+  loginPath = "/admin/sign-in/",
+): void {
+  const root = resolve(distRoot);
+
+  const serveResolved = (c: Context, urlPath: string) => {
+    const relative = urlPath.replace(/^\/+/, "");
+    const candidates =
+      relative === "" || relative.endsWith("/")
+        ? [`${relative}index.html`]
+        : [relative, `${relative}/index.html`];
+    for (const candidate of candidates) {
+      const file = resolveMediaPath(root, candidate);
+      if (file) return fileResponse(c, file, cacheControlFor(urlPath));
+    }
+    return c.text("Not found", 404);
+  };
+
+  app.get("*", async (c) => {
+    const ok = await guard(c);
+    if (!ok) {
+      const accept = c.req.header("Accept") ?? "";
+      if (accept.includes("text/html")) return c.redirect(loginPath, 302);
+      return c.json({ error: "Sign in to use the admin" }, 401);
+    }
+    const requested = c.req.path;
+    if (!resolveWithinRoot(root, requested.replace(/^\/+/, ""))) return c.text("Not found", 404);
+    return serveResolved(c, requested);
   });
 }
