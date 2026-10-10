@@ -33,7 +33,7 @@ function referenceLabel(ref) {
 const IMAGE_BASE = (typeof window !== "undefined" && window.IMAGE_DELIVERY_BASE) || "/media";
 
 export function mediaView({ shell, identity }) {
-  const state = { page: 1, pageSize: 50, q: "", filter: "all" };
+  const state = { page: 1, pageSize: 50, q: "", filter: "" };
   let host;
   let ui;
 
@@ -157,12 +157,13 @@ export function mediaView({ shell, identity }) {
         }),
         adminFilters({
           value: { filter: state.filter },
+          // "" (the primitive's own first option) is the no-filter state; a view
+          // default of "all" would read as applied and show Clear filters on load.
           filters: [{ key: "filter", label: "Show", options: [
-            { value: "all", label: "All" },
             { value: "unattached", label: "Never attached" },
             { value: "unused", label: "Not referenced" },
           ] }],
-          onChange: (next) => { state.filter = next.filter || "all"; state.page = 1; load(); },
+          onChange: (next) => { state.filter = next.filter || ""; state.page = 1; load(); },
         }));
       load();
     },

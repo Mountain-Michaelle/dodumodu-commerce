@@ -631,8 +631,8 @@ ok("order-success: a failed order is not reset, so the customer keeps their deta
 /* The reference is generated in one repo and read off the page in the other, and
    the webhook has to find it again whatever case the payment provider echoes. */
 const orderServiceSource = backend("services/orderService.ts");
-ok("reference: the server writes it in lowercase",
-  /return `ord-\$\{/.test(orderServiceSource) && !/toUpperCase\(\)/.test(orderServiceSource));
+ok("reference: the server writes it in ddmd- lowercase hex form",
+  /return `ddmd-\$\{/.test(orderServiceSource) && !/toUpperCase\(\)/.test(orderServiceSource));
 ok("reference: the webhook's lookup folds case, or paid orders are never marked paid",
   /lower\(\$\{orders\.reference\}\)\s*=\s*lower\(\$\{reference\}\)/.test(backend("data/ordersRepo.ts")));
 const thankYou = readFileSync(new URL("../thank-you.html", import.meta.url), "utf8");

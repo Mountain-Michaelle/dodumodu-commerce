@@ -16,7 +16,7 @@ import {
 // a worse experience than "you pressed delete, and here is why not".
 
 export function categoriesView({ shell, identity }) {
-  const state = { page: 1, pageSize: 50, q: "", filter: "all", selected: new Set() };
+  const state = { page: 1, pageSize: 50, q: "", filter: "", selected: new Set() };
   let host;
   let ui;
   let parents = [];
@@ -294,13 +294,15 @@ export function categoriesView({ shell, identity }) {
         }),
         adminFilters({
           value: { filter: state.filter },
+          // The first option is the primitive's own ""/All entry, not a value of
+          // "all": a view-level no-op value counts as an applied filter and makes
+          // "Clear filters" appear on a list nothing is filtered.
           filters: [{ key: "filter", label: "Show", options: [
-            { value: "all", label: "All" },
             { value: "roots", label: "Top level only" },
             { value: "active", label: "Active only" },
             { value: "unused", label: "No products" },
           ] }],
-          onChange: (next) => { state.filter = next.filter || "all"; state.page = 1; load(); },
+          onChange: (next) => { state.filter = next.filter || ""; state.page = 1; load(); },
         }));
       load();
     },

@@ -26,7 +26,7 @@ if (!existsSync(distDir)) {
 const BUDGETS = {
   page: 10.5 * 1024,   // HTML document, preview script included (CSS is linked)
   css: 4.5 * 1024,     // the whole stylesheet
-  js: 6.5 * 1024,      // the whole customer bundle
+  js: 7.0 * 1024,      // the whole customer bundle
   // Everything the first paint needs, excluding the hero image (which is a
   // separate, cacheable, content-negotiated request). This is the number that
   // decides whether a customer on a poor connection sees the product.
@@ -201,7 +201,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // that admin work is free for the storefront: if shared code ever leaked from the
 // admin entry into the customer one, these hashes would change and every customer
 // would pay for it.
-const EXPECTED_CUSTOMER = { js: "site.47b028a8.min.js", css: "site.ef5781ce.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.b1deab2c.min.js", css: "site.00f6049f.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

@@ -11,6 +11,11 @@ import { ConflictError, NotFoundError, ValidationError } from "../shared/httpErr
 
 const db = {} as Db;
 
+// Every query is unreachable: a rule that runs BEFORE any read must fail here
+// with its own error, not with a database one. Reaching the database in these
+// tests would mean the guard was skipped.
+const unreachableDb = new Proxy({}, { get() { throw new Error("no query should be reached"); } }) as never;
+
 function order(over: Partial<OrderRow> = {}): OrderRow {
   return {
     id: 1,
@@ -338,4 +343,19 @@ test("a bulk action reports what it skipped, rather than failing the whole batch
 test("a bulk action over no ids does nothing rather than erroring", async () => {
   const result = await orderCrmService.bulkAction(db, [], "deliver", "admin@x.test");
   assert.deepEqual(result, { updated: [], skipped: [], errors: [] });
+});
+
+/* ---- cancellation reason is the service's own contract ---- */
+
+test("the service refuses a cancellation without a meaningful reason before touching the database", async () => {
+  // The route schema is the first gate; this is the second, for any future
+  // caller that reaches the service directly. It must fail on the REASON - a
+  // database error here would mean the guard never ran.
+  for (const reason of ["", "   ", "no"]) {
+    await assert.rejects(
+      () => orderCrmService.cancel(unreachableDb, 1, null, "admin@x.test", reason),
+      (err: unknown) => err instanceof ValidationError && /12 characters/.test((err as Error).message),
+      `reason=${JSON.stringify(reason)} must be refused by the service itself`,
+    );
+  }
 });

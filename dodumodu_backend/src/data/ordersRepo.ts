@@ -1,6 +1,7 @@
 import { eq, and, asc, sql, like, lt, lte, gte, ne, inArray, or, desc, count, type SQL } from "drizzle-orm";
 import type { Db } from "../db";
 import { categories, orders, orderStatusHistory, products } from "../schema";
+import { updatedAtBucketCondition } from "../shared/versionGuard";
 
 // §5.4b — the only transitions legal in V1. Checked here, not trusted from callers.
 // Phase 7a additions: cancelled and not_picking are terminal except for reversal,
@@ -21,8 +22,10 @@ function updatedAtVersionCondition(expectedUpdatedAt: Date): SQL {
   // PostgreSQL timestamps retain microseconds, while Date/JSON preserve only
   // milliseconds. Match the millisecond bucket sent to the browser instead of
   // comparing against a timestamp whose remaining precision was truncated.
-  const nextMillisecond = new Date(expectedUpdatedAt.getTime() + 1);
-  return sql`${orders.updatedAt} >= ${expectedUpdatedAt} AND ${orders.updatedAt} < ${nextMillisecond}`;
+  // The bucket binds naive wall-clock strings rather than this Date directly —
+  // see shared/versionGuard for why a Date parameter lands hours away from the
+  // stored value and turned every guarded write into a spurious conflict.
+  return updatedAtBucketCondition(orders.updatedAt, expectedUpdatedAt);
 }
 
 export const ordersRepo = {

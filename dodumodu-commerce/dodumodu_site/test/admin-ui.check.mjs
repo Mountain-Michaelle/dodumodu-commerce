@@ -58,6 +58,7 @@ Object.defineProperty(globalThis, "CSS", {
 
 const { el, mount } = await import("../shared/scripts/admin/dom.js");
 const { statusBadge, actionMenu, adminTable, resultCount } = await import("../shared/scripts/admin/ui.js");
+const { buildXlsx, crc32 } = await import("../shared/scripts/admin/xlsx.js");
 
 /* ---- the security property ---- */
 
@@ -129,6 +130,72 @@ ok("resultCount says 0 records rather than nothing at all",
 ok("resultCount reports the page when there is more than one",
   resultCount({ page: { total: 95, totalPages: 5, page: 2, pageSize: 20 } }).textContent.includes("page 2 of 5"));
 
+/* ---- the xlsx writer produces a file a spreadsheet will actually open ---- */
+
+// A minimal ZIP reader: walk the end-of-central-directory record, then the
+// central directory, and pull each STORED entry back out. Re-implemented HERE
+// rather than imported from the module under test, because a writer bug and a
+// reader bug only cancel each other out when they are independent.
+function unzip(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i -= 1) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("no end-of-central-directory record");
+  const count = view.getUint16(eocd + 10, true);
+  let at = view.getUint32(eocd + 16, true);
+  const entries = {};
+  for (let i = 0; i < count; i += 1) {
+    if (view.getUint32(at, true) !== 0x02014b50) throw new Error(`bad central header at ${at}`);
+    const method = view.getUint16(at + 10, true);
+    const expectedCrc = view.getUint32(at + 16, true);
+    const size = view.getUint32(at + 20, true);
+    const nameLen = view.getUint16(at + 28, true);
+    const localOffset = view.getUint32(at + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLen));
+    if (method !== 0) throw new Error(`${name}: expected a STORED entry`);
+    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error(`${name}: bad local header`);
+    const dataStart = localOffset + 30 + view.getUint16(localOffset + 26, true)
+      + view.getUint16(localOffset + 28, true);
+    const data = bytes.subarray(dataStart, dataStart + size);
+    if (crc32(data) !== expectedCrc) throw new Error(`${name}: CRC mismatch`);
+    entries[name] = data;
+    at += 46 + nameLen;
+  }
+  return entries;
+}
+
+const OOXML_PARTS = ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml",
+  "xl/_rels/workbook.xml.rels", "xl/worksheets/sheet1.xml"];
+
+ok("crc32 matches the published IEEE vector",
+  crc32(new TextEncoder().encode("123456789")) === 0xCBF43926,
+  `got ${crc32(new TextEncoder().encode("123456789"))}`);
+
+const sampleXlsx = buildXlsx([
+  ["Order ID", "Name", "Address"],
+  ["ord-abc-12345678", 'O"Brien & <Son>', "12 Allen Ave, Ikeja"],
+]);
+ok("buildXlsx starts with the ZIP local-header signature",
+  sampleXlsx[0] === 0x50 && sampleXlsx[1] === 0x4B && sampleXlsx[2] === 0x03 && sampleXlsx[3] === 0x04,
+  `got ${[...sampleXlsx.slice(0, 4)].map((b) => b.toString(16)).join(" ")}`);
+
+// unzip() THROWS on a bad signature, a non-stored entry or a CRC mismatch, so
+// reaching these assertions already proves the archive is well-formed.
+const sampleFiles = unzip(sampleXlsx);
+ok("all five OOXML parts are present and every CRC verifies",
+  OOXML_PARTS.every((part) => part in sampleFiles),
+  Object.keys(sampleFiles).join(", "));
+const sampleSheet = new TextDecoder().decode(sampleFiles["xl/worksheets/sheet1.xml"]);
+ok("cell text lands in the sheet as inline strings",
+  sampleSheet.includes("ord-abc-12345678") && sampleSheet.includes("12 Allen Ave, Ikeja"));
+ok("XML metacharacters are escaped rather than passed through",
+  sampleSheet.includes("O&quot;Brien &amp; &lt;Son&gt;") && !sampleSheet.includes("<Son>"),
+  sampleSheet.slice(0, 300));
+ok("an empty matrix still yields a complete archive, not an empty one",
+  OOXML_PARTS.every((part) => part in unzip(buildXlsx([]))));
+
 /* ---- every navigation entry boots and shows its own content ---- */
 
 // The bug this section exists for: the shell drew and every panel was blank,
@@ -146,9 +213,12 @@ function jsonResponse(body) {
 const PAGE = { page: 1, pageSize: 50, total: 1, totalPages: 1, hasNext: false, hasPrev: false };
 const STUB = {
   "/admin/me": { email: "owner@example.com", permissions: ["orders:read", "orders:write", "orders:delete", "orders:payment-override", "categories:read", "categories:write", "products:read", "products:write", "media:read", "media:write", "settings:write"] },
-  "/admin/orders": { orders: [{ id: 1, reference: "ord-abc-12345678", createdAt: "2026-01-01T10:00:00Z", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", categoryName: "Skin", quantity: 1, unitPrice: 100, subtotal: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "paid", deliveredAt: null, updatedAt: "2026-01-01T10:00:00Z", actions: ["deliver", "cancel", "mark-not-picking"] }], page: PAGE },
-  "/admin/orders/csv": { csv: "id,reference\n1,ord-abc-12345678" },
-  "/admin/orders/1": { order: { id: 1, reference: "ord-abc-12345678", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", quantity: 1, unitPrice: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "cancelled", deliveredAt: null, createdAt: "2026-01-01T10:00:00Z", updatedAt: "2026-01-01T10:00:00Z", actions: ["revert-cancel"] }, history: [] },
+  "/admin/orders": { orders: [
+    { id: 1, reference: "ddmd-a1b2c3d4e5f6071", createdAt: "2026-01-01T10:00:00Z", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", categoryName: "Skin", quantity: 1, unitPrice: 100, subtotal: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "paid", deliveredAt: null, updatedAt: "2026-01-01T10:00:00Z", actions: ["deliver", "cancel", "mark-not-picking"] },
+    { id: 2, reference: "ddmd-e5f60718a1b2c3d", createdAt: "2026-01-02T09:30:00Z", customerName: "Adaeze", phone: "07098765432", whatsapp: "07098765432", address: "5 Ogudu Road", state: "Lagos", productName: "Serum", productSlug: "serum", categoryName: "Skin", quantity: 3, unitPrice: 100, subtotal: 300, discountPercent: 0, discountAmount: 0, amount: 300, currency: "NGN", paymentMethod: "transfer", status: "paid", deliveredAt: null, updatedAt: "2026-01-02T09:30:00Z", actions: ["deliver", "cancel", "mark-not-picking"] },
+  ], page: { ...PAGE, total: 2 } },
+  "/admin/orders/csv": { csv: "id,reference\n1,ddmd-a1b2c3d4e5f6071" },
+  "/admin/orders/1": { order: { id: 1, reference: "ddmd-a1b2c3d4e5f6071", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", quantity: 1, unitPrice: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "cancelled", deliveredAt: null, createdAt: "2026-01-01T10:00:00Z", updatedAt: "2026-01-01T10:00:00Z", actions: ["revert-cancel"] }, history: [] },
   "/admin/categories": { categories: [{ id: 1, name: "Skin Cares", slug: "skin-cares", productCount: 1, sortOrder: 0, isActive: true, mediaR2Key: "", updatedAt: "2026-01-01T10:00:00Z" }], page: PAGE },
   "/admin/categories/tree": { tree: [{ id: 1, name: "Skin Cares", children: [] }] },
   "/admin/products": { products: [{ id: 1, slug: "glow", name: "Glow", price: 100, active: true, categoryId: 1, categoryName: "Skin Cares", updatedAt: "2026-01-01T10:00:00Z" }], page: PAGE },
@@ -183,10 +253,26 @@ const STUB = {
     collectionUnavailableReason: "Collected cash is unavailable without a persisted collection record.",
     deliveryTimingNote: "Legacy delivery times may be approximate.",
   },
+  "/admin/reports/visitors": {
+    trackingStartedOn: "2026-09-30",
+    today: "2026-10-09",
+    dailyRange: { from: "2026-09-30", to: "2026-10-09" },
+    daily: [
+      { date: "2026-10-07", visitors: 1 },
+      { date: "2026-10-08", visitors: 3 },
+      { date: "2026-10-09", visitors: 2 },
+    ],
+    monthly: [{ month: "2026-09", visitors: 6 }, { month: "2026-10", visitors: 9 }],
+    yearly: [{ year: 2026, visitors: 11, complete: false, current: true }],
+    geographyApproximate: true,
+    geography: [{ country: "NG", region: "Lagos", visitorDays: 12 }],
+    notice: "Distinct visitor counts are not additive across days, months or years.",
+  },
 };
 
 const requested = [];
 const requestedUrls = [];
+const posted = [];
 let reportDelay = 0;
 // Defined once as a factory, because `fetch` must be installed on EACH window the
 // bundle runs in. Setting it on globalThis is not enough: the bundle is evaluated
@@ -195,11 +281,18 @@ let reportDelay = 0;
 // real fetch, which produced an HTML body, which failed JSON.parse, which surfaced
 // as "b.text is not a function" — a failure in the harness wearing the costume of
 // a bug in the console.
-const stubFetch = () => async (input) => {
+const stubFetch = () => async (input, init) => {
   const url = String(input);
   const path = url.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
   requested.push(path);
   requestedUrls.push(url);
+  // Request BODIES are recorded too, because "the reason is sent" is only
+  // provable by seeing it on the wire - a dialog that collects text and posts
+  // nothing would otherwise look identical to one that works.
+  if (init && typeof init.body === "string") {
+    try { posted.push({ path, body: JSON.parse(init.body) }); }
+    catch { posted.push({ path, body: null }); }
+  }
   if (path === "/admin/reports/monthly-kpis" && reportDelay > 0) {
     await new Promise((resolve) => setTimeout(resolve, reportDelay));
   }
@@ -231,6 +324,12 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
   // The bundle resolves `fetch` against THIS window, so it has to be installed here
   // and not merely on globalThis.
   page.window.fetch = stubFetch();
+  // jsdom implements neither TextEncoder nor TextDecoder; every browser has had
+  // both for years and the xlsx writer encodes UTF-8 with the platform one.
+  // Node's implementation is spec-identical, so it stands in here rather than
+  // the writer growing a bespoke encoder to satisfy the test DOM.
+  page.window.TextEncoder ??= globalThis.TextEncoder;
+  page.window.TextDecoder ??= globalThis.TextDecoder;
   for (const key of ["window", "document", "Node", "navigator", "location", "getComputedStyle"]) {
     Object.defineProperty(globalThis, key, { value: key === "window" ? page.window : key === "document" ? page.window.document : page.window[key], configurable: true, writable: true });
   }
@@ -263,6 +362,48 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("reversal actions stay out of the row action dropdown",
       !menuText.includes("Revert"));
 
+    /* ---- cancel must record WHY ---- */
+    const cancelItem = [...main.querySelectorAll(".action-menu button, .action-menu [role='menuitem'], .action-menu li")]
+      .find((node) => node.textContent.trim() === "Cancel order");
+    ok("the Cancel order menu item is clickable", Boolean(cancelItem),
+      `menu was: ${main.querySelector(".action-menu")?.textContent}`);
+    cancelItem?.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const cancelDialog = [...page.window.document.querySelectorAll(".dialog")]
+      .find((d) => d.textContent.includes("Cancel this order?"));
+    ok("Cancel opens a dialog with a required reason box", Boolean(cancelDialog?.querySelector("textarea")),
+      "no reason dialog appeared");
+    const cancelConfirm = [...(cancelDialog?.querySelectorAll("button") || [])]
+      .find((b) => b.textContent.trim() === "Cancel order");
+    ok("confirm is disabled while the reason box is empty", cancelConfirm?.disabled === true,
+      `disabled=${cancelConfirm?.disabled}`);
+
+    const reasonBox = cancelDialog?.querySelector("textarea");
+    if (reasonBox && cancelConfirm) {
+      reasonBox.dispatchEvent(new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      ok("Enter in the reason box does not submit or close the dialog",
+        !page.window.document.querySelector(".dialog") === false
+        && posted.every((p) => p.path !== "/admin/orders/1/cancel"));
+
+      reasonBox.value = "Customer asked to stop the order";
+      reasonBox.dispatchEvent(new page.window.Event("input", { bubbles: true }));
+      ok("a real reason enables the confirm button", cancelConfirm.disabled === false,
+        `disabled=${cancelConfirm.disabled}`);
+
+      cancelConfirm.click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const cancelPost = posted.find((p) => p.path === "/admin/orders/1/cancel");
+      ok("the cancel request carries the trimmed reason",
+        cancelPost?.body?.reason === "Customer asked to stop the order",
+        `posted=${JSON.stringify(posted)}`);
+      ok("the cancel dialog closes after success",
+        ![...page.window.document.querySelectorAll(".dialog")]
+          .some((d) => d.textContent.includes("Cancel this order?")));
+    } else {
+      ok("cancel dialog has a reason box and confirm button", false);
+    }
+
     main.querySelector("tbody tr")?.click();
     await new Promise((resolve) => setTimeout(resolve, 30));
     const detailActions = page.window.document.querySelector(".detail-actions");
@@ -272,6 +413,200 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
       detailActionLabels.includes("Revert"));
     ok("the detail modal does not offer forward cancellation or Not Picking actions",
       !detailActionLabels.includes("Cancel order") && !detailActionLabels.includes("Mark Not Picking"));
+
+    /* ---- the filter bar keeps every filter the operator picks ---- */
+    // The controls are built ONCE, so a pick used to spread the build-time
+    // snapshot and drop the other filters from the request while the other
+    // selects kept displaying them. Each change fires its own request, so the
+    // LAST orders URL is the one that proves what was actually sent.
+    const orderFilterSelects = [...main.querySelectorAll(".filters select")];
+    ok("the orders filter bar renders its three filters", orderFilterSelects.length === 3,
+      `found ${orderFilterSelects.length}`);
+    const [ordersStatusPick, , ordersPaymentPick] = orderFilterSelects;
+    ordersStatusPick.value = "delivered";
+    ordersStatusPick.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    ordersPaymentPick.value = "cod";
+    ordersPaymentPick.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const filteredOrdersUrl = requestedUrls.filter((url) => url.startsWith("/admin/orders?")).pop() || "";
+    ok("a second filter change sends BOTH filters to the API",
+      filteredOrdersUrl.includes("status=delivered") && filteredOrdersUrl.includes("paymentMethod=cod"),
+      `last orders request: ${filteredOrdersUrl}`);
+    ok("the status select still shows the operator's choice", ordersStatusPick.value === "delivered");
+
+    /* ---- selection: a tick must SURVIVE its own re-render ---- */
+    // The bug: render() began with state.selected.clear(), and a checkbox's
+    // onchange re-renders - so ticking erased itself one frame later and the
+    // bulk bar (gated on state.selected.size) could never appear at all.
+    const tickBoxes = () => [...main.querySelectorAll("tbody input[type=checkbox]")];
+    ok("every order row renders a checkbox", tickBoxes().length === 2,
+      `found ${tickBoxes().length}`);
+    tickBoxes()[0].checked = true;
+    tickBoxes()[0].dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok("a ticked box is still ticked after the re-render",
+      tickBoxes()[0]?.checked === true, `checked: ${tickBoxes()[0]?.checked}`);
+    ok("the bulk bar appears with 1 selected",
+      main.querySelector(".bulk-bar .bulk-count")?.textContent === "1 selected",
+      `got: ${main.querySelector(".bulk-bar .bulk-count")?.textContent}`);
+    tickBoxes()[1].checked = true;
+    tickBoxes()[1].dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok("a second tick counts up - the first selection survived",
+      main.querySelector(".bulk-bar .bulk-count")?.textContent === "2 selected",
+      `got: ${main.querySelector(".bulk-bar .bulk-count")?.textContent}`);
+
+    // A new result set arrives on a filter change; rows the operator can no
+    // longer see must not stay selected.
+    ordersStatusPick.value = "paid";
+    ordersStatusPick.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok("a filter change clears the selection with the old result set",
+      main.querySelector(".bulk-bar") === null && !tickBoxes().some((box) => box.checked),
+      `bulk bar present: ${Boolean(main.querySelector(".bulk-bar"))}`);
+
+    /* ---- selection-aware export/copy: ticked rows win, else the page ---- */
+    tickBoxes()[0].checked = true;
+    tickBoxes()[0].dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const bulkLabels = [...main.querySelectorAll(".bulk-bar button")]
+      .map((button) => button.textContent.trim());
+    ok("the bulk bar offers export and copy of exactly the selection",
+      bulkLabels.includes("Export (.xlsx)") && bulkLabels.includes("Copy as text"),
+      bulkLabels.join(" | "));
+    const pageButtons = [...main.querySelectorAll(".list-actions button")]
+      .map((button) => button.textContent.trim());
+    ok("the page export/copy buttons switch to the selection when rows are ticked",
+      pageButtons.includes("Export selected (.xlsx)") && pageButtons.includes("Copy selected as text"),
+      pageButtons.join(" | "));
+    // Back to unselected so the page-level export assertions below start clean.
+    main.querySelector(".bulk-bar .button-link")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok("clearing the selection restores the page-level buttons",
+      [...main.querySelectorAll(".list-actions button")]
+        .some((button) => button.textContent.trim() === "Export page (.xlsx)"),
+      [...main.querySelectorAll(".list-actions button")].map((b) => b.textContent.trim()).join(" | "));
+
+    /* ---- export: ONE column list, .xlsx file AND tab-separated copy ---- */
+
+    // Everything the writer touches is intercepted at its seam: Blob captures
+    // the raw bytes as built, createObjectURL never has to produce a real URL,
+    // and the anchor's click records the filename instead of navigating jsdom.
+    const downloads = [];
+    const blobParts = [];
+    const blobOptions = [];
+    const SavedBlob = page.window.Blob;
+    page.window.Blob = function CapturingBlob(parts, options) {
+      blobParts.push(parts);
+      blobOptions.push(options);
+      return new SavedBlob(parts, options);
+    };
+    page.window.URL.createObjectURL = () => "blob:orders-test";
+    page.window.URL.revokeObjectURL = () => {};
+    const savedAnchorClick = page.window.HTMLAnchorElement.prototype.click;
+    page.window.HTMLAnchorElement.prototype.click = function record() {
+      downloads.push({ name: this.getAttribute("download"), href: this.getAttribute("href") });
+    };
+    const savedExecCommand = document.execCommand;
+    let clipboardText = null;
+    document.execCommand = (command) => {
+      if (command !== "copy") return false;
+      clipboardText = document.querySelector("body > textarea[readonly]")?.value ?? null;
+      return true;
+    };
+
+    const EXPORT_HEADERS = ["Order ID", "Date", "Name", "Phone", "WhatsApp", "Product / Qty", "Address", "Status"];
+    const exportPage = [...main.querySelectorAll("button")]
+      .find((button) => button.textContent.trim() === "Export page (.xlsx)");
+    ok("the orders list offers an .xlsx export", Boolean(exportPage));
+    exportPage?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok("the export downloads a file named for the day",
+      downloads.length === 1 && /^orders-\d{4}-\d{2}-\d{2}\.xlsx$/.test(downloads[0]?.name || ""),
+      JSON.stringify(downloads));
+    ok("the downloaded object is an OOXML spreadsheet blob",
+      blobOptions[0]?.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      `type: ${blobOptions[0]?.type}`);
+    const exportedBytes = blobParts[0]?.[0];
+    // ArrayBuffer.isView, not instanceof: the bundle builds its bytes inside the
+    // jsdom realm, whose Uint8Array is a DIFFERENT intrinsic from Node's - the
+    // signature below is the real assertion, the view check only rules out a
+    // plain array that would have slipped past it.
+    ok("the exported bytes start with the ZIP signature",
+      ArrayBuffer.isView(exportedBytes)
+        && exportedBytes[0] === 0x50 && exportedBytes[1] === 0x4B,
+      `first bytes: ${exportedBytes && [...exportedBytes.slice(0, 4)].join(",")}`);
+    const exportedFiles = unzip(exportedBytes);
+    ok("the export contains all five OOXML parts",
+      OOXML_PARTS.every((part) => part in exportedFiles),
+      Object.keys(exportedFiles).join(", "));
+    const exportedSheet = new TextDecoder().decode(exportedFiles["xl/worksheets/sheet1.xml"]);
+    ok("the export carries exactly the eight informational columns",
+      EXPORT_HEADERS.every((header) => exportedSheet.includes(`>${header}</t>`)),
+      EXPORT_HEADERS.filter((header) => !exportedSheet.includes(`>${header}</t>`)).join(", "));
+    ok("both rows' information is in the sheet",
+      ["ddmd-a1b2c3d4e5f6071", "Chioma", "08012345678", "12 Allen Ave", "Glow ×1", "Jan",
+        "ddmd-e5f60718a1b2c3d", "Adaeze", "Serum ×3", "paid"]
+        .every((value) => exportedSheet.includes(value)),
+      ["ddmd-a1b2c3d4e5f6071", "Chioma", "08012345678", "12 Allen Ave", "Glow ×1", "Jan",
+        "ddmd-e5f60718a1b2c3d", "Adaeze", "Serum ×3", "paid"]
+        .filter((value) => !exportedSheet.includes(value)).join(", "));
+    ok("the dropped columns stayed dropped",
+      ["unitPrice", "amount", "currency", "productSlug", "kobo"]
+        .every((dropped) => !exportedSheet.includes(`>${dropped}</t>`)),
+      ["unitPrice", "amount", "currency", "productSlug", "kobo"]
+        .filter((dropped) => exportedSheet.includes(`>${dropped}</t>`)).join(", "));
+
+    const copyPage = [...main.querySelectorAll("button")]
+      .find((button) => button.textContent.trim() === "Copy page as text");
+    ok("the orders list offers a paste-ready text copy", Boolean(copyPage));
+    copyPage?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const copiedLines = (clipboardText || "").split("\n");
+    ok("the text copy is tab-separated with the same eight columns",
+      copiedLines[0] === EXPORT_HEADERS.join("\t"),
+      `got: ${JSON.stringify(copiedLines[0])}`);
+    ok("each order is one pasteable line",
+      copiedLines.length === 3
+        && copiedLines[1].startsWith("ddmd-a1b2c3d4e5f6071\t")
+        && copiedLines[1].includes("\tChioma\t")
+        && copiedLines[2].startsWith("ddmd-e5f60718a1b2c3d\t")
+        && copiedLines[2].includes("\tAdaeze\t"),
+      `got ${copiedLines.length} lines: ${JSON.stringify(copiedLines)}`);
+
+    // The row menu offers the SAME column list for one order.
+    main.querySelector(".action-menu-trigger")?.click();
+    const rowMenuLabels = [...main.querySelectorAll(".action-menu button")]
+      .map((button) => button.textContent.trim());
+    ok("the row menu offers the per-order export and text copy",
+      rowMenuLabels.includes("Export order (.xlsx)") && rowMenuLabels.includes("Copy order as text"),
+      rowMenuLabels.join(" | "));
+    [...main.querySelectorAll(".action-menu button")]
+      .find((button) => button.textContent.trim() === "Export order (.xlsx)")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ok("the row export downloads one order under its reference",
+      downloads.length === 2 && downloads[1]?.name === "order-ddmd-a1b2c3d4e5f6071.xlsx",
+      JSON.stringify(downloads));
+    main.querySelector(".action-menu-trigger")?.click();
+    [...main.querySelectorAll(".action-menu button")]
+      .find((button) => button.textContent.trim() === "Copy order as text")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const rowCopyLines = (clipboardText || "").split("\n");
+    ok("the row copy puts the header and that one order on the clipboard",
+      rowCopyLines.length === 2 && rowCopyLines[1].startsWith("ddmd-a1b2c3d4e5f6071\t"),
+      `got ${rowCopyLines.length} lines: ${JSON.stringify(rowCopyLines)}`);
+
+    ok("the panel no longer calls the server CSV endpoint",
+      !requestedUrls.some((url) => url.includes("/admin/orders/csv")),
+      requestedUrls.filter((url) => url.includes("/admin/orders/csv")).join(", "));
+
+    page.window.Blob = SavedBlob;
+    delete page.window.URL.createObjectURL;
+    delete page.window.URL.revokeObjectURL;
+    page.window.HTMLAnchorElement.prototype.click = savedAnchorClick;
+    if (savedExecCommand === undefined) delete document.execCommand;
+    else document.execCommand = savedExecCommand;
   }
   if (id === "reports") {
     ok("the report requests the monthly KPI API",
@@ -284,6 +619,65 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("the report shows each order lifecycle status separately",
       ["Awaiting payment", "Failed", "Confirmed COD", "Paid", "Delivered (all)", "Cancelled", "Not Picking"]
         .every((label) => main.textContent.includes(label)));
+
+    // Delivery-performance line chart + lifecycle status side summary. The chart
+    // is real SVG (createElementNS), the summary lists every status with counts,
+    // and monetary amounts are kept distinct from counts / collected cash.
+    ok("the report renders a delivered-rate line chart",
+      Boolean(main.querySelector(".chart svg.chart-svg polyline.chart-line")));
+    ok("the delivery chart is labelled as a rate over time",
+      /Delivered-order rate over time/.test(main.textContent));
+    ok("the report shows a lifecycle status side summary with counts",
+      Boolean(main.querySelector(".report-side .status-list .status-item"))
+      && main.textContent.includes("Order status totals"));
+    ok("the status summary keeps delivered order value separate from collected cash",
+      main.textContent.includes("Delivered order value")
+      && main.textContent.includes("Collected cash"));
+
+    // Visitor trend chart — separate from the sales/delivery chart — with real
+    // backend daily data and the non-additive distinct-count notice.
+    ok("the report requests the visitor analytics API",
+      requested.includes("/admin/reports/visitors"));
+    ok("the report renders a daily visitor line chart",
+      /Daily visitors/.test(main.textContent)
+      && Boolean([...main.querySelectorAll(".chart svg.chart-svg")].length >= 2));
+    ok("the visitor report states distinct counts are not additive",
+      /not additive/i.test(main.textContent));
+    ok("the visitor geography is labelled approximate and hides raw IPs",
+      /Approximate geography/.test(main.textContent));
+
+    // Daily visitor paging + date filter: the series opens on the LAST 10 Lagos
+    // days (sent as ?from=&to= on the wire), Prev/Next page the window, and a
+    // from/to filter offers jumping anywhere inside the backend's range cap.
+    const visitClock = (() => {
+      const now = new Date(Date.now() + 36e5).toISOString().slice(0, 10);
+      const [yy, mm, dd] = now.split("-").map(Number);
+      const shift = (n) => new Date(Date.UTC(yy, mm - 1, dd + n)).toISOString().slice(0, 10);
+      return { now, from10: shift(-9), prev10: shift(-10), from20: shift(-19) };
+    })();
+    ok("the visitor daily series defaults to the last 10 Lagos days",
+      requestedUrls.some((url) => url.includes(
+        `/admin/reports/visitors?from=${visitClock.from10}&to=${visitClock.now}`)));
+    ok("the report shows the loaded daily window",
+      main.textContent.includes("2026-09-30 → 2026-10-09"));
+    const visitButtons = [...main.querySelectorAll(".visit-controls button")];
+    const prevButton = visitButtons.find((button) => /Previous/.test(button.textContent));
+    const nextButton = visitButtons.find((button) => /Next/.test(button.textContent));
+    ok("the visitor window is paged with Previous and Next",
+      Boolean(prevButton) && Boolean(nextButton));
+    ok("the visitor window stops paging at today",
+      nextButton && nextButton.disabled === (visitClock.now >= "2026-10-09"));
+    ok("the visitor report offers a from/to date filter",
+      Boolean(main.querySelector("#visit-from")) && Boolean(main.querySelector("#visit-to")));
+    ok("the daily window reports its visitor-day page total",
+      /page total [\d,]+ visitor-days/.test(main.textContent));
+    if (prevButton) {
+      prevButton.dispatchEvent(new page.window.Event("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      ok("Previous pages the visitor window back by 10 Lagos days",
+        requestedUrls.some((url) => url.includes(
+          `/admin/reports/visitors?from=${visitClock.from20}&to=${visitClock.prev10}`)));
+    }
 
     const windowSelect = main.querySelector("#report-month-window");
     windowSelect.value = "24";
@@ -299,6 +693,77 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("the report displays its API error state",
       Boolean(main.querySelector(".table-state-error"))
         || page.window.document.querySelector(".table-state-error")?.textContent.includes("Report unavailable"));
+  }
+  if (id === "products") {
+    // The same built-once snapshot bug, with two filters: pick a category, then
+    // a state - the category must still be on the request that the second pick
+    // fires, and the last products URL proves it.
+    const productFilters = [...main.querySelectorAll(".filters select")];
+    ok("the products filter bar renders category and state filters", productFilters.length === 2,
+      `found ${productFilters.length}`);
+    const [categoryFilter, stateFilter] = productFilters;
+    categoryFilter.value = "1";
+    categoryFilter.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    stateFilter.value = "true";
+    stateFilter.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const filteredProductsUrl = requestedUrls.filter((url) => url.startsWith("/admin/products?")).pop() || "";
+    ok("the state filter does not drop the chosen category",
+      filteredProductsUrl.includes("categoryId=1") && filteredProductsUrl.includes("active=true"),
+      `last products request: ${filteredProductsUrl}`);
+  }
+  if (id === "categories") {
+    // The Show filter's no-op is "" (the primitive's own first option), not
+    // "all". Seeding state.filter with the backend's explicit default made
+    // active() count it as applied: "Clear filters" showed on a freshly loaded
+    // list, and clicking it re-sent the same query - the button vanished while
+    // nothing on screen changed, which reads as a broken control.
+    const showSelect = main.querySelector(".filters select");
+    ok("the categories Show filter renders", Boolean(showSelect),
+      "no .filters select in the categories controls");
+    const categoriesUrls = () => requestedUrls.filter((url) => url.startsWith("/admin/categories?"));
+    const firstCategoriesUrl = categoriesUrls()[0] || "";
+    ok("an unfiltered categories load omits the filter parameter",
+      !firstCategoriesUrl.includes("filter="), `first request: ${firstCategoriesUrl}`);
+    const clearOnLoad = [...main.querySelectorAll(".filters button")]
+      .find((button) => button.textContent.trim() === "Clear filters");
+    ok("no Clear filters button on an unfiltered categories list",
+      !clearOnLoad || clearOnLoad.hidden,
+      clearOnLoad ? "the clear button is visible on the default state" : "");
+    const showOptions = [...(showSelect?.querySelectorAll("option") || [])];
+    ok("the Show filter offers a single All entry",
+      showOptions.length === 4 && showOptions.filter((option) => option.textContent === "All").length === 1,
+      showOptions.map((option) => option.textContent).join(" | "));
+
+    showSelect.value = "unused";
+    showSelect.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const clearAfterPick = [...main.querySelectorAll(".filters button")]
+      .find((button) => button.textContent.trim() === "Clear filters");
+    ok("picking a filter reveals Clear filters", Boolean(clearAfterPick) && !clearAfterPick.hidden);
+    ok("the pick reaches the API", (categoriesUrls().pop() || "").includes("filter=unused"),
+      `last request: ${categoriesUrls().pop() || ""}`);
+    clearAfterPick?.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    ok("clearing resets the Show filter, hides the button, and drops the parameter",
+      showSelect.value === "" && clearAfterPick?.hidden === true
+        && !(categoriesUrls().pop() || "").includes("filter="),
+      `select: "${showSelect.value}", last request: ${categoriesUrls().pop() || ""}`);
+  }
+  if (id === "media") {
+    // Same no-op convention as categories: nothing is applied on load, so the
+    // Clear button stays hidden and the dropdown has one All entry.
+    const mediaSelect = main.querySelector(".filters select");
+    const mediaClear = [...main.querySelectorAll(".filters button")]
+      .find((button) => button.textContent.trim() === "Clear filters");
+    ok("no Clear filters button on an unfiltered media list",
+      !mediaClear || mediaClear.hidden,
+      mediaClear ? "the clear button is visible on the default state" : "");
+    const mediaOptions = [...(mediaSelect?.querySelectorAll("option") || [])];
+    ok("the media Show filter offers a single All entry",
+      mediaOptions.length === 3 && mediaOptions.filter((option) => option.textContent === "All").length === 1,
+      mediaOptions.map((option) => option.textContent).join(" | "));
   }
 }
 
@@ -322,7 +787,7 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
   // this exists to catch (`ApiError` in orders.js, `qs` in ui.js) disappear into the
   // noise. Naming the exact shape of the bug keeps it checkable.
 const moduleExports = new Set();
-for (const rel of ["ui.js", "api.js", "dom.js"]) {
+for (const rel of ["ui.js", "api.js", "dom.js", "xlsx.js"]) {
   const src = readFileSync(join(siteRoot, "shared", "scripts", "admin", rel), "utf8");
   for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function|class|const|let)\s+([A-Za-z_$][\w$]*)/g)) {
     moduleExports.add(m[1]);
@@ -348,13 +813,15 @@ const scannedFiles = [
   ...readdirSync(viewsDir).filter((f) => f.endsWith(".js")).map((f) => join(viewsDir, f)),
   join(siteRoot, "shared", "scripts", "admin", "ui.js"),
   join(siteRoot, "shared", "scripts", "admin", "api.js"),
+  join(siteRoot, "shared", "scripts", "admin", "xlsx.js"),
 ];
 const EXPECTED = {
   // Identifiers a view may use without importing: JS builtins and globals.
   globals: new Set(["window", "document", "console", "fetch", "FormData", "File", "Blob", "URL",
     "AbortController", "setTimeout", "clearTimeout", "navigator", "location", "JSON", "Object",
     "Array", "Number", "String", "Boolean", "Date", "Math", "Promise", "Map", "Set", "undefined",
-    "globalThis", "isFinite", "isNaN", "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent"]),
+    "globalThis", "isFinite", "isNaN", "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent",
+    "Uint8Array", "Uint32Array", "DataView", "TextEncoder"]),
 };
 
 for (const path of scannedFiles) {
@@ -486,7 +953,7 @@ ok("a failed upload is reported rather than re-thrown into nothing",
 // These drive the real modules through the real event path. Nothing here asserts
 // on a stub: if the scaffold stops being persistent, these fail.
 
-const { adminSearch, listScaffold } = await import("../shared/scripts/admin/ui.js");
+const { adminSearch, adminFilters, listScaffold } = await import("../shared/scripts/admin/ui.js");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -633,6 +1100,51 @@ function typeInto(input, text) {
   ok("and focus is untouched by repeated result renders", dom.window.document.activeElement === input);
 }
 
+// A filter bar that resets its siblings on every pick is not a filter bar. The
+// controls are built once (see above), so each change used to spread the
+// BUILD-TIME snapshot - dropping every filter the operator had already chosen
+// from the request while the other selects kept displaying them. Orders and
+// Products have multiple filters and lost one per additional pick; this drives
+// the primitive through the real event path and asserts on the payloads.
+{
+  const host = dom.window.document.createElement("div");
+  dom.window.document.body.append(host);
+
+  const sent = [];
+  const bar = adminFilters({
+    value: {},
+    filters: [
+      { key: "status", label: "Status", options: [{ value: "delivered", label: "Delivered" }] },
+      { key: "payment", label: "Payment", options: [{ value: "cod", label: "Pay on delivery" }] },
+    ],
+    onChange: (next) => sent.push(next),
+  });
+  host.append(bar);
+
+  const [statusSelect, paymentSelect] = bar.querySelectorAll("select");
+
+  statusSelect.value = "delivered";
+  statusSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  ok("picking a filter reports it to the screen",
+    sent.length === 1 && sent[0].status === "delivered", JSON.stringify(sent));
+
+  paymentSelect.value = "cod";
+  paymentSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  ok("a second pick keeps the first filter instead of resetting it",
+    sent.length === 2 && sent[1].status === "delivered" && sent[1].payment === "cod",
+    `second payload: ${JSON.stringify(sent[1])}`);
+
+  // "Clear filters" only counts if the bar looks cleared too.
+  const clear = [...bar.querySelectorAll("button")]
+    .find((button) => button.textContent.trim() === "Clear filters");
+  ok("the clear-filters button appears once a filter is chosen", Boolean(clear) && !clear.hidden);
+  clear?.click();
+  ok("clearing reports empty filters",
+    sent.length === 3 && Object.keys(sent[2]).length === 0, JSON.stringify(sent[2]));
+  ok("clearing resets the selects so the bar tells the truth",
+    statusSelect.value === "" && paymentSelect.value === "");
+}
+
 // The primitive is only half the guarantee. A view can still defeat it by building
 // its own controls inside render() instead of once at setup - which is precisely
 // what every one of these views used to do. So this checks the CALL SITES, not the
@@ -724,6 +1236,22 @@ for (const [file, subject] of [
     "the image can be chosen but never persisted");
   ok("and clearing it sends an empty key rather than omitting it",
     /let mediaR2Key = category\.mediaR2Key \|\| ""/.test(source));
+}
+
+// The filter no-op lives in exactly one place: the primitive's own ""/All option.
+// A view seeding `filter: "all"` reads as an APPLIED filter (the backend accepts
+// "all", so nothing errors and the list looks right) - which still shows "Clear
+// filters" on a list nothing is filtered, and clicking it re-sends the same query.
+{
+  const files = [
+    join(siteRoot, "shared", "scripts", "admin", "ui.js"),
+    ...["categories.js", "media.js", "orders.js", "products.js"]
+      .map((name) => join(siteRoot, "shared", "scripts", "admin", "views", name)),
+  ];
+  const offenders = files.filter((file) => /filter: "all"/.test(readFileSync(file, "utf8")));
+  ok("no view seeds its filter state with the backend's explicit no-op value",
+    offenders.length === 0,
+    `filter: "all" in: ${offenders.map((file) => file.split(/[\\/]/).pop()).join(", ")}`);
 }
 
 // Phase 2: the delivery URL builder and the alpha decision rule.

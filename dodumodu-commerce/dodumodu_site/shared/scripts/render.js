@@ -133,8 +133,17 @@ export function renderTestimonials(container, testimonials) {
   for (const t of testimonials) {
     const card = document.createElement("div");
     card.className = "testimonial-card";
+    // A review photo is OPTIONAL: when set it renders as the 64px avatar
+    // (lazy + async-decoded so the section costs nothing on slow networks);
+    // when empty the card renders its initial-letter tile instead of a broken
+    // <img>. A WhatsApp screenshot always carries an image (the server refuses
+    // one without), so it keeps the plain lazy <img> path.
+    const hasPhoto = Boolean(t.url);
+    const avatar = !hasPhoto
+      ? `<span class="testimonial-avatar" aria-hidden="true">${escapeHtml((t.title || "?").trim().charAt(0).toUpperCase())}</span>`
+      : `<img class="testimonial-image" src="${t.url}" alt="" loading="lazy" decoding="async" width="64" height="64">`;
     card.innerHTML = `
-      <img class="testimonial-image" src="${t.url}" alt="" loading="lazy" width="64" height="64">
+      ${avatar}
       <div>
         <p class="testimonial-title">${escapeHtml(t.title)}</p>
         <p class="testimonial-description">${escapeHtml(t.description)}</p>

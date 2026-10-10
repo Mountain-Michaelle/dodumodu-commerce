@@ -423,8 +423,16 @@ export const orderCrmService = {
     id: number,
     expectedUpdatedAt: Date | null,
     actor: string,
-    reason?: string,
+    reason: string,
   ): Promise<OrderRow> {
+    // Validated again here rather than trusted from the route: this function IS
+    // the cancellation, so the "why" belongs to its contract, not to whichever
+    // HTTP handler happens to call it today.
+    const trimmedReason = (reason ?? "").trim();
+    if (trimmedReason.length < 12) {
+      throw new ValidationError("A cancellation reason of at least 12 characters is required");
+    }
+
     const current = await ordersRepo.findById(db, id);
     if (!current) throw new NotFoundError("Order", id);
 
@@ -445,7 +453,7 @@ export const orderCrmService = {
       );
     }
 
-    await ordersRepo.writeStatusHistory(db, id, current.status, "cancelled", actor, reason);
+    await ordersRepo.writeStatusHistory(db, id, current.status, "cancelled", actor, trimmedReason);
     console.log(JSON.stringify({ event: "order_cancelled", id, reference: updated.reference, by: actor }));
     return updated;
   },

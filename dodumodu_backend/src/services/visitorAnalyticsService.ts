@@ -76,6 +76,10 @@ function maxDate(one: string, two: string): string {
   return one > two ? one : two;
 }
 
+function minDate(one: string, two: string): string {
+  return one < two ? one : two;
+}
+
 function dateAfter(date: string): string {
   return shiftDate(date, 1);
 }
@@ -135,19 +139,40 @@ export const visitorAnalyticsService = {
     return db.select({ ready: sql<number>`1` });
   },
 
-  async report(db: Db, now = new Date()) {
+  async report(db: Db, now = new Date(), range: { from: string; to: string } | null = null) {
     const today = lagosDate(now);
     const currentYear = Number(today.slice(0, 4));
     const tomorrow = dateAfter(today);
     const startedOn = await visitorAnalyticsRepo.analyticsStartedOn(db);
-    const dailyFrom = maxDate(startedOn, shiftDate(today, -(DAILY_WINDOW_DAYS - 1)));
+    // The daily series is the only day-granular data, and the only part an
+    // explicit range touches (pagination + a date filter). The default is the
+    // trailing DAILY_WINDOW_DAYS; a range narrows it to [from, to], clamped to
+    // the tracking window so a malformed or future-dated range can never invent
+    // days. Monthly and yearly are aggregates and are never day-paginated.
+    const dailyFrom = range
+      ? maxDate(startedOn, range.from)
+      : maxDate(startedOn, shiftDate(today, -(DAILY_WINDOW_DAYS - 1)));
+    const dailyTo = minDate(today, range ? range.to : today);
+    // A window that lies wholly outside the tracked period (before tracking
+    // started, or entirely in the future) has no rows at all. It is reported as
+    // an EMPTY series echoing the requested window — never collapsed onto a
+    // single invented day outside what was actually asked for.
+    const windowEmpty = dailyFrom > dailyTo;
+    const dailyEnd = windowEmpty ? dailyFrom : dailyTo;
+    const dailyRange = windowEmpty && range
+      ? { from: range.from, to: dailyTo }
+      : { from: dailyFrom, to: dailyEnd };
     const monthlyFrom = maxDate(startedOn, shiftMonth(monthStart(today), -(MONTHLY_WINDOW_MONTHS - 1)));
     const yearStart = startOfYear(currentYear);
 
     const [dailyRows, monthlyRows, geographyRows] = await Promise.all([
-      visitorAnalyticsRepo.dailyVisitorDaysBetween(db, dailyFrom, tomorrow),
+      windowEmpty
+        ? Promise.resolve([] as { date: string; visitors: number }[])
+        : visitorAnalyticsRepo.dailyVisitorDaysBetween(db, dailyFrom, dateAfter(dailyEnd)),
       visitorAnalyticsRepo.monthlyUniqueVisitorsBetween(db, monthlyFrom, tomorrow),
-      visitorAnalyticsRepo.visitorGeographyBetween(db, dailyFrom, tomorrow),
+      windowEmpty
+        ? Promise.resolve([] as { country: string | null; region: string | null; visitorDays: number }[])
+        : visitorAnalyticsRepo.visitorGeographyBetween(db, dailyFrom, dateAfter(dailyEnd)),
     ]);
 
     const existingSnapshots = await visitorAnalyticsRepo.yearSnapshots(db);
@@ -185,10 +210,14 @@ export const visitorAnalyticsService = {
 
     return {
       trackingStartedOn: startedOn,
-      daily: datesBetweenInclusive(dailyFrom, today).map((date) => ({
-        date,
-        visitors: dailyCounts.get(date) ?? 0,
-      })),
+      today,
+      dailyRange,
+      daily: windowEmpty
+        ? []
+        : datesBetweenInclusive(dailyFrom, dailyEnd).map((date) => ({
+          date,
+          visitors: dailyCounts.get(date) ?? 0,
+        })),
       monthly: monthsBetweenInclusive(monthlyFrom, monthStart(today)).map((month) => ({
         month,
         visitors: monthlyCounts.get(month) ?? 0,

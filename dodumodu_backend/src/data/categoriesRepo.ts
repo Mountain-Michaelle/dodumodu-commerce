@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import type { Db } from "../db";
 import { categories, products } from "../schema";
+import { updatedAtBucketCondition } from "../shared/versionGuard";
 
 // Categories are few and read constantly, so "few" is a real design input: the
 // tree is walked in application code over a bounded number of indexed
@@ -196,7 +197,7 @@ export const categoriesRepo = {
     const stamped = { ...patch, updatedAt: new Date() };
     const where = expectedUpdatedAt === null
       ? eq(categories.id, id)
-      : sql`${categories.id} = ${id} and ${categories.updatedAt} = ${expectedUpdatedAt}`;
+      : sql`${categories.id} = ${id} and ${updatedAtBucketCondition(categories.updatedAt, expectedUpdatedAt)}`;
     const [row] = await db.update(categories).set(stamped).where(where).returning();
     return row ?? null;
   },

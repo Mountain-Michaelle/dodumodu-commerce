@@ -5,6 +5,7 @@ import { adminRoute as app } from "./admin";
 import { registerDbDriver } from "../db";
 import { FakeDatabase, fakeDriver } from "../testSupport/fakeDb";
 import { ordersRepo } from "../data/ordersRepo";
+import { testimonialsRepo } from "../data/testimonialsRepo";
 import { ACCESS_EMAIL_HEADER } from "../auth/adminAuth";
 import type { Env } from "../env";
 
@@ -241,4 +242,111 @@ test("deleting an order without the confirm flag is refused", async () => {
   // are needed, and this test is about the outer one.
   assert.equal(body.error.code, "VALIDATION_ERROR");
   assert.ok(body.fields && "confirm" in body.fields, `expected a note against confirm: ${JSON.stringify(body)}`);
+});
+
+/* ---- cancellation always records WHY ---- */
+
+test("cancelling without a reason is a 400 field note and changes nothing", async () => {
+  const res = await call("/admin/orders/1/cancel", { method: "POST", body: "{}" });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { error: { code: string }; fields?: Record<string, unknown> };
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.ok(body.fields && "reason" in body.fields, `expected a note against reason: ${JSON.stringify(body)}`);
+  assert.equal(current?.status, "paid", "a refused cancel must not touch the order");
+});
+
+test("a blank or too-short cancellation reason is refused", async () => {
+  for (const reason of ["", "   ", "dup", "  no  "]) {
+    const res = await call("/admin/orders/1/cancel", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    assert.equal(res.status, 400, `reason=${JSON.stringify(reason)} must be refused`);
+  }
+  assert.equal(current?.status, "paid", "every refused cancel must leave the order alone");
+});
+
+test("a real reason cancels the order, stores the previous status, and lands trimmed in history", async () => {
+  const historyWrites: unknown[][] = [];
+  ordersRepo.writeStatusHistory = async (...args: unknown[]) => { historyWrites.push(args); };
+  // Same shape as the markDelivered stub above: the in-memory store holds a
+  // clone, so the mutating repo call is stubbed to keep `current` authoritative
+  // while the SERVICE logic (guards, history, reason) stays real.
+  const originalCancel = ordersRepo.cancel;
+  ordersRepo.cancel = async (_db, _id, expectedStatus, expectedUpdatedAt) => {
+    if (!current || current.status !== expectedStatus) return null;
+    if (expectedUpdatedAt && (current.updatedAt as Date).getTime() !== expectedUpdatedAt.getTime()) return null;
+    current = { ...current, status: "cancelled", preCancellationStatus: expectedStatus, updatedAt: new Date() };
+    return current as never;
+  };
+
+  try {
+    const res = await call("/admin/orders/1/cancel", {
+      method: "POST",
+      body: JSON.stringify({
+        reason: "  Customer asked to stop the order  ",
+        expectedUpdatedAt: (current as { updatedAt: Date }).updatedAt.toISOString(),
+      }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(current?.status, "cancelled");
+    assert.equal(current?.preCancellationStatus, "paid", "reversal depends on the stored previous status");
+
+    assert.equal(historyWrites.length, 1, "exactly one history entry per cancellation");
+    const [, id, from, to, actor, storedReason] = historyWrites[0] as [unknown, number, string, string, string, string];
+    assert.equal(id, 1);
+    assert.equal(from, "paid");
+    assert.equal(to, "cancelled");
+    assert.equal(String(actor), "owner@example.com", "the history must name who cancelled");
+    assert.equal(storedReason, "Customer asked to stop the order", "the reason is stored trimmed");
+  } finally {
+    ordersRepo.cancel = originalCancel;
+  }
+});
+
+test("cancelling an already-cancelled order is a 409, and the reason does not overwrite the first", async () => {
+  current = order({ status: "cancelled", preCancellationStatus: "paid" });
+  const res = await call("/admin/orders/1/cancel", {
+    method: "POST",
+    body: JSON.stringify({ reason: "A second reason that is long enough" }),
+  });
+  assert.equal(res.status, 409);
+  assert.equal(current?.status, "cancelled");
+});
+
+test("cancelling a delivered order is refused", async () => {
+  current = order({ status: "delivered", deliveredAt: new Date() });
+  const res = await call("/admin/orders/1/cancel", {
+    method: "POST",
+    body: JSON.stringify({ reason: "Customer asked to stop the order" }),
+  });
+  assert.equal(res.status, 409);
+  assert.equal(current?.status, "delivered", "a completed sale is never cancelled");
+});
+
+/* ---- testimonial paging is server-side ---- */
+
+test("the testimonial list is paged server-side and reports page metadata", async () => {
+  const seen: number[] = [];
+  const original = testimonialsRepo.listPaged;
+  testimonialsRepo.listPaged = async (_db, limit, offset) => {
+    seen.push(limit, offset);
+    return { rows: [], total: 45 };
+  };
+  try {
+    const res = await call("/admin/testimonials?page=2&pageSize=20");
+    assert.equal(res.status, 200);
+    const body = await res.json() as { page: { page: number; pageSize: number; total: number; totalPages: number } };
+    assert.deepEqual(seen, [20, 20], "limit 20, offset 20 for page 2");
+    assert.equal(body.page.total, 45);
+    assert.equal(body.page.page, 2);
+    assert.equal(body.page.totalPages, 3);
+  } finally {
+    testimonialsRepo.listPaged = original;
+  }
+});
+
+test("an unbounded testimonial page size is refused like every other list", async () => {
+  const res = await call("/admin/testimonials?pageSize=100000");
+  assert.equal(res.status, 400);
 });

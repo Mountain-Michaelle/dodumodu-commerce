@@ -1,9 +1,10 @@
 import { el, mount, formatNaira, formatDateTime, toWireTimestamp, humanStatus } from "../dom.js";
 import { api, ApiError, qs } from "../api.js";
+import { downloadXlsx } from "../xlsx.js";
 import {
   adminTable, adminSearch, adminFilters, adminPagination, resultCount, adminField,
   fieldset, saveBar, readForm, applyFieldErrors, actionMenu, statusBadge, toast,
-  toastError, openModal, confirmDialog, definitionList, errorState, bulkBar,
+  toastError, openModal, confirmDialog, reasonDialog, definitionList, errorState, bulkBar,
   copyToClipboard, listScaffold,
 } from "../ui.js";
 import { markAsSpam, revertSpamFlag } from "./spam.js";
@@ -68,6 +69,15 @@ export function ordersView({ shell, identity }) {
   const can = (permission) => (identity?.permissions || []).includes(permission);
 
   async function load() {
+    // The result set is about to be replaced, so the selection goes with it: a
+    // selection that outlives a filter change would let a bulk action touch rows
+    // the operator can no longer see.
+    //
+    // It lives HERE and not in render(): render also runs when a checkbox is
+    // ticked, and clearing there wiped the selection that had just been made -
+    // the box un-checked itself on the next frame and the bulk bar, gated on
+    // state.selected.size, could never appear at all.
+    state.selected.clear();
     try {
       const data = await ui.load((signal) => api.get(`/orders${qs({
         q: state.q, status: state.status, action: state.action, paymentMethod: state.paymentMethod,
@@ -101,17 +111,31 @@ export function ordersView({ shell, identity }) {
   function render({ orders, page }) {
     lastOrders = orders;
     lastPage = page;
-    // A selection that outlives a filter change would let a bulk action touch rows
-    // the operator can no longer see, so it is cleared whenever the result set does.
-    state.selected.clear();
+
+    // The export/copy targets: ticked rows win, otherwise the visible page.
+    // lastOrders must be the source (never a re-fetch), because the loaded
+    // page on screen IS the definition of "this page".
+    const targetRows = () => (state.selected.size > 0
+      ? lastOrders.filter((row) => state.selected.has(row.id))
+      : lastOrders);
+    const targetLabel = () => (state.selected.size > 0
+      ? `${state.selected.size} selected order${state.selected.size === 1 ? "" : "s"}`
+      : `the ${lastOrders.length} order${lastOrders.length === 1 ? "" : "s"} on this page`);
 
     ui.results(
       el("div", { class: "list-summary" },
         resultCount({ page, noun: "order" }),
-        el("button", {
-          class: "button button-small", type: "button", text: "Copy page as CSV",
-          onclick: copyPageCsv,
-        })),
+        el("div", { class: "list-actions" },
+          el("button", {
+            class: "button button-small", type: "button",
+            text: state.selected.size > 0 ? "Export selected (.xlsx)" : "Export page (.xlsx)",
+            onclick: () => exportXlsx(targetRows(), `orders-${new Date().toISOString().slice(0, 10)}.xlsx`),
+          }),
+          el("button", {
+            class: "button button-small", type: "button",
+            text: state.selected.size > 0 ? "Copy selected as text" : "Copy page as text",
+            onclick: () => copyAsText(targetRows(), targetLabel()),
+          }))),
       adminTable({
         caption: "Orders",
         rows: orders,
@@ -179,7 +203,8 @@ export function ordersView({ shell, identity }) {
       if (!copy) continue;
       items.push({ label: copy.label, danger: copy.danger, onSelect: () => runOrderAction(row, verb) });
     }
-    items.push({ label: "Copy row as CSV", onSelect: () => copyRowsCsv([row]) });
+    items.push({ label: "Export order (.xlsx)", onSelect: () => exportXlsx([row], `order-${row.reference}.xlsx`) });
+    items.push({ label: "Copy order as text", onSelect: () => copyAsText([row], "the order") });
     if (can("orders:delete")) {
       items.push({ label: "Delete order", danger: true, onSelect: () => removeOrder(row) });
     }
@@ -193,11 +218,40 @@ export function ordersView({ shell, identity }) {
    * audit entry - not as an ordinary CRM transition.
    */
   async function runOrderAction(row, verb) {
-    if (["mark-paid", "mark-failed", "cancel", "mark-not-picking", "revert-cancel", "revert-not-picking", "revert"].includes(verb)) {
+    // Cancel gets its own dialog rather than a yes/no confirm: a cancellation
+    // without a recorded reason is unauditable, so the reason is collected here
+    // and REQUIRED by the server as well. The request runs inside the dialog, so
+    // the confirm button can show its in-flight state and a failure keeps the
+    // typed text on screen for a retry.
+    if (verb === "cancel") {
+      const result = await reasonDialog({
+        title: "Cancel this order?",
+        danger: true,
+        confirmLabel: "Cancel order",
+        placeholder: "For example: customer asked to stop, duplicate order, wrong address…",
+        body: el("div", {},
+          el("p", { text: `Order ${row.reference} will be marked cancelled. Payment records are not changed and no refund is triggered.` }),
+          el("p", { class: "muted", text: "The reason is stored in the order history. You can revert this cancellation from the order details." })),
+        submit: (reason) => api.post(`/orders/${row.id}/cancel`, {
+          expectedUpdatedAt: toWireTimestamp(row.updatedAt),
+          reason,
+        }),
+      });
+      if (result.ok) {
+        toast(`Cancel order — ${row.reference}`, "success");
+        load();
+      } else if (result.conflict) {
+        // Same words and the same reload as handleActionError's conflict branch,
+        // said directly because there is no real ApiError instance to hand it.
+        toast("This order changed while you were looking at it. Reloading the latest version.", "warn", 6000);
+        load();
+      }
+      return;
+    }
+    if (["mark-paid", "mark-failed", "mark-not-picking", "revert-cancel", "revert-not-picking", "revert"].includes(verb)) {
       const titles = {
         "mark-paid": "Override this payment to paid?",
         "mark-failed": "Override this payment to failed?",
-        cancel: "Cancel this order?",
         "mark-not-picking": "Mark this order Not Picking?",
         "revert-cancel": "Revert this cancellation?",
         "revert-not-picking": "Revert Not Picking?",
@@ -206,7 +260,6 @@ export function ordersView({ shell, identity }) {
       const labels = {
         "mark-paid": "Mark paid",
         "mark-failed": "Mark failed",
-        cancel: "Cancel order",
         "mark-not-picking": "Mark Not Picking",
         "revert-cancel": "Revert",
         "revert-not-picking": "Revert",
@@ -276,6 +329,10 @@ export function ordersView({ shell, identity }) {
 
   function bulkBarFor(ids) {
     const offer = (verb, label, danger) => ({ label, danger, onSelect: () => runBulk(ids, verb, label) });
+    // Export/copy of the same selection lives beside the status actions: an
+    // operator copying WhatsApp follow-ups for exactly the rows they ticked
+    // should not have to un-check, copy the page, and re-check.
+    const selectedRows = () => lastOrders.filter((row) => state.selected.has(row.id));
     return bulkBar({
       count: ids.length,
       onClear: () => { state.selected.clear(); render({ orders: lastOrders, page: lastPage }); },
@@ -285,6 +342,8 @@ export function ordersView({ shell, identity }) {
         ...(can("orders:payment-override")
           ? [offer("mark-paid", "Mark paid", true), offer("mark-failed", "Mark failed", true)]
           : []),
+        { label: "Export (.xlsx)", onSelect: () => exportXlsx(selectedRows(), `orders-${new Date().toISOString().slice(0, 10)}.xlsx`) },
+        { label: "Copy as text", onSelect: () => copyAsText(selectedRows(), `${ids.length} selected order${ids.length === 1 ? "" : "s"}`) },
       ],
     });
   }
@@ -317,43 +376,58 @@ export function ordersView({ shell, identity }) {
     }
   }
 
-  /* ---- CSV ---- */
+  /* ---- export: ONE column list, two outputs (file and clipboard) ---- */
 
-  /**
-   * The CSV is built SERVER-SIDE and copied verbatim. Escaping quotes and commas in
-   * two places - once here, once in the panel - is how an address silently splits
-   * across two spreadsheet columns, so the panel only moves characters it was given.
-   */
-  async function copyPageCsv() {
-    try {
-      const { csv } = await api.get(`/orders/csv${qs({
-        q: state.q, status: state.status, action: state.action, paymentMethod: state.paymentMethod,
-        from: state.from, to: state.to, page: state.page, pageSize: state.pageSize,
-      })}`);
-      await copyCsv(csv, "this page");
-    } catch (err) {
-      toastError(err);
-    }
+  // This is the only definition of what an operator exports. The .xlsx download
+  // and the tab-separated copy are two renderings of this list, which is the
+  // only way they can stay in step; the old server-built CSV's twenty-one
+  // columns (kobo amounts, slugs, internal ids) answered a different question
+  // than the one asked here - "just the information I paste to a customer".
+  //
+  // Every cell is written as text on purpose: a phone number or a reference is
+  // an identifier, and a spreadsheet that turns "08012345678" into 8012345678
+  // hands back a number nobody can dial.
+  const EXPORT_COLUMNS = [
+    { header: "Order ID", value: (row) => row.reference },
+    { header: "Date", value: (row) => formatDateTime(row.createdAt) },
+    { header: "Name", value: (row) => row.customerName },
+    { header: "Phone", value: (row) => row.phone },
+    { header: "WhatsApp", value: (row) => row.whatsapp || row.phone || "" },
+    { header: "Product / Qty", value: (row) => `${row.productName || "—"} ×${row.quantity ?? ""}` },
+    { header: "Address", value: (row) => row.address ?? "" },
+    { header: "Status", value: (row) => humanStatus(row.status) },
+  ];
+
+  function matrixFor(rows) {
+    return [
+      EXPORT_COLUMNS.map((column) => column.header),
+      ...rows.map((row) => EXPORT_COLUMNS.map((column) => column.value(row))),
+    ];
   }
 
-  async function copyRowsCsv(rows) {
-    // One row still goes through the server so its escaping is identical to the page
-    // export. A locally-built single row would be a second set of rules.
-    try {
-      const { csv } = await api.get(`/orders/csv${qs({ page: state.page, pageSize: 1000 })}`);
-      const [header, ...lines] = csv.split("\r\n");
-      const wanted = rows.map((row) => row.reference);
-      const body = lines.filter((line) => wanted.some((ref) => line.includes(ref)));
-      await copyCsv([header, ...body].join("\r\n"), rows.length === 1 ? "1 row" : `${rows.length} rows`);
-    } catch (err) {
-      toastError(err);
+  function exportXlsx(rows, filename) {
+    if (!rows.length) {
+      toast("Nothing to export — the list is empty", "warn");
+      return;
     }
+    downloadXlsx(filename, matrixFor(rows));
+    toast(`Exported ${rows.length} order${rows.length === 1 ? "" : "s"} as ${filename}`, "success");
   }
 
-  async function copyCsv(csv, what) {
-    const ok = await copyToClipboard(csv);
-    toast(ok ? `Copied ${what} as CSV` : `Could not copy ${what} — your browser blocked the clipboard`,
-      ok ? "success" : "error");
+  async function copyAsText(rows, what) {
+    if (!rows.length) {
+      toast("Nothing to copy — the list is empty", "warn");
+      return;
+    }
+    // Tabs between cells, one order per line: pasted into WhatsApp it reads as
+    // lines, pasted into a sheet it lands in columns. A tab or newline INSIDE a
+    // cell would split the row, so they are flattened to spaces first.
+    const text = matrixFor(rows)
+      .map((cells) => cells.map((cell) => String(cell).replace(/[\t\r\n]+/g, " ")).join("\t"))
+      .join("\n");
+    const copied = await copyToClipboard(text);
+    toast(copied ? `Copied ${what} as text` : `Could not copy ${what} — your browser blocked the clipboard`,
+      copied ? "success" : "error");
   }
 
   /* ---- detail ---- */
