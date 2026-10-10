@@ -103,13 +103,17 @@ export async function noteFuse(db: Db, emailHmac: string): Promise<boolean> {
   return row?.aa_auth_fuse_note ?? false;
 }
 
-/** Clear throttle state for these keys after a factor is verified (AUTH_CLEAR). */
+/** Clear throttle state for these keys after a factor is verified (AUTH_CLEAR).
+ * Each key is bound as its own scalar text param (via sql.join) instead of one
+ * array param: drizzle serializes a JS array differently per driver, while
+ * scalar text params serialize identically everywhere (see the bytea probe). */
 export async function clearKeys(db: Db, keys: string[]): Promise<void> {
   if (keys.length === 0) return;
-  await q(
-    db,
-    sql`DELETE FROM aa_auth_throttle WHERE key = ANY(${keys}::text[])`,
+  const list = sql.join(
+    keys.map((k) => sql`${k}`),
+    sql`, `,
   );
+  await q(db, sql`DELETE FROM aa_auth_throttle WHERE key IN (${list})`);
 }
 
 /**

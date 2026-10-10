@@ -143,7 +143,7 @@ test("b32decode of newTotpSecret round-trips", () => {
 
 test("RFC 6238 vectors (SHA-1, 8 digits)", async () => {
   const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
-  const vec = [
+  const vec: Array<[number, string]> = [
     [1, "94287082"],
     [37037036, "07081804"],
     [37037037, "14050471"],
