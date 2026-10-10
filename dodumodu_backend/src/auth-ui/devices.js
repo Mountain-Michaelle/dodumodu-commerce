@@ -8,7 +8,7 @@ function note(kind, text) { const n = $("note"); n.className = "note " + kind; n
 
 async function load() {
   const res = await fetch("/admin-v2/devices", { credentials: "same-origin" });
-  if (res.status === 401 || res.status === 403) { location.href = "/auth-ui/login.html"; return; }
+  if (res.status === 401 || res.status === 403) { location.href = "/admin/sign-in/"; return; }
   const { devices } = await res.json();
   const list = $("list");
   list.innerHTML = "";
@@ -70,3 +70,4 @@ $("invite").addEventListener("click", async () => {
 });
 
 load();
+

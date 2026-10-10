@@ -7,7 +7,7 @@ function note(kind, text) { const n = $("note"); n.className = "note " + kind; n
 
 async function load() {
   const res = await fetch("/auth/sessions", { credentials: "same-origin" });
-  if (res.status === 401) { location.href = "/auth-ui/login.html"; return; }
+  if (res.status === 401) { location.href = "/admin/sign-in/"; return; }
   const { sessions } = await res.json();
   const list = $("list");
   list.innerHTML = "";
@@ -43,6 +43,7 @@ $("revoke-others").addEventListener("click", async () => {
 });
 $("logout").addEventListener("click", async () => {
   await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
-  location.href = "/auth-ui/login.html";
+  location.href = "/admin/sign-in/";
 });
 load();
+
