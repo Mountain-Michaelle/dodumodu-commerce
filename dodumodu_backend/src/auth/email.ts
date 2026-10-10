@@ -63,3 +63,90 @@ export async function sendLoginCode(
     `login-code:${to}`,
   );
 }
+
+// --- Notification emails (spec §5.10). One stable idempotency key per event.
+// Bodies never contain codes, phrases, tokens or full IPs.
+
+/** Phrase reset link (single-use, 15 min). Token is the only secret in the body. */
+export async function sendPhraseReset(
+  provider: EmailProvider, to: string, resetUrl: string,
+): Promise<void> {
+  await provider.send(
+    to, "Reset your sign-in phrase",
+    `Use this link to choose a new sign-in phrase. It works once and expires in 15 minutes: ${resetUrl}\n` +
+      `If you did not request this, ignore this email — your current phrase still works.`,
+    `phrase-reset:${to}`,
+  );
+}
+
+/** A backup code was used (spec §5.6). */
+export async function sendBackupUsed(
+  provider: EmailProvider, to: string, remaining: number,
+): Promise<void> {
+  await provider.send(
+    to, "A backup code was used",
+    `One of your backup codes was just used to sign in. You have ${remaining} left. ` +
+      `If this wasn't you, reset your authenticator now.`,
+    `backup-used:${to}`,
+  );
+}
+
+/** Permission change for the affected user (spec §5.10). */
+export async function sendPermChange(
+  provider: EmailProvider, to: string, perm: string, granted: boolean,
+): Promise<void> {
+  await provider.send(
+    to, granted ? "A permission was granted" : "A permission was removed",
+    `Your "${perm}" permission was ${granted ? "granted" : "removed"}.`,
+    `perm:${to}:${perm}:${granted}`,
+  );
+}
+
+/** Sign-in attempt from an unrecognized device (denied path, max 1 / 6 h). */
+export async function sendDeniedAlert(
+  provider: EmailProvider, to: string,
+): Promise<void> {
+  await provider.send(
+    to, "Sign-in attempt on an unrecognized device",
+    "Someone just tried to sign in to your admin account from a device we do not recognize. " +
+      "No code was sent. If this wasn't you, no action is needed.",
+    `denied-alert:${to}`,
+  );
+}
+
+/** Sign-in from a new network (strict tier). No full IP, no UA beyond a hint. */
+export async function sendNewNetwork(
+  provider: EmailProvider, to: string, country: string | null,
+): Promise<void> {
+  await provider.send(
+    to, "Sign-in from a new network",
+    `Your admin account was just signed in from a new network` +
+      `${country ? ` (${country})` : ""}. Extra checks are on for this session.`,
+    `new-network:${to}`,
+  );
+}
+
+/** A device was invited or registered (spec §5.10). */
+export async function sendDeviceEvent(
+  provider: EmailProvider, to: string, kind: "invited" | "registered",
+): Promise<void> {
+  await provider.send(
+    to, kind === "invited" ? "A new device was invited" : "A new device was registered",
+    kind === "invited"
+      ? "A trusted-device invite was created for your admin account. It works once and expires in 15 minutes."
+      : "A new trusted device was just registered for your admin account. If this wasn't you, revoke it now.",
+    `device-${kind}:${to}`,
+  );
+}
+
+/** Phrase reset requested (to the user, when an admin triggers it). */
+export async function sendPhraseResetRequested(
+  provider: EmailProvider, to: string,
+): Promise<void> {
+  await provider.send(
+    to, "A sign-in phrase reset was requested",
+    "An administrator requested a reset of your sign-in phrase. Check your inbox for the reset link.",
+    `phrase-reset-requested:${to}`,
+  );
+}
+

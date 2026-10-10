@@ -111,8 +111,9 @@ authRoute.post("/request", async (c) => guarded(c, async () => {
     const provider = providerFor(secrets.resendApiKey);
     sendInBackground(c as never, provider, out.sendDeniedAlert.to,
       "Sign-in attempt on an unrecognized device",
-      "Someone just tried to sign in to your admin account from a device we do not recognize.",
-      `denied:${out.flowToken}`);
+      "Someone just tried to sign in to your admin account from a device we do not recognize. " +
+        "No code was sent. If this wasn't you, no action is needed.",
+      `denied:${out.sendDeniedAlert.to}`);
   }
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);
   return c.json({ ok: true }, 202);
