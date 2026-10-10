@@ -4,7 +4,7 @@
 //   GET /admin, /admin/            guarded -> dist/admin/index.html else 302
 //   GET /admin/sessions[/]         guarded -> sessions HTML else 302
 //   GET /admin/devices[/]          guarded -> devices HTML else 302
-//   GET /admin/assets/*            guarded -> login JS/CSS (external files only, CSP)
+//   GET /admin/assets/*            public  -> login JS/CSS (external files only, CSP)
 // Guard fail => 302 to /admin/sign-in/ for documents, 401 JSON for XHR/fetch.
 // Server-side, so disabling JS cannot bypass it.
 import { readFileSync } from "node:fs";
@@ -56,8 +56,11 @@ export function mountAdminPages(app: Hono<{ Bindings: Env }>, backendRoot: strin
     return assetResponse(c, resolved);
   };
 
+  // Public static assets (JS/CSS). These contain no secrets — the security
+  // boundary is the guarded pages + APIs, not client code. The login page MUST
+  // load its own CSS/JS while unauthenticated, so these are served publicly.
+  // sessions.js / devices.js only render data via guarded APIs, so exposure is safe.
   const asset = (name: string) => async (c: AC) => {
-    if (!(await isAdminSession(c as unknown as Context<{ Bindings: Env }>))) return deny(c);
     const root = resolve(uiRoot);
     const resolved = resolveWithinRoot(root, name);
     if (!resolved) return c.text("Not found", 404);
@@ -83,7 +86,8 @@ export function mountAdminPages(app: Hono<{ Bindings: Env }>, backendRoot: strin
   app.get("/admin/devices", page(uiRoot, "devices.html", "admin"));
   app.get("/admin/devices/", page(uiRoot, "devices.html", "admin"));
 
-  // Guarded assets (JS/CSS only — fixed map, no traversal).
+  // Public assets (JS/CSS only — fixed map, no traversal). Safe to expose:
+  // no secrets in client code; sessions.js/devices.js render only via guarded APIs.
   for (const name of ["auth.js", "auth.css", "sessions.js", "devices.js"]) {
     app.get(`/admin/assets/${name}`, asset(name));
   }
