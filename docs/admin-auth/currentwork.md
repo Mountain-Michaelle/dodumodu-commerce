@@ -1,45 +1,43 @@
-dodumodu-commerce/dodumodu_backend/src/app.ts‎
+# Current Work — Admin Auth: guarded /admin/sign-in/ + no-bypass admin pages
 
+Date: 2026-10-10 | Branch: feat/admin-auth | Spec: docs/admin-auth/IMPLEMENT.md
 
-Now I have the wiring. The critical bypass question: does the existing /admin/* route (line 102, adminRoute — Cloudflare-Access guarded) have a /* guard or catch-all that would intercept my new /admin/sign-in/? I must read it before touching routing.
+## Locked requirements
+- Admin sign-in lives STRICTLY at /admin/sign-in/ (clean URL, no .html, no auth-ui/ prefix).
+- NO public /sign-in/ route.
+- REMOVE the /auth-ui/ route entirely (bundle copy step + serving).
+- Server-side guard: no /admin/* page served without a valid session (server 302, not JS).
 
-Cline read 3 files:
+## The bypass (why this work exists)
+- mountStatic(app, siteDist) serves dist/ with no session check, so dist/admin/index.html
+  (console) and dist/auth-ui/login.html are reachable raw today.
+- APIs are already gated correctly: /auth/* (login flow) and /admin-v2/*
+  (requireSession/requireAdmin/requirePerm). Only the admin HTML surface is unguarded.
+- Existing /admin/* API (src/routes/admin.ts, Cloudflare-Access guarded) must not be disturbed.
 
-C:/Users/user/Documents/Automation/dodumodu-commerce/dodumodu_backend/src/routes/admin.ts‎
+## Plan
+A. Guarded static helper in src/node/static.ts: mountGuardedStatic(app, distDir, guard)
+   reusing mountStatic resolution (MIME, traversal safety, clean-URL index.html) with a guard
+   check first; fail => 302 to /admin/sign-in/.
+B. Guarded page routes in src/node.ts AFTER /auth + /admin-v2 mounts and BEFORE mountStatic:
+   - GET /admin/sign-in/ (public) => login HTML.
+   - GET /admin, /admin/, /admin/sessions[/], /admin/devices[/] => __Host-sid via lookupSession
+     (+ role/idle/tier enforcement); valid admin => serve static page; else 302 /admin/sign-in/.
+   - GET /admin/assets/* => guarded JS/CSS (external files only, CSP forbids inline).
+C. Remove auth-ui/ serving: delete auth-ui -> dist/auth-ui copy in
+   dodumodu_site/build/bundle.mjs; /auth-ui/* then 404s.
+D. UI redirect: finishLogin() defaults to /admin/, honoring same-origin ?next= only.
+E. Collision safety: confirm adminRoute has no /* catch-all shadowing /admin/sign-in/;
+   if it does, place guarded page routes before app.route('/admin', adminRoute).
+F. Rebuild + verify live: /admin/sign-in/ => 200; /admin/, /admin/sessions/, /admin/devices/
+   without cookie => 302 to /admin/sign-in/; /auth-ui/login.html => 404; APIs unchanged;
+   full staff + admin login via Playwright lands on /admin/; tsc clean; commit + push.
 
-C:/Users/user/Documents/Automation/dodumodu-commerce/dodumodu_backend/src/auth-ui/login.html‎
+## Test accounts (local dev DB)
+- staff@example.com / phrase: correct-horse-battery-staple-99 (2 factors; code via
+  /auth/test/mailbox/staff@example.com).
+- admin2@example.com (first admin; device window open; enrolls phrase + TOTP + 8 backup
+  codes on first login; code via /auth/test/mailbox/admin2@example.com).
 
-C:/Users/user/Documents/Automation/dodumodu-commerce/dodumodu_backend/src/auth-ui/auth.js‎
-
-
-I have the full routing picture. Stopping the recon loop now — here's the definitive plan. No more reads.
-
-Current state
-Admin console pages (/admin/, /admin/sessions/, /admin/devices/) are static HTML served from dodumodu_site/dist/admin/ by mountStatic. Static files cannot be guarded — that's the bypass: anyone hitting /admin/ with JS disabled or by direct URL gets the page shell.
-Login UI lives at src/auth-ui/ (login.html + auth.js), copied to dist/auth-ui/ by bundle.mjs; currently reachable at /auth-ui/login.html.
-APIs are already correctly gated: /auth/* (login flow) and /admin-v2/* (requireSession/requireAdmin/requirePerm). The admin HTML is the only unguarded surface.
-There's an existing /admin/* API route (src/routes/admin.ts, Cloudflare-Access guarded) mounted in app.ts. I must confirm in Act mode whether it's a catch-all that would shadow /admin/sign-in/; my plan is collision-proof regardless (see A).
-Plan (admin-focused, no public /sign-in)
-A. Server-side page guard (the anti-bypass core). A guardAdminPages middleware in node.ts, ordered after the /auth + /admin-v2 API mounts and before mountStatic. It intercepts GET /admin/* document requests (Accept: text/html, not the API):
-
-/admin/sign-in/ → public, serve login HTML (no redirect loop).
-/admin/, /admin/sessions/, /admin/devices/ → read __Host-sid, run the same session resolution the API uses (lookupSession + role/idle/tier enforcement). Valid admin → serve the static page. Invalid/expired/missing → 302 → /admin/sign-in/.
-Because it's a server 302, disabling JS or curling directly cannot bypass it (unlike a client-side redirect).
-B. Sign-in at /admin/sign-in/ only. The page route serves login.html there. No /sign-in/ route is created (per your instruction). Login HTML/JS/CSS move out of the auth-ui/ prefix.
-
-C. Remove the auth-ui/ route. Delete the auth-ui → dist/auth-ui copy step in bundle.mjs; stop serving that prefix (it'll 404). Assets (auth.js, sessions.js, devices.js, auth.css) are served from the admin page paths (external files only — CSP forbids inline per §5.9).
-
-D. Post-login redirect. finishLogin() already targets /admin/; I'll keep that and ensure it's same-origin (no open redirect). Arriving at /admin/sign-in/ returns to /admin/.
-
-E. Collision safety. If the existing /admin/* API adminRoute is a catch-all, I'll scope my page guard + /admin/sign-in/ ahead of it and confirm /admin-v2/* (auth API) is untouched, so neither the Cloudflare-Access API nor the new guard is bypassed.
-
-F. Rebuild + verify (live, curl).
-
-No cookie: /admin/, /admin/sessions/, /admin/devices/ → 302 → /admin/sign-in/.
-No cookie: /auth-ui/login.html → 404 (prefix gone).
-/admin/sign-in/ → 200 login page.
-Full staff + admin login through Playwright → lands on /admin/; API calls without session → 401/403.
-Commit.
-Operator-only, flagged: everything runs against the local dev DB + local build. No production.
-
-One Act-mode verification before editing (A/E): whether adminRoute is a /* catch-all so I place the guard and /admin/sign-in/ where they can't be shadowed.
+## Operator note
+- Local dev DB + local build only. No production access.
