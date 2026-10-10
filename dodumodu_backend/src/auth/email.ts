@@ -2,6 +2,7 @@
 // interface so tests use a stub. Sent inside ctx.waitUntil so the response
 // never waits and never changes with email success. Never log the body/code.
 import type { Context } from "hono";
+import { afterResponse } from "./ctx";
 
 export interface EmailProvider {
   send(to: string, subject: string, text: string, idempotencyKey: string): Promise<void>;
@@ -69,10 +70,10 @@ export function providerForEnv(
 
 /** Send inside waitUntil; never throws into the request path. */
 export function sendInBackground(
-  c: Context<never>, provider: EmailProvider,
+  c: Context, provider: EmailProvider,
   to: string, subject: string, text: string, key: string,
 ): void {
-  c.executionCtx?.waitUntil?.(provider.send(to, subject, text, key).catch(() => {}));
+  void afterResponse(c, provider.send(to, subject, text, key));
 }
 
 /** The login-code email (code never logged). */

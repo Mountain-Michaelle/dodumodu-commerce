@@ -30,7 +30,7 @@ import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { sha256, toHex, decryptSecret, totpMatch } from "./crypto";
 import { providerForEnv, sendLoginCode, sendInBackground, testMailbox } from "./email";
 import { setFlowCookie, setSidCookie, setDidCookie, clearSidCookie, clearFlowCookie,
-  getFlowToken } from "./ctx";
+  getFlowToken, afterResponse } from "./ctx";
 import { loadFlow } from "./flows";
 
 type AppEnv = { Bindings: AuthEnv };
@@ -98,6 +98,20 @@ adminRoute.use("*", flagGate);
 adminRoute.use("*", originGuard);
 adminRoute.use("*", securityHeaders);
 
+// POST /auth/device/available -> does THIS browser hold an active device for
+// some admin? Used by the UI to show "Use this trusted device". Never leaks
+// whether a specific email has a device: it only reads the caller's own cookie.
+authRoute.get("/device/available", async (c) => {
+  const s = authInit(c);
+  if (!s.deviceToken) return c.json({ available: false });
+  const h = await tokenHashHex(s.deviceToken);
+  const row = await q1<{ ok: number }>(s.db,
+    sql`SELECT 1 AS ok FROM aa_admin_devices d JOIN aa_users u ON u.id = d.user_id
+      WHERE d.token_hash = decode(${h}, 'hex') AND d.status = 'active'
+        AND d.expires_at > now() AND u.role = 'admin' AND u.is_active`);
+  return c.json({ available: !!row });
+});
+
 // GET /auth/test/mailbox/:email -> last captured email for a recipient.
 // EXISTS ONLY when ALLOW_TEST_IP=1 (a .dev.vars-only var). Returns 404 otherwise,
 // so it is unreachable in any deployed config. Used by Playwright + attack tests
@@ -121,8 +135,8 @@ authRoute.post("/request", async (c) => guarded(c, async () => {
   const out = await requestCode(s.db, secrets, email, s.ctx, s.deviceToken);
   if (out.sendCode) {
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
-    c.executionCtx?.waitUntil?.(
-      sendLoginCode(provider, out.sendCode.to, out.sendCode.code).catch(() => {}));
+    await afterResponse(c as never,
+      sendLoginCode(provider, out.sendCode.to, out.sendCode.code));
   }
   if (out.sendDeniedAlert) {
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
@@ -147,8 +161,8 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
   const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken);
   if (out.sendCode) {
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
-    c.executionCtx?.waitUntil?.(
-      sendLoginCode(provider, out.sendCode.to, out.sendCode.code).catch(() => {}));
+    await afterResponse(c as never,
+      sendLoginCode(provider, out.sendCode.to, out.sendCode.code));
   }
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);
   return c.json({ ok: true }, 202);
@@ -160,7 +174,8 @@ authRoute.post("/code", async (c) => guarded(c, async () => {
   const { code } = await json<{ code?: string }>(c);
   const token = getFlowToken(c as never);
   if (!token) throw new AuthRejectError("flow");
-  const out = await verifyCode(s.db, secretsOf(c), token, code ?? "", s.ctx.ip);
+  if (typeof code !== "string" || code.length !== 10) throw new AuthRejectError("code");
+  const out = await verifyCode(s.db, secretsOf(c), token, code, s.ctx.ip);
   return c.json({ next: out.next });
 }));
 

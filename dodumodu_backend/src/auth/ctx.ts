@@ -15,6 +15,33 @@ export interface ReqCtx {
   ua: string;
 }
 
+/**
+ * Totally-safe waitUntil: Hono's `executionCtx` accessor THROWS on Node
+ * (@hono/node-server) because it only exists on the Worker. `?.` can't help
+ * with a throwing getter, so this catches. On the Worker the promise goes to
+ * waitUntil (never blocks the response); on Node it is awaited inline (tests
+ * and local dev rely on delivery before read-back) — but a rejection can never
+ * reach the request path.
+ */
+export async function afterResponse(c: Context, p: Promise<unknown>): Promise<void> {
+  let ctx: { waitUntil?: (x: Promise<unknown>) => void } | null = null;
+  try {
+    ctx = (c as Context & { executionCtx?: { waitUntil?: (x: Promise<unknown>) => void } })
+      .executionCtx ?? null;
+  } catch {
+    ctx = null;
+  }
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(p.catch(() => {}));
+    return;
+  }
+  try {
+    await p;
+  } catch {
+    /* email/drift failure is invisible to the client */
+  }
+}
+
 /** IPv4 /24 as "a.b.c"; IPv6 /48 as the first three expanded hextets. */
 export function ipPrefix(ip: string): string {
   // IPv4-mapped IPv6 (::ffff:a.b.c.d) is treated as IPv4.

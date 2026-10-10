@@ -40,7 +40,7 @@ async function api(path, body) {
 
 const STAGES = {
   email:          { label: "Email",           type: "email",    ac: "username",        btn: "Continue", sub: "Enter your email to receive a one-time code." },
-  otp:            { label: "Code",            type: "text",     ac: "one-time-code",   btn: "Resend code", sub: "Enter the code we emailed you." },
+  otp:            { label: "Code",            type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter the code we emailed you." },
   phrase:         { label: "Sign-in phrase",  type: "password", ac: "current-password",btn: "Continue", sub: "Enter your sign-in phrase." },
   enroll_phrase:  { label: "Choose a phrase", type: "password", ac: "new-password",    btn: "Continue", sub: "Choose a sign-in phrase (12-64 characters, no spaces)." },
   totp:           { label: "Authenticator",   type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter the 6-digit code from your authenticator app." },
@@ -65,6 +65,38 @@ function render() {
   } else { setHint(""); }
   const backup = $("backup-link");
   if (backup) backup.hidden = !(state.stage === "totp" && state.showBackup && !state.strict);
+  const resend = $("resend-link");
+  if (resend) { resend.hidden = state.stage !== "otp"; tick(); }
+  const dev = $("device-link");
+  if (dev) dev.hidden = !(state.stage === "email" && state.device);
+  // First time at totp_enroll: fetch the pending secret and show it ONCE.
+  if (state.stage === "totp_enroll" && !state.enrollStarted) {
+    state.enrollStarted = true;
+    enrollStart();
+  }
+}
+
+// totp_enroll: POST /auth/totp/enroll/start, render secret + otpauth link once.
+async function enrollStart() {
+  const res = await fetch(AUTH + "/totp/enroll/start", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    credentials: "same-origin", body: "{}",
+  });
+  if (res.status !== 200) { showNote("error", "Invalid or expired code"); return; }
+  const { secret, otpauth_uri } = await res.json();
+  const box = $("enroll-box");
+  box.innerHTML = "";
+  const head = document.createElement("strong");
+  head.textContent = "Add this to your authenticator app (shown once).";
+  const code = document.createElement("div");
+  code.className = "mono"; code.textContent = secret;
+  const uri = document.createElement("a");
+  uri.href = otpauth_uri; uri.textContent = "Open in authenticator"; uri.rel = "noopener";
+  const ok = document.createElement("button");
+  ok.type = "button"; ok.className = "ghost"; ok.textContent = "I saved it";
+  ok.addEventListener("click", () => { box.hidden = true; $("input").focus(); });
+  box.appendChild(head); box.appendChild(code); box.appendChild(uri); box.appendChild(ok);
+  box.hidden = false;
 }
 
 // "Use a backup code instead" -> switch the totp input to accept a backup code.
@@ -102,7 +134,7 @@ async function onSubmit(ev) {
   try {
     switch (state.stage) {
       case "email":        await doRequest(value); break;
-      case "otp":          await doResend(); break;
+      case "otp":          await doCode(value); break;
       case "phrase":       await doPhrase(value); break;
       case "enroll_phrase":await doEnroll(value); break;
       case "totp":
@@ -130,7 +162,11 @@ async function handleResult(status, data) {
     return;
   }
   showNote("");
-  if (data && data.next) { state.stage = data.next; render(); }
+  if (data && data.next) {
+    if (data.next === "ready") { state.stage = "ready"; await finishLogin(); return; }
+    state.stage = data.next;
+    render();
+  }
 }
 
 async function doRequest(email) {
@@ -201,23 +237,60 @@ async function finishLogin() {
 
 function tick() {
   const now = Date.now();
+  const link = $("resend-link");
   const btn = $("submit");
   if (state.cooldownUntil > now) {
     const secs = Math.ceil((state.cooldownUntil - now) / 1000);
-    btn.disabled = true;
-    btn.textContent = state.stage === "otp" ? `Resend in ${secs}s` : `Wait ${secs}s`;
+    // A lock disables the whole form; a resend cooldown only greys the link.
+    if (state.locked) btn.disabled = true;
+    if (link && !link.hidden) { link.textContent = `Resend code in ${secs}s`; link.setAttribute("aria-disabled", "1"); }
   } else {
+    if (state.locked) { state.locked = false; btn.disabled = false; }
+    if (link) { link.textContent = "Resend code"; link.removeAttribute("aria-disabled"); }
+    if (!state.timer) return;
     clearInterval(state.timer); state.timer = null;
-    btn.disabled = false;
-    if (state.stage === "otp") btn.textContent = "Resend code";
   }
 }
 function startResendCountdown(secs) { state.cooldownUntil = Date.now() + secs * 1000; if (!state.timer) state.timer = setInterval(tick, 500); tick(); }
 function startLockCountdown(secs) {
+  state.locked = true;
   state.cooldownUntil = Date.now() + (typeof secs === "number" ? secs : 60) * 1000;
   if (!state.timer) state.timer = setInterval(tick, 500); tick();
 }
 
+// Resend link (only visible at the otp stage, during/after its cooldown).
+if ($("resend-link")) {
+  $("resend-link").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    if (Date.now() < state.cooldownUntil) return;
+    doResend();
+  });
+}
+
+// "Use this trusted device" -> the device path (phrase -> TOTP -> session).
+if ($("device-link")) {
+  $("device-link").addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    const email = $("input").value.trim();
+    if (!email) return;
+    busy(true);
+    try {
+      const { status, data } = await api(AUTH + "/device/start", { email });
+      if (status === 202) {
+        state.stage = "phrase";
+        showNote("");
+        render();
+      } else { await handleResult(status, data); }
+    } finally { busy(false); }
+  });
+}
+
 $("form").addEventListener("submit", onSubmit);
 render();
+// Show the trusted-device option only if this browser actually holds an active
+// device (checked against our own cookie; leaks nothing about a given email).
+fetch(AUTH + "/device/available", { credentials: "same-origin" })
+  .then((r) => (r.status === 200 ? r.json() : { available: false }))
+  .then((j) => { if (j.available) { state.device = true; render(); } })
+  .catch(() => {});
 

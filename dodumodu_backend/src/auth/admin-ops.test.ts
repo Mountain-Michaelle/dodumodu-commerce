@@ -24,7 +24,18 @@ async function cleanup(db: Db) {
 test("admin ops part 1: perms, create, guards, phrase reset", { skip: !databaseUrl }, async (t) => {
   registerDbDriver(pgDriver);
   const db = pgDriver(databaseUrl!);
-  t.after(async () => { await cleanup(db); await closePools(); });
+  // The last-admin guard is GLOBAL by spec. Park any pre-existing active admins
+  // (the E2E seed keeps one) so this test owns the world, restore afterward.
+  const parked = await q<{ id: string }>(db,
+    sql`UPDATE aa_users SET is_active = false
+        WHERE role = 'admin' AND is_active AND email NOT LIKE ${tag + "%"}
+        RETURNING id::text AS id`);
+  t.after(async () => {
+    for (const r of parked) {
+      await q(db, sql`UPDATE aa_users SET is_active = true WHERE id = ${r.id}::uuid`);
+    }
+    await cleanup(db); await closePools();
+  });
 
   const adminA = await createUser(db, `${tag}-a@example.com`, "admin", null as never);
   const adminB = await createUser(db, `${tag}-b@example.com`, "admin", adminA);
@@ -42,7 +53,7 @@ test("admin ops part 1: perms, create, guards, phrase reset", { skip: !databaseU
   // Last-admin guard.
   await deactivateUser(db, adminA);
   const remain = await q<{ id: string }>(db,
-    sql`SELECT id FROM aa_users WHERE role = 'admin' AND is_active ORDER BY id`);
+    sql`SELECT id FROM aa_users WHERE role = 'admin' AND is_active AND email LIKE ${tag + "%"} ORDER BY id`);
   assert.equal(remain.length, 1);
   assert.equal(remain[0].id, adminB);
   await assert.rejects(deactivateUser(db, adminB), AuthRejectError);
@@ -50,10 +61,10 @@ test("admin ops part 1: perms, create, guards, phrase reset", { skip: !databaseU
   // Phrase reset: create, consume with new phrase, single-use.
   const resetToken = await createPhraseReset(db, staff, adminB);
   assert.ok(resetToken.length > 20);
-  await consumePhraseReset(db, resetToken, "brand new phrase 77!");
-  await assert.rejects(consumePhraseReset(db, resetToken, "another phrase 88!"), AuthRejectError);
+  await consumePhraseReset(db, resetToken, "brand-new-phrase-77!");
+  await assert.rejects(consumePhraseReset(db, resetToken, "another-phrase-88!"), AuthRejectError);
   const row = await q<{ phrase_hash: string }>(db,
     sql`SELECT phrase_hash FROM aa_users WHERE id = ${staff}`);
-  assert.equal(await verifyPhrase(row[0].phrase_hash, "brand new phrase 77!"), true);
-  assert.equal(await verifyPhrase(row[0].phrase_hash, "correct horse 99!"), false);
+  assert.equal(await verifyPhrase(row[0].phrase_hash, "brand-new-phrase-77!"), true);
+  assert.equal(await verifyPhrase(row[0].phrase_hash, "correct-horse-99!"), false);
 });

@@ -18,7 +18,7 @@ import { AuthRejectError } from "./errors";
 
 export const tag = `totp:${Date.now().toString(36)}`;
 export const CTX = { ip: "10.2.3.4", prefix: "10.2.3", country: "NG", ua: "itest" };
-export const PHRASE = "correct horse 99!";
+export const PHRASE = "correct-horse-99!";   // §5.2.1: no spaces
 
 export function secrets(): EntrySecrets & { totpEncKey: Uint8Array } {
   return {

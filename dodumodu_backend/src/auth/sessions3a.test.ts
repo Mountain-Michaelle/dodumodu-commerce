@@ -19,7 +19,7 @@ import { AuthRejectError } from "./errors";
 
 const databaseUrl = process.env.DATABASE_URL;
 const tag = `sess2a:${Date.now().toString(36)}`;
-const PHRASE = "correct horse 99!";
+const PHRASE = "correct-horse-99!";        // §5.2.1: no spaces
 const A = { ip: "10.92.1.1", prefix: "10.92.1", country: "NG", ua: "itest" };
 const B = { ip: "10.99.9.9", prefix: "10.99.9", country: "NG", ua: "itest" };
 

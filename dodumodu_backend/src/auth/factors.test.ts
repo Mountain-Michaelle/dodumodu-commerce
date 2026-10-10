@@ -53,14 +53,14 @@ test("factors: staff full journey request->code->phrase->ready", { skip: !databa
 
   // Mismatched confirm: 401.
   await assert.rejects(
-    enrollPhrase(db, s, req.flowToken, "correct horse 99!", "different phrase 99!", CTX.ip),
+    enrollPhrase(db, s, req.flowToken, "correct-horse-99!", "different-phrase-99!", CTX.ip),
     AuthRejectError);
   // Enroll: staff -> ready.
-  const e = await enrollPhrase(db, s, req.flowToken, "correct horse 99!", "correct horse 99!", CTX.ip);
+  const e = await enrollPhrase(db, s, req.flowToken, "correct-horse-99!", "correct-horse-99!", CTX.ip);
   assert.equal(e.next, "ready");
   // Double enroll: stage is ready now -> 401.
   await assert.rejects(
-    enrollPhrase(db, s, req.flowToken, "another phrase 00!", "another phrase 00!", CTX.ip),
+    enrollPhrase(db, s, req.flowToken, "another-phrase-00!", "another-phrase-00!", CTX.ip),
     AuthRejectError);
 
   // New flow for the same staff user: code -> phrase stage (phrase exists now).
@@ -69,9 +69,9 @@ test("factors: staff full journey request->code->phrase->ready", { skip: !databa
   const v2 = await verifyCode(db, s, req2.flowToken, req2.sendCode.code, "10.9.9.9");
   assert.equal(v2.next, "phrase");
   // Wrong phrase: 401.
-  await assert.rejects(verifyPhrase(db, s, req2.flowToken, "wrong phrase at all", "10.9.9.9"), AuthRejectError);
+  await assert.rejects(verifyPhrase(db, s, req2.flowToken, "wrong-phrase-at-all!", "10.9.9.9"), AuthRejectError);
   // Right phrase: staff -> ready.
-  const p = await verifyPhrase(db, s, req2.flowToken, "correct horse 99!", "10.9.9.9");
+  const p = await verifyPhrase(db, s, req2.flowToken, "correct-horse-99!", "10.9.9.9");
   assert.equal(p.next, "ready");
 
   // Dummy flow (unknown email): rejects identically at code and phrase.

@@ -6,7 +6,7 @@ import type { Context, Next } from "hono";
 import { createDb, type Db } from "../db";
 import { adminAuthEnabled } from "./config";
 import { lookupSession, touchSession, touchDevice, type Session } from "./session-lookup";
-import { buildCtx, getSidToken, getDidToken, type ReqCtx } from "./ctx";
+import { buildCtx, afterResponse, getSidToken, getDidToken, type ReqCtx } from "./ctx";
 import { AuthUnauthorizedError, AuthForbiddenError } from "./errors";
 
 export type AuthEnv = Record<string, string | undefined> & { DATABASE_URL: string };
@@ -81,9 +81,10 @@ export async function loadSession(c: Context<{ Bindings: AuthEnv }>): Promise<Se
   }
   s.session = sess;
   if (sess.needsTouch) {
-    // Touch in waitUntil so the response never waits (spec §6).
+    // Touch in waitUntil on the Worker (response never waits); inline on Node
+    // so local/test delivery is deterministic. Never throws into the request.
     const token = s.sessionToken;
-    c.executionCtx?.waitUntil?.(touchSession(s.db, token).then(() => {
+    void afterResponse(c as never, touchSession(s.db, token).then(() => {
       if (sess.deviceId) return touchDevice(s.db, sess.deviceId!);
     }));
   }
