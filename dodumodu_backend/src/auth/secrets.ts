@@ -2,6 +2,7 @@
 // a missing secret is a server fault (503), never a silent allow.
 import { loadKey } from "./crypto";
 import type { AuthEnv } from "./middleware";
+import { AuthServerFaultError } from "./errors";
 
 export interface AuthSecrets {
   otpKey: Uint8Array;
@@ -16,7 +17,9 @@ export function loadAuthSecrets(env: AuthEnv): AuthSecrets {
   const throttleKey = env.THROTTLE_KEY ? loadKey(env.THROTTLE_KEY, "throttle") : null;
   const totpEncKey = env.TOTP_ENC_KEY ? loadKey(env.TOTP_ENC_KEY, "totp-enc") : null;
   if (!otpKey || !throttleKey || !totpEncKey) {
-    throw new Error("auth secrets not configured");
+    // Missing secrets is OUR fault, not the caller's: fail closed as 503
+    // {retry:true} (spec §4), never 401 and never a bare 500.
+    throw new AuthServerFaultError("auth secrets not configured");
   }
   return {
     otpKey, throttleKey, totpEncKey,

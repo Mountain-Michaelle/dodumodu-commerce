@@ -223,15 +223,30 @@ function showBackupCodes(codes) {
   box.hidden = false;
 }
 
+// Same-origin ?next= only: a leading single "/" is required and "//" (protocol
+// relative) and absolute URLs are refused, so this cannot be used as an open
+// redirect (§11 web attack: open redirects).
+function safeNext() {
+  try {
+    const p = new URLSearchParams(window.location.search).get("next");
+    if (!p || p[0] !== "/" || p[1] === "/" || p[1] === "\\") return null;
+    return p;
+  } catch { return null; }
+}
+
 async function finishLogin() {
   const { status, data } = await api(AUTH + "/session", {});
   if (status === 200) {
     const me = await refreshMe();
     state.stage = "done";
     $("form").hidden = true;
-    showNote("ok", "Signed in.");
+    showNote("ok", "Signed in. Taking you to the admin console…");
     if (me && me.role === "admin") $("devices-link").hidden = false;
     $("sessions-link").hidden = false;
+    // Land on the main admin page (/admin/). The session cookie is same-origin,
+    // so it rides along. Honor a validated ?next= if one was supplied.
+    const target = safeNext() || "/admin/";
+    window.setTimeout(() => { window.location.assign(target); }, 400);
   } else { await handleResult(status, data); }
 }
 
