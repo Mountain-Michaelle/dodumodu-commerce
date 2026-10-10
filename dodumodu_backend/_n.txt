@@ -1,0 +1,23 @@
+
+src\node.ts:3:// differ: a TCP Postgres driver instead of Neon's HTTP one, a directory
+src\node.ts:7:// Nothing in src/app.ts, src/routes/, src/services/ or src/data/ knows this
+src\node.ts:10:import { serve } from "@hono/node-server";
+src\node.ts:11:import { existsSync } from "node:fs";
+src\node.ts:12:import { join, resolve } from "node:path";
+src\node.ts:13:import { app } from "./app";
+src\node.ts:14:import { registerDbDriver } from "./db";
+src\node.ts:15:import { closePools, pgDriver } from "./dbDrivers/pg";
+src\node.ts:16:import type { Env } from "./env";
+src\node.ts:17:import { backendRoot, loadRootEnv, repoRoot } from "./node/envFile";
+src\node.ts:18:import { localBucket, memoryKV } from "./node/shims";
+src\node.ts:19:import { mountMedia, mountStatic } from "./node/static";
+src\node.ts:25:const siteDist = join(repoRoot, "dodumodu_site", "dist");
+src\node.ts:102:  RL_ABUSE_DISTINCT_PHONES: process.env.RL_ABUSE_DISTINCT_PHONES ?? "40",
+src\node.ts:132:registerDbDriver(pgDriver);
+src\node.ts:135:if (existsSync(siteDist)) {
+src\node.ts:136:  mountStatic(app, siteDist);
+src\node.ts:147:const fetchWithLocalIdentity: typeof app.fetch = (request) => {
+src\node.ts:151:  return app.fetch(new Request(request, { headers }), env);
+src\node.ts:174:  if (!existsSync(siteDist)) {
+src\node.ts:175:    lines.push(`  No site build found at ${siteDist} — run "npm run build" in dodumodu_site.`);
+
