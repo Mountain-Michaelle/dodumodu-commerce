@@ -18,7 +18,7 @@ import { AuthRejectError } from "./errors";
 
 const databaseUrl = process.env.DATABASE_URL;
 const tag = `sess:${Date.now().toString(36)}`;
-const PHRASE = "correct horse 99!";
+const PHRASE = "correct-horse-99!";        // §5.2.1: no spaces
 const A = { ip: "10.91.1.1", prefix: "10.91.1", country: "NG", ua: "itest" };
 
 function secrets(): EntrySecrets & { totpEncKey: Uint8Array } {

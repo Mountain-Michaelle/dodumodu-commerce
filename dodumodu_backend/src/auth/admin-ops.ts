@@ -7,6 +7,7 @@ import type { Db } from "../db";
 import { isV2Perm, STEPUP_WINDOW_SECS, STEPUP_WINDOW_SECS_STRICT,
   FIRST_DEVICE_WINDOW_HOURS, SESSION_IDLE_SECS_STAFF } from "./config";
 import { normalizeEmail, randomToken } from "./crypto";
+import { assertPhraseFormat } from "./phrase";
 import { tokenHashHex } from "./keys";
 import { hashPhrase } from "./argon2";
 import { AuthRejectError, AuthServerFaultError } from "./errors";
@@ -64,6 +65,7 @@ export async function createPhraseReset(
 export async function consumePhraseReset(
   db: Db, resetToken: string, newPhrase: string,
 ): Promise<void> {
+  assertPhraseFormat(newPhrase);
   const hashHex = await tokenHashHex(resetToken);
   const newHash = await hashPhrase(newPhrase);
   const row = await q1<{ id: string }>(db,

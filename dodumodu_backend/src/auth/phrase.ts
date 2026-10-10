@@ -14,12 +14,20 @@ function phraseKey(tag: string, ip: string): string {
   return `phrase:${tag}:${ip}`;
 }
 
+/** Spec §5.2.1: 12-64 chars, no spaces, any symbol. Guards every SET path. */
+export function assertPhraseFormat(phrase: string): void {
+  if (phrase.length < 12 || phrase.length > 64 || /\s/.test(phrase)) {
+    throw new AuthRejectError("phrase");
+  }
+}
+
 /** First login (stage='enroll_phrase'). Sets the hash iff none exists. */
 export async function enrollPhrase(
   db: Db, secrets: VerifySecrets, flowToken: string,
   phrase: string, confirm: string, ip: string,
 ): Promise<{ next: Stage }> {
   if (!safeEqual(phrase, confirm)) throw new AuthRejectError("phrase");
+  assertPhraseFormat(phrase);
   const flow = await loadFlow(db, flowToken);
   if (!flow || flow.stage !== "enroll_phrase" || flow.user_id === null) {
     throw new AuthRejectError("flow");

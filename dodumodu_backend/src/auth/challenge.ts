@@ -5,7 +5,7 @@
 import { q1, sql } from "./sql";
 import type { Db } from "../db";
 import { OTP_TTL_SECS, OTP_RESEND_COOLDOWN_SECS, OTP_RESEND_MAX } from "./config";
-import { deriveCode, codeMac, toHex } from "./crypto";
+import { deriveCode, codeMac, toHex, fromHex } from "./crypto";
 import { AuthServerFaultError } from "./errors";
 
 export interface ChallengeIssue {
@@ -55,6 +55,5 @@ export async function issueChallenge(
 export async function deriveChallengeCode(
   otpKey: Uint8Array, userId: string, nonceHex: string,
 ): Promise<string> {
-  const bytes = Uint8Array.from(Buffer.from(nonceHex, "hex"));
-  return deriveCode(otpKey, userId, bytes);
+  return deriveCode(otpKey, userId, fromHex(nonceHex));
 }

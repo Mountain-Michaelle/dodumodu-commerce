@@ -22,6 +22,14 @@ function totpKey(tag: string, ip: string): string {
 
 export interface TotpStart { secret: string; otpauthUri: string; }
 
+/** Generate a fresh backup-code set (plain + hex hashes), for regenerate. */
+export async function genBackupCodes(): Promise<{ codes: string[]; hashes: string[] }> {
+  const codes = Array.from({ length: BACKUP_CODE_COUNT }, backupCode);
+  const hashes = await Promise.all(
+    codes.map(async (c) => toHex(await sha256(c.replace("-", "")))));
+  return { codes, hashes };
+}
+
 /** Begin enrollment: fresh secret stored pending, shown ONCE (reload = new flow). */
 export async function totpEnrollStart(
   db: Db, secrets: VerifySecrets & { totpEncKey: Uint8Array },

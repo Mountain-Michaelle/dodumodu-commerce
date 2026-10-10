@@ -1,7 +1,10 @@
 // ADMIN_AUTH_V2 config — one module, spec §5.8. Verbatim values.
 // Everything new is behind ADMIN_AUTH_V2 ("0" default). Flag off = new routes 404.
 export const AUTH_BASE = "/auth";
-export const ADMIN_BASE = "/admin";
+// Spec §2.4: the existing admin console already owns /admin (and its /admin/*
+// middleware). Mount the new admin routes under /admin-v2 so nothing existing
+// is wrapped, overridden or re-ordered. /auth has no collision.
+export const ADMIN_BASE = "/admin-v2";
 
 export const OTP_LEN = 10;
 export const OTP_TTL_SECS = 180;
