@@ -69,9 +69,8 @@ const orderStatusFilter = z.enum([
 
 export const orderListFiltersSchema = z.object({
   status: orderStatusFilter.optional(),
-  action: z.enum([
-    "deliver", "revert", "mark-paid", "mark-failed", "cancel", "revert-cancel",
-    "mark-not-picking", "revert-not-picking",
+  availableAction: z.enum([
+    "today", "yesterday", "this-week", "last-week", "this-month", "last-month",
   ]).optional(),
   paymentMethod: z.enum(["pay_now", "cod"]).optional(),
   productId: z.coerce.number().int().positive().optional(),

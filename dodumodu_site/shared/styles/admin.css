@@ -221,14 +221,43 @@ p:last-child { margin-bottom: 0; }
 .search-status { font-size: .6875rem; color: var(--text-muted); white-space: nowrap; }
 .search-status:empty { display: none; }
 .list-summary {
+  position: relative;
   display: flex; align-items: center; gap: .75rem;
   padding: .5rem 1rem; border-bottom: 1px solid var(--border);
 }
-.result-count { color: var(--text-muted); font-size: .8125rem; }
+/* The result count: small-screen badge so it never crowds the buttons. At
+   <1000px the summary row stacks and the count pins top-left in light orange,
+   keeping the Export/Copy/switch row clear below it. */
+.result-count {
+  color: var(--text-muted); font-size: .8125rem;
+  background: none; border-radius: 0; padding: 0;
+}
+@media (max-width: 1000px) {
+  .list-summary { flex-wrap: wrap; padding-top: 1.75rem; }
+  .list-summary > .result-count {
+    position: absolute; top: .375rem; left: .625rem;
+    background: #fdf3e3; border: 1px solid #f0d3ac; color: #9a5b12;
+    border-radius: 999px; padding: .0625rem .5rem; font-size: .75rem; font-weight: 600;
+    white-space: nowrap; max-width: calc(100% - 1.25rem);
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .list-actions { flex: 1 1 100%; margin-left: 0; }
+  .bulk-bar { padding-top: 1.75rem; }
+  /* The selection summary rides top-right as one unit - count and Clear stay
+     together so they never wedge between the action buttons. */
+  .bulk-bar > .bulk-meta {
+    position: absolute; bottom: .375rem; right: .625rem;
+    background: #fdf3e3; border: 1px solid #f0d3ac; border-radius: 999px;
+    padding: .0625rem .375rem .0625rem .5rem;
+  }
+  .bulk-bar > .bulk-meta .bulk-count,
+  .bulk-bar > .bulk-meta .bulk-clear { color: #9a5b12; font-size: .75rem; }
+  .bulk-bar > .bulk-meta .bulk-clear { padding: 0 .125rem; min-height: 0; }
+}
 .list-summary > :last-child { margin-left: auto; }
 /* The export pair sits as ONE last child so the space-between lands on the
    group, not between the two buttons. */
-.list-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.list-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-left: auto; justify-content: flex-end; }
 
 /* align-items is what lets the new status note sit beside the box rather than
    below it, so adding one did not change the height of the controls row and
@@ -643,11 +672,14 @@ p:last-child { margin-bottom: 0; }
 /* -------------------------------------------------------------- bulk bar */
 
 .bulk-bar {
+  position: relative;
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   padding: .5rem .75rem;
   background: var(--primary-soft); border: 1px solid #c7dedd; border-radius: var(--radius-sm);
 }
 .bulk-count { font-weight: 600; font-size: .8125rem; color: var(--primary); }
+/* The count + clear ride together so they never split the action buttons apart. */
+.bulk-meta { display: inline-flex; align-items: center; gap: .5rem; }
 
 /* In the orders list the bar sits directly under the toolbar, ABOVE the table:
    full width and flush, so it reads as part of the toolbar rather than a rounded
@@ -949,8 +981,8 @@ p:last-child { margin-bottom: 0; }
 
 /* Medium and below: the toolbar goes icon-only - the switch keeps its pill and
    glyph, Export/Copy keep theirs, and the labels (still in the DOM for screen
-   readers) hide. One breakpoint, the same one the sidebar collapses at. */
-@media (max-width: 900px) {
+   readers) hide. 1000px breakpoint so crowded tablet widths stay icon-only. */
+@media (max-width: 1000px) {
   .list-actions .button-label,
   .assignment-switch-label { display: none; }
   .list-actions .button { padding-left: .6rem; padding-right: .6rem; }
@@ -981,6 +1013,28 @@ p:last-child { margin-bottom: 0; }
   border: 1px solid #f0d3ac;
   font-size: 0.78rem;
   font-weight: 600;
+}
+
+/* The customer's chosen delivery window, bottom of the Delivery cell: light red
+   background with a dark red face, so it reads as urgency without shouting.
+   Fixed 90px width caps the badge text to ~30 chars on narrow screens. */
+.tag-delivery {
+  display: inline-block;
+  align-self: flex-start;
+  width: 90px;
+  max-width: 90px;
+  min-width: 0;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #fdecec;
+  color: #a12020;
+  border: 1px solid #f3b8b8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 /* The staff picker: a searchable list in a modal, reusing the modal primitive. */

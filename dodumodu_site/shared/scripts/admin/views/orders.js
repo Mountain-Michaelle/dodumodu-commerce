@@ -10,6 +10,19 @@ import {
 import { markAsSpam, revertSpamFlag } from "./spam.js";
 import { orderBadges, orderEvidenceSection } from "./evidence.js";
 
+// The delivery window the customer picked (today / tomorrow / next_tomorrow).
+// Full labels live in the modal; the LIST badge uses the short forms ("Day
+// after…") so the Delivery column never dominates the row.
+const DELIVERY_LABELS = { today: "Today", tomorrow: "Tomorrow", next_tomorrow: "Day after tomorrow" };
+const DELIVERY_SHORT = { today: "Today", tomorrow: "Tomorrow", next_tomorrow: "Day after…" };
+
+// Long addresses dominate a row, so the list shows 30 chars + "…"; the modal
+// shows the full text. Title carries the full address for hover/copy.
+function shortAddress(address) {
+  const text = String(address ?? "");
+  return text.length > 30 ? `${text.slice(0, 30)}…` : text;
+}
+
 // Orders: the lightweight CRM.
 //
 // Two rules shape this whole file.
@@ -32,17 +45,6 @@ const STATUSES = [
   { value: "failed", label: "Failed" },
   { value: "cancelled", label: "Cancelled" },
   { value: "not_picking", label: "Not Picking" },
-];
-
-const ACTIONS = [
-  { value: "deliver", label: "Mark delivered" },
-  { value: "revert", label: "Revert delivery" },
-  { value: "mark-paid", label: "Mark paid" },
-  { value: "mark-failed", label: "Mark failed" },
-  { value: "cancel", label: "Cancel" },
-  { value: "revert-cancel", label: "Revert cancellation" },
-  { value: "mark-not-picking", label: "Mark Not Picking" },
-  { value: "revert-not-picking", label: "Revert Not Picking" },
 ];
 
 // How each server action verb is worded, and how dangerous it is. The set of verbs
@@ -148,7 +150,7 @@ export function ordersView({ shell, identity }) {
       // lives in one place. A per-staff filter (assignedTo) and the deleted
       // filter ride along; all are absent when off, which means "no filter".
       const data = await ui.load((signal) => api.get(`/orders${qs({
-        q: state.q, status: state.status, action: state.action, paymentMethod: state.paymentMethod,
+        q: state.q, status: state.status, availableAction: state.availableAction, paymentMethod: state.paymentMethod,
         from: state.from, to: state.to, page: state.page, pageSize: state.pageSize,
         ...(state.assignmentMode && !state.assignedTo ? { unassigned: "true" } : {}),
         ...(state.assignedTo ? { assignedTo: state.assignedTo } : {}),
@@ -493,8 +495,9 @@ export function ordersView({ shell, identity }) {
             el("span", { class: "strong", text: row.customerName }),
             el("span", { class: "muted mono", text: row.phone })) },
           { label: "Delivery", render: ({ row }) => el("div", { class: "stack" },
-            el("span", { text: row.address }),
-            el("span", { class: "muted", text: row.state })) },
+            el("span", { text: shortAddress(row.address), title: row.address }),
+            el("span", { class: "muted", text: row.state }),
+            el("span", { class: "tag tag-delivery", text: DELIVERY_SHORT[row.deliveryDate] || row.deliveryDate, title: DELIVERY_LABELS[row.deliveryDate] || row.deliveryDate })) },
           { label: "Item", render: ({ row }) => el("div", { class: "stack" },
             el("span", { text: row.productName || "—" }),
             el("span", { class: "muted", text: `×${row.quantity}` })) },
@@ -692,9 +695,6 @@ export function ordersView({ shell, identity }) {
       actions: [
         offer("deliver", "Mark delivered", false),
         offer("revert", "Revert delivery", false),
-        ...(can("orders:payment-override")
-          ? [offer("mark-paid", "Mark paid", true), offer("mark-failed", "Mark failed", true)]
-          : []),
         // Same gate as the row menu: the feature on AND orders:write.
         ...(assignmentActive() && can("orders:write") ? [{ label: "Assign to…", onSelect: () => assignRows(ids) }] : []),
         { label: "Export (.xlsx)", onSelect: () => exportXlsx(selectedRows(), `orders-${new Date().toISOString().slice(0, 10)}.xlsx`) },
@@ -953,10 +953,17 @@ export function ordersView({ shell, identity }) {
           onSearch: (value) => { state.q = value; state.page = 1; load(); },
         }),
         adminFilters({
-          value: { status: state.status, action: state.action, paymentMethod: state.paymentMethod },
+          value: { status: state.status, paymentMethod: state.paymentMethod },
           filters: [
             { key: "status", label: "Status", options: STATUSES },
-            { key: "action", label: "Available action", options: ACTIONS },
+            { key: "availableAction", label: "Quick Date", options: [
+              { value: "today", label: "Today" },
+              { value: "yesterday", label: "Yesterday" },
+              { value: "this-week", label: "This week" },
+              { value: "last-week", label: "Last week" },
+              { value: "this-month", label: "This month" },
+              { value: "last-month", label: "Last month" },
+            ] },
             { key: "paymentMethod", label: "Payment", options: [
               { value: "pay_now", label: "Paid up front" },
               { value: "cod", label: "Pay on delivery" },
@@ -964,7 +971,7 @@ export function ordersView({ shell, identity }) {
           ],
           onChange: (next) => {
             state.status = next.status || "";
-            state.action = next.action || "";
+            state.availableAction = next.availableAction || "";
             state.paymentMethod = next.paymentMethod || "";
             state.page = 1;
             load();

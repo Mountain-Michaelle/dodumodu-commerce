@@ -1,7 +1,8 @@
 import { eq, and, asc, sql, like, lt, lte, gte, ne, inArray, or, desc, count, type SQL } from "drizzle-orm";
 import type { Db } from "../db";
-import { categories, orders, orderStatusHistory, products } from "../schema";
+import { categories, orders, orderStatusHistory, products, spamFlags } from "../schema";
 import { updatedAtBucketCondition } from "../shared/versionGuard";
+import { lagosDayStart } from "../abuse/orderEvidence";
 
 // §5.4b — the only transitions legal in V1. Checked here, not trusted from callers.
 // Phase 7a additions: cancelled and not_picking are terminal except for reversal,
@@ -529,7 +530,7 @@ export const ORDER_SORT_FIELDS = [
 
 export type OrderListFilters = {
   status: string | null;
-  action: string | null;
+  availableAction: QuickDateKey | null;
   paymentMethod: "pay_now" | "cod" | null;
   phone: string | null;
   from: Date | null;
@@ -558,7 +559,7 @@ export type OrderListFilters = {
  */
 export function filtersFromQuery(input: {
   status?: string;
-  action?: string;
+  availableAction?: QuickDateKey;
   paymentMethod?: "pay_now" | "cod";
   phone?: string;
   productId?: number;
@@ -571,7 +572,7 @@ export function filtersFromQuery(input: {
 }): OrderListFilters {
   return {
     status: input.status ?? null,
-    action: input.action ?? null,
+    availableAction: input.availableAction ?? null,
     paymentMethod: input.paymentMethod ?? null,
     phone: input.phone?.trim() || null,
     productId: input.productId ?? null,
@@ -582,6 +583,62 @@ export function filtersFromQuery(input: {
     unassigned: input.unassigned === "true",
     deleted: input.deleted === "true",
   };
+}
+
+// ---- Quick Date presets (Africa/Lagos wall-clock) -------------------------
+// The operator's "today" is Lagos, not the server's clock. Workers run in UTC,
+// and a UTC midnight boundary splits every Lagos morning: an order placed
+// 00:30 WAT lands on 23:30 UTC the previous day and would vanish from "today".
+// lagosDayStart is the single source of truth for the day boundary; weeks are
+// Monday-based (the business week) and months are calendar months. Every range
+// is half-open [from, to) so a day/week/month never double-counts a boundary
+// instant, which matters because createdAt carries second/microsecond stamps.
+const LAGOS_OFFSET_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type QuickDateKey =
+  | "today"
+  | "yesterday"
+  | "this-week"
+  | "last-week"
+  | "this-month"
+  | "last-month";
+
+export function quickDateRange(
+  key: QuickDateKey,
+  now: Date = new Date(),
+): { from: Date; to: Date } {
+  const startOfToday = lagosDayStart(now);
+  // Lagos wall-clock fields, used for weekday and month arithmetic.
+  const shifted = new Date(now.getTime() + LAGOS_OFFSET_MS);
+  switch (key) {
+    case "today":
+      return { from: startOfToday, to: new Date(startOfToday.getTime() + DAY_MS) };
+    case "yesterday":
+      return { from: new Date(startOfToday.getTime() - DAY_MS), to: startOfToday };
+    case "this-week":
+    case "last-week": {
+      // getUTCDay(): 0=Sun..6=Sat; (day+6)%7 maps Mon->0 .. Sun->6.
+      const daysSinceMonday = (shifted.getUTCDay() + 6) % 7;
+      const thisMonday = new Date(startOfToday.getTime() - daysSinceMonday * DAY_MS);
+      if (key === "this-week") {
+        return { from: thisMonday, to: new Date(thisMonday.getTime() + 7 * DAY_MS) };
+      }
+      return { from: new Date(thisMonday.getTime() - 7 * DAY_MS), to: thisMonday };
+    }
+    case "this-month":
+    case "last-month": {
+      const y = shifted.getUTCFullYear();
+      const m = shifted.getUTCMonth();
+      // First day of a Lagos calendar month, as an absolute instant.
+      const monthStart = (year: number, month: number) =>
+        new Date(Date.UTC(year, month, 1) - LAGOS_OFFSET_MS);
+      if (key === "this-month") {
+        return { from: monthStart(y, m), to: monthStart(y, m + 1) };
+      }
+      return { from: monthStart(y, m - 1), to: monthStart(y, m) };
+    }
+  }
 }
 
 export type OrderListItem = OrderRow & {
@@ -625,19 +682,13 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
     ));
   }
   if (filters.status) conditions.push(eq(orders.status, filters.status as OrderRow["status"]));
-  if (filters.action) {
-    const actionConditions: Record<string, SQL> = {
-      deliver: inArray(orders.status, ["paid", "confirmed_cod"]),
-      revert: eq(orders.status, "delivered"),
-      "mark-paid": and(eq(orders.status, "awaiting_payment"), eq(orders.paymentMethod, "pay_now"))!,
-      "mark-failed": and(eq(orders.status, "awaiting_payment"), eq(orders.paymentMethod, "pay_now"))!,
-      cancel: inArray(orders.status, ["awaiting_payment", "paid", "confirmed_cod", "failed"]),
-      "revert-cancel": and(eq(orders.status, "cancelled"), sql`${orders.preCancellationStatus} IS NOT NULL`)!,
-      "mark-not-picking": inArray(orders.status, ["paid", "confirmed_cod"]),
-      "revert-not-picking": and(eq(orders.status, "not_picking"), sql`${orders.preNotPickingStatus} IS NOT NULL`)!,
-    };
-    const actionCondition = actionConditions[filters.action];
-    if (actionCondition) conditions.push(actionCondition);
+  // Quick Date presets resolve to a half-open Lagos-calendar range against the
+  // placed-date column (created_at). Uses createdAt (the placed timestamp) and a
+  // Lagos boundary - not a UTC server boundary - see quickDateRange for why.
+  if (filters.availableAction) {
+    const { from, to } = quickDateRange(filters.availableAction);
+    conditions.push(gte(orders.createdAt, from));
+    conditions.push(lt(orders.createdAt, to));
   }
   if (filters.paymentMethod) conditions.push(eq(orders.paymentMethod, filters.paymentMethod));
   if (filters.phone) conditions.push(like(orders.phone, filters.phone + "%"));
@@ -648,11 +699,17 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
   // count query has to repeat the joins rather than skip them.
   if (filters.categoryId) conditions.push(eq(products.categoryId, filters.categoryId));
   // Assignment filters (fulfilment routing). assignedTo is one staff member's
-  // orders; unassigned is the assignment-mode view of ownerless orders. Both are
-  // direct half-open-safe equality/IS NULL on an indexed column - never a
-  // function on the column - so idx_orders_assigned_to serves them.
+  // orders; unassigned is the assignment-mode queue: ownerless orders that are
+  // still actionable - delivered and spam-flagged orders are finished or toxic,
+  // so they never appear there and cannot be pulled back in by assignment.
+  // Both are direct equality/IS NULL on an indexed column - never a function
+  // on the column - so idx_orders_assigned_to serves them.
   if (filters.assignedTo) conditions.push(eq(orders.assignedTo, filters.assignedTo));
-  if (filters.unassigned) conditions.push(sql`${orders.assignedTo} IS NULL`);
+  if (filters.unassigned) conditions.push(and(
+    sql`${orders.assignedTo} IS NULL`,
+    ne(orders.status, "delivered"),
+    sql`${orders.phoneNorm} NOT IN (SELECT ${spamFlags.phoneNorm} FROM ${spamFlags} WHERE ${spamFlags.revertedAt} IS NULL)`,
+  )!);
   // Soft-delete visibility. Default (deleted=false) hides deleted orders from
   // the list entirely; the explicit "Deleted" filter (deleted=true) shows ONLY
   // them. This is why the list query, not the UI, owns the rule: a deleted order

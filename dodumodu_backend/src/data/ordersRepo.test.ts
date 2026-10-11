@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Db } from "../db";
-import { ordersRepo } from "./ordersRepo";
+import { ordersRepo, filtersFromQuery, quickDateRange } from "./ordersRepo";
 
 /* findByReference is what stops a paid order from being left unpaid. The payment
    webhook looks the order up by the reference the provider echoed back, and if
@@ -77,4 +77,32 @@ test("findByReference returns the row it found, and null when there is none", as
 
   const missing = await ordersRepo.findByReference(stubDb(undefined, { where: undefined }), "ord-nope");
   assert.equal(missing, null);
+});
+
+test("filtersFromQuery maps availableAction to the filter shape", () => {
+  assert.equal(filtersFromQuery({ availableAction: "today" }).availableAction, "today");
+  assert.equal(filtersFromQuery({ availableAction: "yesterday" }).availableAction, "yesterday");
+  assert.equal(filtersFromQuery({}).availableAction, null);
+});
+
+test("quickDateRange resolves half-open Lagos-calendar ranges", () => {
+  // Wednesday 2026-01-14 10:00 UTC. Lagos is +1, so the Lagos day is the same
+  // date and every boundary is 23:00Z of the previous calendar day. These exact
+  // instants are what a UTC boundary would have gotten wrong for the morning.
+  const now = new Date("2026-01-14T10:00:00.000Z");
+  const iso = (r: { from: Date; to: Date }) => [r.from.toISOString(), r.to.toISOString()];
+
+  assert.deepEqual(iso(quickDateRange("today", now)),
+    ["2026-01-13T23:00:00.000Z", "2026-01-14T23:00:00.000Z"]);
+  assert.deepEqual(iso(quickDateRange("yesterday", now)),
+    ["2026-01-12T23:00:00.000Z", "2026-01-13T23:00:00.000Z"]);
+  // Monday-based week: Wednesday is 2 days after Monday.
+  assert.deepEqual(iso(quickDateRange("this-week", now)),
+    ["2026-01-11T23:00:00.000Z", "2026-01-18T23:00:00.000Z"]);
+  assert.deepEqual(iso(quickDateRange("last-week", now)),
+    ["2026-01-04T23:00:00.000Z", "2026-01-11T23:00:00.000Z"]);
+  assert.deepEqual(iso(quickDateRange("this-month", now)),
+    ["2025-12-31T23:00:00.000Z", "2026-01-31T23:00:00.000Z"]);
+  assert.deepEqual(iso(quickDateRange("last-month", now)),
+    ["2025-11-30T23:00:00.000Z", "2025-12-31T23:00:00.000Z"]);
 });

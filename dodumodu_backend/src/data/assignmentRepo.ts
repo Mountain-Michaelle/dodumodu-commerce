@@ -1,6 +1,6 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "../db";
-import { adminStaff, orderAssignments, orders } from "../schema";
+import { adminStaff, orderAssignments, orders, spamFlags } from "../schema";
 import { orderMatchKey, lagosDayStart } from "../abuse/orderEvidence";
 
 // Order assignment: fulfilment routing, kept entirely outside the order/payment
@@ -87,12 +87,23 @@ async function assignOrder(
   const [current] = await db.select({
     id: orders.id, phoneNorm: orders.phoneNorm, address: orders.address,
     productId: orders.productId, quantity: orders.quantity, createdAt: orders.createdAt,
-    assignedTo: orders.assignedTo,
+    status: orders.status, assignedTo: orders.assignedTo,
   }).from(orders).where(eq(orders.id, id)).limit(1);
   if (!current) return "not_found";
 
   // Idempotent: already mine -> nothing to do, no history row.
   if (current.assignedTo === targetEmail) return { assignedTo: targetEmail, changed: false };
+
+  // Delivered orders are finished and spam-flagged ones are toxic: assigning
+  // either would pull them back into someone's queue. Direct checks (not the
+  // enriched list flag) so a service caller cannot skip them.
+  if (current.status === "delivered") return "conflict";
+  if (current.phoneNorm) {
+    const flag = await db.select({ phoneNorm: spamFlags.phoneNorm }).from(spamFlags)
+      .where(and(eq(spamFlags.phoneNorm, current.phoneNorm), isNull(spamFlags.revertedAt)))
+      .limit(1);
+    if (flag.length > 0) return "conflict";
+  }
 
   // The cross-staff duplicate guard (see conflictingAssignee).
   const clash = await conflictingAssignee(db, current, targetEmail);

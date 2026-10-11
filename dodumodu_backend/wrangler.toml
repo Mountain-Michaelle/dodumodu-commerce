@@ -9,6 +9,10 @@ ENVIRONMENT = "sandbox" # 'sandbox' | 'production'
 RATE_LIMIT_API_PER_MINUTE = "20"
 ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "false"
+# Assignment Mode (fulfilment routing). "true" reveals the Assignment Mode
+# toolbar switch, the "Assigned to" filter and the assign/unassign actions.
+# Independently revertible without a code change.
+ASSIGNMENT_MODE_ENABLED = "false"
 
 # ---- image pipeline ----
 # Every one of these has the same default in src/config/imageConfig.ts, so a missing
