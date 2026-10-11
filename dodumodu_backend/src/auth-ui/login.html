@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in</title>
+  <link rel="stylesheet" href="/admin/assets/auth.css" />
+</head>
+<body>
+  <main class="card" id="card">
+    <h1 id="title">Sign in</h1>
+    <p class="muted" id="subtitle">Enter your email to receive a one-time code.</p>
+
+    <form id="form" autocomplete="on" novalidate>
+      <label class="field" id="field-label" for="input">Email</label>
+      <input id="input" name="input" type="email" inputmode="email"
+             autocomplete="username" required />
+      <button id="submit" type="submit">Continue</button>
+    </form>
+
+    <div class="links">
+      <a href="#" id="resend-link" hidden>Resend code</a>
+      <a href="#" id="device-link" hidden>Use this trusted device</a>
+      <a href="#" id="backup-link" hidden>Use a backup code instead</a>
+    </div>
+
+    <div id="enroll-box" class="once" hidden></div>
+
+    <p class="note" id="note" hidden></p>
+    <p class="muted small" id="hint" hidden></p>
+
+    <div class="links">
+      <a href="/admin/sessions/" id="sessions-link" hidden>Your sessions</a>
+      <a href="/admin/devices/" id="devices-link" hidden>Trusted devices</a>
+    </div>
+  </main>
+  <script src="/admin/assets/auth.js" defer></script>
+</body>
+</html>
+

@@ -114,6 +114,11 @@ export type Env = {
    */
   ADMIN_OPERATORS: string;
 
+  // admin-auth v2 (feature flag "0"/"1"; additive only, existing routes untouched)
+  ADMIN_AUTH_V2: string;
+  /** Test-only: allows X-Test-IP to override the client IP. Exists only in .dev.vars. */
+  ALLOW_TEST_IP: string;
+
   // secrets (wrangler secret put / .env)
   DATABASE_URL: string;
   OPAY_PUBLIC_KEY: string;
@@ -122,6 +127,13 @@ export type Env = {
   OPAY_WEBHOOK_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
   RECONCILE_CRON_SECRET: string;
+
+  // admin-auth v2 secrets (Worker secrets only; see src/auth/config.ts)
+  OTP_KEY: string;
+  THROTTLE_KEY: string;
+  TOTP_ENC_KEY: string;
+  RESEND_API_KEY: string;
+  TURNSTILE_SECRET: string;
 
   // bindings — real R2/KV on the Worker, local shims under Node
   MEDIA_BUCKET: R2Bucket;

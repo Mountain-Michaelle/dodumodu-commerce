@@ -420,6 +420,11 @@ async function main() {
 
   copyStaticFile("sitemap.xml", replacements);
   copyStaticFile("robots.txt", replacements);
+
+  // admin-auth v2 UI is served from the backend source (src/auth-ui) behind the
+  // server-side admin guard (/admin/sign-in/, /admin/assets/*). It is NOT
+  // copied to dist (no /auth-ui/ route) — see currentwork.md step C.
+
   emitHeaders();
 
   console.log("Build complete:");

@@ -16,12 +16,14 @@
     "db:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 stop",
     "db:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 init",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/**/*.test.ts",
+    "test:ui": "node --test src/auth-ui/*.test.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@neondatabase/serverless": "^0.10.1",
     "drizzle-orm": "^0.36.1",
+    "hash-wasm": "^4.12.0",
     "hono": "^4.6.9",
     "libphonenumber-js": "^1.11.20",
     "pg": "^8.23.0",
