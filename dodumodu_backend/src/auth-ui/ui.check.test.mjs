@@ -40,8 +40,11 @@ test("no inline scripts or handlers (CSP script-src 'self')", () => {
 test("external asset paths are the shipped ones", () => {
   for (const p of pages) {
     const html = read(p.html);
-    assert.match(html, /href="\/auth-ui\/auth\.css"/, `${p.html} must link the shared stylesheet`);
-    assert.match(html, new RegExp(`src="\/auth-ui\/${p.js.replace(".", "\\.")}"`), `${p.html} must load ${p.js}`);
+    // adminPages.ts serves these under /admin/assets/* (login.html is additionally
+    // run through /auth-ui/ -> /admin/assets/ at request time). The source files
+    // already reference the shipped paths, so assert those.
+    assert.match(html, /href="\/admin\/assets\/auth\.css"/, `${p.html} must link the shared stylesheet`);
+    assert.match(html, new RegExp(`src="\/admin\/assets\/${p.js.replace(".", "\\.")}"`), `${p.html} must load ${p.js}`);
   }
 });
 
