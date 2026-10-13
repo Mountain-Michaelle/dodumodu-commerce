@@ -30,9 +30,18 @@ export class FakeDatabase {
   private tables = new Map<string, Row[]>();
   private sequences = new Map<string, number>();
 
-  table(name: string, seed: Row[] = []): Row[] {
-    if (!this.tables.has(name)) {
+  /**
+   * Seeding is explicit: passing `seed` (re)places the table contents and
+   * restarts the id sequence, so each test starts deterministic. Calling with
+   * no `seed` is a READ — it must never reset the store, otherwise every
+   * SELECT issued by a repository would wipe the rows the test just seeded.
+   */
+  table(name: string, seed?: Row[]): Row[] {
+    if (seed !== undefined) {
       this.tables.set(name, structuredClone(seed));
+      this.sequences.set(name, 0);
+    } else if (!this.tables.has(name)) {
+      this.tables.set(name, []);
       this.sequences.set(name, 0);
     }
     return this.tables.get(name)!;
