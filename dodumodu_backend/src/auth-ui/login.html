@@ -9,7 +9,7 @@
 <body>
   <main class="card" id="card">
     <h1 id="title">Sign in</h1>
-    <p class="muted" id="subtitle">Enter your email to receive a one-time code.</p>
+    <p class="muted" id="subtitle">Enter your email to continue.</p>
 
     <form id="form" autocomplete="on" novalidate>
       <label class="field" id="field-label" for="input">Email</label>
@@ -34,7 +34,9 @@
       <a href="/admin/devices/" id="devices-link" hidden>Trusted devices</a>
     </div>
   </main>
-  <script src="/admin/assets/auth.js" defer></script>
+  <script type="module" src="/admin/assets/qr.js"></script>
+  <script type="module" src="/admin/assets/qr-logo.mjs"></script>
+  <script type="module" src="/admin/assets/auth.js"></script>
 </body>
 </html>
 

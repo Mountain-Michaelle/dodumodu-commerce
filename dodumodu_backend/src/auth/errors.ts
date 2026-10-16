@@ -48,3 +48,16 @@ export class AuthForbiddenError extends Error {
     this.name = "AuthForbiddenError";
   }
 }
+
+// A TOTP/phrase/backup factor was wrong AND the flow has crossed the threshold
+// that unlocks recovery (spec §4.3: 3 TOTP fails). Maps to 401 with a uniform
+// body that ALSO carries recovery_available:true — the ONLY extra field, and it
+// reveals nothing about the account (it is a property of THIS flow's own
+// counter, which the caller already owns). The UI shows the recovery link only
+// when this is true; the server still enforces it regardless.
+export class AuthRecoverableError extends Error {
+  constructor(readonly reason: string) {
+    super("Invalid code");
+    this.name = "AuthRecoverableError";
+  }
+}

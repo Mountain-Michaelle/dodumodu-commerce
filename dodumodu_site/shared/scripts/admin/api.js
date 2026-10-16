@@ -98,7 +98,60 @@ export const api = {
   upload: (path, formData) => request(path, { method: "POST", formData }),
 };
 
+/**
+ * The v2 auth API. Same session-cookie model as the auth pages, but rooted
+ * at /admin-v2 (ADMIN_BASE) instead of /auth. Every route is admin-guarded
+ * server-side; a non-admin gets 401/403 and the caller renders accordingly.
+ */
+async function v2request(path, { method = "GET", body } = {}) {
+  const init = { method, headers: { "Content-Type": "application/json" }, credentials: "same-origin" };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/admin-v2${path}`, init);
+  } catch {
+    throw new ApiError(0, "NETWORK", "Could not reach the server. Check your connection and try again.");
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  let payload = null;
+  if (text) {
+    try { payload = JSON.parse(text); } catch { payload = null; }
+  }
+  if (!res.ok) {
+    const error = (payload && payload.error) || {};
+    const message = typeof error === "string" ? error : (error.message || `Request failed (${res.status})`);
+    const code = typeof error === "string" ? "ERROR" : (error.code || "ERROR");
+    throw new ApiError(res.status, code, message, payload || {});
+  }
+  return payload;
+}
+
+export const v2api = {
+  get: (path) => v2request(path),
+  post: (path, body) => v2request(path, { method: "POST", body }),
+  patch: (path, body) => v2request(path, { method: "PATCH", body }),
+  put: (path, body) => v2request(path, { method: "PUT", body }),
+  del: (path) => v2request(path, { method: "DELETE" }),
+};
+
 /** The signed-in operator and what they may do. Drives which buttons exist. */
 export async function loadIdentity() {
   return api.get("/me");
+}
+
+/**
+ * The v2 session identity (role, perms, stepup state, perms version).
+ * Lives on /auth/me and is mounted at AUTH_BASE outside the /admin prefix,
+ * so it goes through fetch() directly. Absent/unreachable (flag off, no
+ * session) resolves to null — the caller falls back to the v1 shape.
+ */
+export async function loadV2Identity() {
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }

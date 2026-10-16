@@ -1,5 +1,5 @@
 import { el, mount, $ } from "./admin/dom.js";
-import { loadIdentity, ApiError } from "./admin/api.js";
+import { loadIdentity, loadV2Identity, ApiError, v2api } from "./admin/api.js";
 import { buildShell } from "./admin/layout.js";
 import { toast, errorState, openModal, confirmDialog } from "./admin/ui.js";
 import { ordersView } from "./admin/views/orders.js";
@@ -11,6 +11,9 @@ import { discountsView, paymentView } from "./admin/views/settings.js";
 import { shadowView } from "./admin/views/shadow.js";
 import { blocksView } from "./admin/views/blocks.js";
 import { reportsView } from "./admin/views/reports.js";
+import { usersView } from "./admin/views/users.js";
+import { authlogView } from "./admin/views/authlog.js";
+import { notificationsView } from "./admin/views/notifications.js";
 
 // The admin entry point, and the only module the build names.
 //
@@ -35,6 +38,9 @@ const ROUTES = {
   payment: paymentView,
   shadow: shadowView,
   blocks: blocksView,
+  users: usersView,
+  authlog: authlogView,
+  notifications: notificationsView,
 };
 
 // "Product pages" is not its own screen: it is the product editor with the page
@@ -51,6 +57,7 @@ const ALIASES = { pages: "products" };
 // in the console to explain it.
 let shell = null;
 let identity = null;
+let v2identity = null;
 
 function routeFromHash() {
   const raw = (window.location.hash || "#orders").replace(/^#/, "");
@@ -67,7 +74,17 @@ function navigate(name, arg) {
 
 function render() {
   if (!shell) return;
-  const { id, arg } = routeFromHash();
+  let { id, arg } = routeFromHash();
+  // Unregistered route (e.g. mono bookmarking an admin page): fall back to
+  // the first route the operator may actually open, not the default.
+  if (shell.isHidden && shell.isHidden(id)) {
+    const first = shell.firstVisible && shell.firstVisible();
+    if (first) {
+      window.location.hash = `#${first}`;
+      return;
+    }
+    id = "orders";
+  }
   const view = ROUTES[id]({ shell, identity, onNavigate: navigate });
 
   // A breadcrumb back to the list whenever a deep link is open, so a bookmarked
@@ -103,8 +120,27 @@ async function boot() {
     return;
   }
 
+  // v2 session identity (role, perms, stepup, perms version). Absent when the
+  // flag is off or no v2 session exists — the v1 shape keeps working alone.
+  v2identity = await loadV2Identity();
+  if (v2identity) {
+    identity = {
+      ...identity,
+      role: v2identity.role,
+      v2perms: v2identity.perms || [],
+      permsVersion: v2identity.perms_version,
+      stepupOk: v2identity.stepup_ok,
+      tier: v2identity.tier,
+    };
+  }
+
   shell = buildShell({ root, identity, onNavigate: navigate });
   window.addEventListener("hashchange", render);
+
+  // Instant access effect: the server bumps perms_version on every grant
+  // change, so a stale open tab refetches identity when the version moves.
+  watchPermsVersion();
+  refreshBell();
 
   // Anything a view throws would otherwise leave the panel blank with nothing in
   // the console to explain it - which is exactly the failure this is here to
@@ -113,6 +149,37 @@ async function boot() {
   window.addEventListener("unhandledrejection", (event) => showFatal(event.reason));
 
   render();
+}
+
+/** Re-fetch identity when the server's perms_version moves. */
+function watchPermsVersion() {
+  let known = identity?.permsVersion ?? null;
+  if (known === null) return;
+  const check = async () => {
+    const next = await loadV2Identity().catch(() => null);
+    if (next && next.perms_version !== known) {
+      known = next.perms_version;
+      identity = { ...identity, role: next.role, v2perms: next.perms || [], permsVersion: next.perms_version, stepupOk: next.stepup_ok, tier: next.tier };
+      toast("Your access was updated. Reloading…", "info");
+      setTimeout(() => window.location.reload(), 1200);
+    }
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+}
+
+/** Topbar bell with the unread attention count. Fail-open: never blocks boot. */
+async function refreshBell() {
+  try {
+    const data = await v2api.get("/notifications");
+    if (!data || typeof data.unread !== "number") return;
+    const link = document.querySelector('a[href="#notifications"]');
+    const host = link?.parentElement;
+    if (!host || host.querySelector(".nav-badge")) return;
+    if (data.unread > 0) {
+      const badge = el("span", { class: "nav-badge", text: String(data.unread), "aria-label": `${data.unread} items need attention` });
+      host.append(badge);
+    }
+  } catch { /* notifications unavailable — the page still lists it */ }
 }
 
 /** A blank panel is the worst possible outcome, so it is never left blank. */

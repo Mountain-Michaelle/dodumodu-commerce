@@ -54,6 +54,25 @@ test("normalizeEmail", () => {
   assert.equal(normalizeEmail("owner@@example.com"), null);
   assert.equal(normalizeEmail("o@example.com"), "o@example.com");
   assert.equal(normalizeEmail("owner@example.com\n"), "owner@example.com");
+  // Valid dot-atom local parts and multi-label domains.
+  assert.equal(normalizeEmail("first.last@sub.example.co.uk"), "first.last@sub.example.co.uk");
+  assert.equal(normalizeEmail("o'brien+tag@example.io"), "o'brien+tag@example.io");
+  // Malformed domains / local parts must be rejected.
+  for (const bad of [
+    "owner@example..com",   // consecutive dots
+    ".owner@example.com",   // leading dot in local
+    "owner.@example.com",   // trailing dot in local
+    "owner@-example.com",   // label starts with hyphen
+    "owner@example-.com",   // label ends with hyphen
+    "owner@example.c",      // 1-char TLD
+    "owner@ex_ample.com",   // underscore in domain label
+    "@example.com",         // empty local
+    "owner@",               // empty domain
+    "owner name@example.com", // space
+    "owner@example.com.",   // trailing dot in domain
+  ]) {
+    assert.equal(normalizeEmail(bad), null, `${JSON.stringify(bad)} should not normalize`);
+  }
 });
 
 test("maskEmail", () => {

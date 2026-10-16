@@ -9,21 +9,26 @@ import { el, mount, clear } from "./dom.js";
 
 export const NAV = [
   { group: "Catalogue", items: [
-    { id: "orders", label: "Orders" },
-    { id: "categories", label: "Categories" },
-    { id: "products", label: "Products" },
+    { id: "orders", label: "Orders", perm: "orders.view" },
+    { id: "categories", label: "Categories", perm: "categories.view" },
+    { id: "products", label: "Products", perm: "products.view" },
     { id: "media", label: "Media" },
   ] },
   { group: "Content", items: [
-    { id: "testimonials", label: "Testimonials" },
-    { id: "pages", label: "Product pages" },
+    { id: "testimonials", label: "Testimonials", perm: "testimonials.view" },
+    { id: "pages", label: "Product pages", perm: "products.view" },
   ] },
   { group: "Safety", items: [
-    { id: "shadow", label: "Abuse (shadow)" },
+    { id: "shadow", label: "Abuse (shadow)", perm: "abuse.view" },
     { id: "blocks", label: "Blocked" },
   ] },
   { group: "Analytics", items: [
-    { id: "reports", label: "Reports" },
+    { id: "reports", label: "Reports", perm: "reports.view" },
+  ] },
+  { group: "Team", items: [
+    { id: "users", label: "Users & access", perm: "users.view" },
+    { id: "authlog", label: "Auth log", perm: "authlog.view" },
+    { id: "notifications", label: "Notifications" },
   ] },
   { group: "Settings", items: [
     { id: "discounts", label: "Discount tiers" },
@@ -43,6 +48,9 @@ const TITLES = {
   payment: ["Payment rules", "Which states may pay on delivery, and up to how much."],
   shadow: ["Abuse (shadow)", "What the automatic checks would have done. Nothing here blocks anyone."],
   blocks: ["Blocked", "Addresses and devices currently being refused, and why."],
+  users: ["Users & access", "Who can sign in, what each person may do, and every access change."],
+  authlog: ["Auth log", "Every sign-in attempt, recovery, block and session event."],
+  notifications: ["Notifications", "Lost-email requests, failed alerts and live blocks needing attention."],
 };
 
 /**

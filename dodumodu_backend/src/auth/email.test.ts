@@ -14,7 +14,7 @@ interface Sent { to: string; subject: string; text: string; key: string }
 function recordingProvider(): { provider: EmailProvider; sent: Sent[] } {
   const sent: Sent[] = [];
   const provider: EmailProvider = {
-    async send(to, subject, text, key) { sent.push({ to, subject, text, key }); },
+    async send(to, subject, text, key) { sent.push({ to, subject, text, key }); return true; },
   };
   return { provider, sent };
 }

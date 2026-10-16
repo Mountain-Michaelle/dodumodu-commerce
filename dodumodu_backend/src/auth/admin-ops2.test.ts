@@ -11,10 +11,14 @@ import { tokenHashHex } from "./keys";
 import { sha256, toHex } from "./crypto";
 
 const databaseUrl = process.env.DATABASE_URL;
-const tag = `ops2:${Date.now().toString(36)}`;
+const tag = `ops2-${Date.now().toString(36)}`;
 
 async function cleanup(db: Db) {
   await q(db, sql`DELETE FROM aa_sessions WHERE user_id IN (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"})`);
+  await q(db, sql`DELETE FROM aa_backup_codes WHERE set_id IN
+    (SELECT id FROM aa_backup_code_sets WHERE user_id IN
+      (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"}))`);
+  await q(db, sql`DELETE FROM aa_backup_code_sets WHERE user_id IN (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"})`);
   await q(db, sql`DELETE FROM aa_recovery_codes WHERE user_id IN (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"})`);
   await q(db, sql`DELETE FROM aa_users WHERE email LIKE ${tag + "%"}`);
 }
@@ -59,7 +63,20 @@ test("admin ops part 2: stepup, sessions, backup regen, force-logout", { skip: !
   const hashes = await Promise.all(Array.from({ length: 8 },
     (_, i) => sha256(`code-${i}-${Date.now()}`).then(toHex)));
   await regenerateBackupCodes(db, u, hashes);
-  assert.equal((await q(db, sql`SELECT 1 FROM aa_recovery_codes WHERE user_id = ${u}`)).length, 8);
+  // Codes live in GENERATIONS now: one live set, acked immediately, 8 codes.
+  const gen = await q<{ codes: number; acked: boolean }>(db,
+    sql`SELECT (SELECT count(*) FROM aa_backup_codes bc
+          JOIN aa_backup_code_sets s ON s.id = bc.set_id
+          WHERE s.user_id = ${u} AND s.revoked_at IS NULL)::int AS codes,
+        (SELECT acked_at IS NOT NULL FROM aa_backup_code_sets
+          WHERE user_id = ${u} AND revoked_at IS NULL) AS acked`);
+  assert.equal(gen[0].codes, 8);
+  assert.equal(gen[0].acked, true);
+  // A second regenerate supersedes the first generation (revoked_at set).
+  await regenerateBackupCodes(db, u, hashes);
+  const live = await q(db,
+    sql`SELECT 1 FROM aa_backup_code_sets WHERE user_id = ${u} AND revoked_at IS NULL`);
+  assert.equal(live.length, 1);
 
   await forceLogout(db, u);
   assert.equal((await listSessions(db, u, h1)).length, 0);

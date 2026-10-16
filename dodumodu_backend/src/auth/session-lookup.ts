@@ -10,6 +10,7 @@ import type { Tier } from "./sessions";
 export interface Session {
   userId: string; email: string; role: string; sid: string;
   deviceId: string | null; tier: Tier; perms: string[];
+  permsVersion: number;
   needsTouch: boolean; idleSecs: number; stepupOk: boolean;
   prefix: string | null; country: string | null;
   driftCount: number;
@@ -26,13 +27,14 @@ export async function lookupSession(db: Db, sessionToken: string): Promise<Sessi
   const row = await q1<{
     id: string; email: string; role: string; sid: string;
     device_id: string | null; tier: Tier; ip_prefix: string | null; country: string | null;
-    drift_count: number; perms: string[] | null; needs_touch: boolean;
+    drift_count: number; perms: string[] | null; perms_version: number; needs_touch: boolean;
     idle_secs: number; stepup_ok: boolean;
   }>(db,
     sql`SELECT u.id::text AS id, u.email, u.role, s.sid::text AS sid,
       s.device_id::text AS device_id, s.tier, s.ip_prefix, s.country,
       s.drift_count,
       ARRAY(SELECT perm FROM aa_user_permissions WHERE user_id = u.id) AS perms,
+      u.perms_version,
       s.last_seen_at < now() - interval '60 seconds' AS needs_touch,
       extract(epoch FROM now() - s.last_seen_at)::int AS idle_secs,
       COALESCE(s.stepup_until > now(), false) AS stepup_ok
@@ -51,6 +53,7 @@ export async function lookupSession(db: Db, sessionToken: string): Promise<Sessi
   return {
     userId: row.id, email: row.email, role: row.role, sid: row.sid,
     deviceId: row.device_id, tier: row.tier, perms: row.perms ?? [],
+    permsVersion: row.perms_version,
     needsTouch: row.needs_touch, idleSecs: row.idle_secs, stepupOk: row.stepup_ok,
     prefix: row.ip_prefix, country: row.country, driftCount: row.drift_count,
   };

@@ -19,18 +19,36 @@ export function loadKey(b64: string, name = "key"): Uint8Array {
   return k;
 }
 
+// Local part: RFC 5322 dot-atom — allowed atoms separated by single dots, with
+// no leading, trailing or consecutive dots. Lowercased already by the caller.
+const LOCAL_RE = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
+// Domain label: alphanumeric, hyphens only in the middle, 1-63 chars.
+const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+/**
+ * Strict-ish email normalization used as the validity gate for admin auth.
+ * Trim + lowercase, then require a real dot-atom local part and a dotted domain
+ * whose labels are well-formed and whose TLD is at least two letters. Returns
+ * null for anything that is not a plausible address (the caller treats null as
+ * "unknown email", which is safe and non-enumerable on the login path).
+ */
 export function normalizeEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const e = raw.trim().toLowerCase();
-  if (e.length < 3 || e.length > 254 || !/^[\x21-\x7e]+$/.test(e)) return null;
-  const parts = e.split("@");
-  if (parts.length !== 2) return null;
-  const [local, domain] = parts;
-  if (!local || !domain) return null;
-  // A dot somewhere in the middle of the domain: rejects "owner@example" and
-  // "owner@.com" while still accepting single-label-dot forms like "o@x.co".
-  const dot = domain.indexOf(".");
-  if (dot <= 0 || dot === domain.length - 1) return null;
+  if (e.length < 3 || e.length > 254) return null;
+  if (!/^[\x21-\x7e]+$/.test(e)) return null; // ASCII printable only (no spaces/unicode)
+  const at = e.indexOf("@");
+  if (at <= 0 || at !== e.lastIndexOf("@") || at === e.length - 1) return null; // exactly one, not at an edge
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (local.length > 64) return null;
+  if (!LOCAL_RE.test(local)) return null;
+  const labels = domain.split(".");
+  if (labels.length < 2) return null; // needs a dot (rejects "owner@example")
+  for (const label of labels) {
+    if (label.length < 1 || label.length > 63 || !LABEL_RE.test(label)) return null;
+  }
+  if (!/^[a-z]{2,}$/.test(labels[labels.length - 1])) return null; // TLD >= 2 letters
   return e;
 }
 
@@ -138,7 +156,7 @@ export async function totpMatch(
   secretB32: string,
   code: string,
   nowMs: number = Date.now(),
-  window = 1,
+  window = 2,
 ): Promise<number | null> {
   const step = Math.floor(nowMs / 30000);
   for (let d = -window; d <= window; d++) if (safeEqual(await hotp(secretB32, step + d), code)) return step + d;

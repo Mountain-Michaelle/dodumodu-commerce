@@ -31,7 +31,10 @@ export interface FinishArgs {
   prefix: string; country: string | null; tier: Tier;
 }
 
-/** POST /auth/session for staff (role <> 'admin'). Flow must be ready. */
+/** POST /auth/session for staff (role <> 'admin'). Flow must be ready.
+ * Slice 5: 'ready' is only reachable through a proven TOTP (no stage-machine
+ * shortcut survives), and the INSERT below hard-requires an enrolled
+ * authenticator so no future slip can issue a session without one. */
 export async function finishStaffSession(db: Db, a: FinishArgs): Promise<FinishedSession> {
   const flow = await loadFlow(db, a.flowToken);
   if (!flow || flow.stage !== "ready" || flow.user_id === null) {
@@ -51,6 +54,7 @@ export async function finishStaffSession(db: Db, a: FinishArgs): Promise<Finishe
         now() + (${SESSION_ABSOLUTE_SECS}::int * interval '1 second'),
         ${a.ip}, left(${a.ua}, 120), f.via, ${a.prefix}, ${a.country}, 'normal'
        FROM f JOIN aa_users u ON u.id = f.user_id AND u.is_active AND u.role <> 'admin'
+         AND u.totp_enabled_at IS NOT NULL
       RETURNING user_id::text AS user_id`);
   if (!row) throw new AuthRejectError("flow");
   return { sessionToken: token, deviceToken: null };

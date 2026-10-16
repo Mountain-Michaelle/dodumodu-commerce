@@ -28,7 +28,17 @@ function assetResponse(c: AC, filePath: string) {
   });
 }
 
-/** Valid admin session? Same check the JSON APIs use (lookupSession). */
+/** Any valid session (admin OR staff)? Same lookupSession the JSON APIs use. */
+async function isSession(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  try {
+    const s = await loadSession(c as never);
+    return !!s;
+  } catch {
+    return false;
+  }
+}
+
+/** Valid admin session? Staff are not admins. */
 async function isAdminSession(c: Context<{ Bindings: Env }>): Promise<boolean> {
   try {
     const s = await loadSession(c as never);
@@ -47,9 +57,18 @@ function deny(c: AC) {
 export function mountAdminPages(app: Hono<{ Bindings: Env }>, backendRoot: string): void {
   const uiRoot = resolve(join(backendRoot, "src", "auth-ui"));
 
-  const page = (dir: string, file: string, allow: "public" | "admin") => async (c: AC) => {
-    if (allow === "admin" && !(await isAdminSession(c as unknown as Context<{ Bindings: Env }>))) {
-      return deny(c);
+  // allow: "public"  = anyone (sign-in page + assets)
+  //        "session" = any authenticated user (admin OR staff) — the console
+  //                    shell and the user's own sessions page. The shell holds
+  //                    no secrets; the JSON APIs enforce per-user permissions,
+  //                    so staff may load it and see only what they're allowed.
+  //        "admin"   = admin only (trusted-device management).
+  const page = (dir: string, file: string, allow: "public" | "session" | "admin") => async (c: AC) => {
+    if (allow !== "public") {
+      const ok = allow === "admin"
+        ? await isAdminSession(c as unknown as Context<{ Bindings: Env }>)
+        : await isSession(c as unknown as Context<{ Bindings: Env }>);
+      if (!ok) return deny(c);
     }
     const resolved = resolveWithinRoot(resolve(dir), file);
     if (!resolved) return c.text("Not found", 404);
@@ -78,17 +97,17 @@ export function mountAdminPages(app: Hono<{ Bindings: Env }>, backendRoot: strin
 
   // Guarded console + sub-pages.
   const adminDir = resolve(join(backendRoot, "..", "dodumodu_site", "dist", "admin"));
-  const consolePage = page(adminDir, "index.html", "admin");
+  const consolePage = page(adminDir, "index.html", "session");
   app.get("/admin", consolePage);
   app.get("/admin/", consolePage);
-  app.get("/admin/sessions", page(uiRoot, "sessions.html", "admin"));
-  app.get("/admin/sessions/", page(uiRoot, "sessions.html", "admin"));
+  app.get("/admin/sessions", page(uiRoot, "sessions.html", "session"));
+  app.get("/admin/sessions/", page(uiRoot, "sessions.html", "session"));
   app.get("/admin/devices", page(uiRoot, "devices.html", "admin"));
   app.get("/admin/devices/", page(uiRoot, "devices.html", "admin"));
 
   // Public assets (JS/CSS only — fixed map, no traversal). Safe to expose:
   // no secrets in client code; sessions.js/devices.js render only via guarded APIs.
-  for (const name of ["auth.js", "auth.css", "sessions.js", "devices.js"]) {
+  for (const name of ["auth.js", "auth.css", "qr.js", "qr-logo.mjs", "sessions.js", "devices.js"]) {
     app.get(`/admin/assets/${name}`, asset(name));
   }
 }

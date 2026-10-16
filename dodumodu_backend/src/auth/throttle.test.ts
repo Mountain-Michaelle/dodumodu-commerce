@@ -20,7 +20,7 @@ import type { Db } from "../db";
 import { AuthLockedError } from "./errors";
 
 const databaseUrl = process.env.DATABASE_URL;
-const tag = `itest:${Date.now().toString(36)}`;
+const tag = `itest-${Date.now().toString(36)}`;
 
 async function throttleRow(db: Db, key: string) {
   return q1<{ fails: number; round: number; locked_until: string | null }>(

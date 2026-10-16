@@ -6,32 +6,38 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Db } from "../db";
 import { AuthRejectError, AuthLockedError, AuthServerFaultError,
-  AuthUnauthorizedError, AuthForbiddenError } from "./errors";
+  AuthUnauthorizedError, AuthForbiddenError, AuthRecoverableError } from "./errors";
 import type { AuthEnv } from "./middleware";
-import { flagGate, originGuard, authInit,
+import { flagGate, originGuard, authInit, guard,
   requireSession, requireAdmin, requireStepUp, securityHeaders } from "./middleware";
 import { loadAuthSecrets } from "./secrets";
-import { FLOW_TTL_SECS, DEVICE_TTL_SECS, SESSION_ABSOLUTE_SECS, isV2Perm } from "./config";
+import { FLOW_TTL_SECS, DEVICE_TTL_SECS, SESSION_ABSOLUTE_SECS, VID_TTL_SECS, isV2Perm } from "./config";
 import { requestCode } from "./entry";
 import { verifyCode } from "./factors";
-import { enrollPhrase, verifyPhrase } from "./phrase";
-import { totpEnrollStart, totpEnrollConfirm, genBackupCodes } from "./totp";
+import { enrollPhrase } from "./phrase";
+import { totpEnrollStart, totpEnrollConfirm, genBackupCodes, ackBackupCodes } from "./totp";
 import { verifyTotp } from "./totp-verify";
+import { recoverWithPhrase, recoverWithBackup } from "./recovery";
+import { requestLostEmail } from "./lost-email";
 import { finishStaffSession } from "./sessions";
 import { finishAdminSession } from "./sessions-admin";
 import { deviceStart } from "./devices";
 import { createDeviceInvite, acceptDeviceInvite, revokeDevice, listDevices } from "./device-invites";
+import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin,
+  listAccountRequests, resolveAccountRequest, listNotifications } from "./admin-reads";
+import { liftBlock } from "./blocks";
 import { createPhraseReset, consumePhraseReset, grantStepup, listSessions,
-  revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm,
+  revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
   deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
 import { q, q1, sql } from "./sql";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
-import { sha256, toHex, decryptSecret, totpMatch } from "./crypto";
-import { providerForEnv, sendLoginCode, sendInBackground, testMailbox } from "./email";
-import { setFlowCookie, setSidCookie, setDidCookie, clearSidCookie, clearFlowCookie,
-  getFlowToken, afterResponse } from "./ctx";
+import { sha256, toHex, decryptSecret, totpMatch, randomToken } from "./crypto";
+import { providerForEnv, sendLoginCode, sendInBackground, testMailbox, fromForEnv } from "./email";
+import { setFlowCookie, setSidCookie, setDidCookie, setVidCookie, clearSidCookie, clearFlowCookie,
+  getFlowToken } from "./ctx";
 import { loadFlow } from "./flows";
+import { orderV2Routes } from "../routes/admin/ordersV2";
 
 type AppEnv = { Bindings: AuthEnv };
 
@@ -47,6 +53,12 @@ function mapError(c: Context<AppEnv>, e: unknown): Response {
   }
   if (e instanceof AuthForbiddenError) return c.json({ error: e.message }, 403);
   if (e instanceof AuthUnauthorizedError) return c.json({ error: e.message }, 401);
+  if (e instanceof AuthRecoverableError) {
+    // Uniform "invalid" body; the ONLY extra field is recovery_available, a
+    // property of the caller's own flow counter — not an account-enumeration
+    // oracle. The UI reveals the recovery link on this; the server still gates.
+    return c.json({ error: "Invalid code", recovery_available: true }, 401);
+  }
   if (e instanceof AuthRejectError) return c.json(NEUTRAL_401, 401);
   throw e; // unknown -> 500 (fail closed; never allow)
 }
@@ -63,6 +75,14 @@ const secretsOf = (c: Context<AppEnv>) => loadAuthSecrets(c.env);
 const origin = (c: Context<AppEnv>) => new URL(c.req.url).origin;
 const json = async <T>(c: Context<AppEnv>): Promise<Partial<T>> =>
   (await c.req.json().catch(() => ({}))) as Partial<T>;
+
+/** Get the __Host-vid, minting + setting it when absent (flow creation). */
+function ensureVid(c: Context<AppEnv>, s: { vidToken: string | null }): string {
+  if (s.vidToken) return s.vidToken;
+  const vid = randomToken();
+  setVidCookie(c as never, vid, VID_TTL_SECS);
+  return vid;
+}
 
 /** Email on a flow (for the otpauth label). Rejects if the flow is unknown. */
 async function flowEmail(db: Db, flowToken: string): Promise<string> {
@@ -128,15 +148,22 @@ authRoute.get("/test/mailbox/:email", (c) => {
 });
 
 // POST /auth/request {email} -> always 202 + flow cookie.
+// For REAL users (sendCode set) we await the send so a genuine provider
+// failure is surfaced to the caller instead of pretending the code left.
+// For dummy/capped flows (sendCode null) we return 202 silently to avoid
+// account enumeration.
 authRoute.post("/request", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const { email } = await json<{ email?: string }>(c);
   const secrets = secretsOf(c);
-  const out = await requestCode(s.db, secrets, email, s.ctx, s.deviceToken);
+  const out = await requestCode(s.db, secrets, email, s.ctx, s.deviceToken, ensureVid(c, s));
   if (out.sendCode) {
-    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
-    await afterResponse(c as never,
-      sendLoginCode(provider, out.sendCode.to, out.sendCode.code));
+    const { to, code } = out.sendCode;
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
+    const ok = await sendLoginCode(provider, to, code, `login-code:${out.flowToken}:1`);
+    if (!ok) {
+      return c.json({ error: "Unable to send code. Please try again later." }, 503);
+    }
   }
   if (out.sendDeniedAlert) {
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
@@ -158,11 +185,14 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
   const f = await loadFlow(s.db, token);
   if (!f || f.user_id === null) throw new AuthRejectError("flow");
   const secrets = secretsOf(c);
-  const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken);
+  const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken, ensureVid(c, s));
   if (out.sendCode) {
-    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
-    await afterResponse(c as never,
-      sendLoginCode(provider, out.sendCode.to, out.sendCode.code));
+    const { to, code } = out.sendCode;
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
+    const ok = await sendLoginCode(provider, to, code, `login-code:${out.flowToken}:1`);
+    if (!ok) {
+      return c.json({ error: "Unable to send code. Please try again later." }, 503);
+    }
   }
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);
   return c.json({ ok: true }, 202);
@@ -184,29 +214,49 @@ authRoute.post("/device/start", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const { email } = await json<{ email?: string }>(c);
   const out = await deviceStart(s.db, secretsOf(c).throttleKey, email ?? "",
-    s.deviceToken, s.ctx.ip, s.ctx.prefix, s.ctx.country, s.ctx.ua);
+    s.deviceToken, s.ctx.ip, s.ctx.prefix, s.ctx.country, s.ctx.ua, ensureVid(c, s));
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);
   return c.json({ ok: true }, 202);
 }));
 
-// POST /auth/phrase/enroll {phrase, confirm} -> next stage (first login).
+// POST /auth/phrase/enroll {phrase, confirm} -> {next: backup_codes, backup_codes}.
 authRoute.post("/phrase/enroll", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const { phrase, confirm } = await json<{ phrase?: string; confirm?: string }>(c);
   const token = getFlowToken(c as never);
   if (!token) throw new AuthRejectError("flow");
   const out = await enrollPhrase(s.db, secretsOf(c), token, phrase ?? "", confirm ?? "", s.ctx.ip);
+  return c.json({ next: out.next, backup_codes: out.backupCodes });
+}));
+
+// POST /auth/backup-codes/ack -> {next: ready}. Acknowledges the codes shown
+// once at generation; required before a session exists (stage machine gates).
+authRoute.post("/backup-codes/ack", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const token = getFlowToken(c as never);
+  if (!token) throw new AuthRejectError("flow");
+  const out = await ackBackupCodes(s.db, token);
   return c.json({ next: out.next });
 }));
 
-// POST /auth/phrase {phrase} -> next stage.
-authRoute.post("/phrase", async (c) => guarded(c, async () => {
+// POST /auth/lost-email {username} -> ALWAYS 202 {ok:true} (uniform for
+// registered/unknown/malformed; §4.6 Option A). Registered handles enqueue an
+// account request for admin review + at most one capped alert per cooldown.
+authRoute.post("/lost-email", async (c) => guarded(c, async () => {
   const s = authInit(c);
-  const { phrase } = await json<{ phrase?: string }>(c);
-  const token = getFlowToken(c as never);
-  if (!token) throw new AuthRejectError("flow");
-  const out = await verifyPhrase(s.db, secretsOf(c), token, phrase ?? "", s.ctx.ip);
-  return c.json({ next: out.next });
+  const { username } = await json<{ username?: string }>(c);
+  const secrets = secretsOf(c);
+  const out = await requestLostEmail(s.db, secrets.throttleKey, username, s.ctx.ip);
+  if (out.alertTo) {
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
+    sendInBackground(c as never, provider, out.alertTo,
+      "Account recovery request",
+      "Someone asked for help recovering access to your account. " +
+        "If this was you, our team will contact you using the details we have on file. " +
+        "If this wasn't you, no action is needed.",
+      `lost:${out.alertTo}`);
+  }
+  return c.json({ ok: true }, 202);
 }));
 
 
@@ -218,6 +268,30 @@ authRoute.post("/totp/enroll/start", async (c) => guarded(c, async () => {
   const email = await flowEmail(s.db, token);
   const out = await totpEnrollStart(s.db, secretsOf(c), token, email);
   return c.json({ secret: out.secret, otpauth_uri: out.otpauthUri });
+}));
+
+// POST /auth/recovery/phrase {phrase} — only after 3 TOTP fails (recovery_unlocked).
+// Resets TOTP inside the flow (no session yet). Wrong -> 401 with attempts_left;
+// the 3rd wrong -> blocked:true (flow dead).
+authRoute.post("/recovery/phrase", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const token = getFlowToken(c as never);
+  const { phrase } = await json<{ phrase?: string }>(c);
+  if (!token || !phrase) throw new AuthRejectError("flow");
+  const r = await recoverWithPhrase(s.db, secretsOf(c), token, phrase, s.ctx.ip);
+  if ("next" in r) return c.json({ next: r.next });
+  return c.json({ error: "Incorrect phrase", attempts_left: r.attemptsLeft, blocked: !!r.blocked }, 401);
+}));
+
+// POST /auth/recovery/backup-code {code} — same gate + counters as the phrase.
+authRoute.post("/recovery/backup-code", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const token = getFlowToken(c as never);
+  const { code } = await json<{ code?: string }>(c);
+  if (!token || !code) throw new AuthRejectError("flow");
+  const r = await recoverWithBackup(s.db, secretsOf(c), token, code, s.ctx.ip);
+  if ("next" in r) return c.json({ next: r.next });
+  return c.json({ error: "Incorrect code", attempts_left: r.attemptsLeft, blocked: !!r.blocked }, 401);
 }));
 
 // POST /auth/totp {code} or {backup_code} at totp / totp_enroll -> next.
@@ -274,9 +348,12 @@ authRoute.post("/stepup", async (c) => guarded(c, async () => {
     if (backup_code !== undefined) {
       const bh = toHex(await sha256(backup_code.replace("-", "")));
       const row = await q1<{ user_id: string }>(s.db,
-        sql`UPDATE aa_recovery_codes SET used_at = now()
-          WHERE user_id = ${sess.userId} AND code_hash = decode(${bh}, 'hex') AND used_at IS NULL
-          RETURNING user_id`);
+        sql`UPDATE aa_backup_codes bc SET used_at = now()
+          FROM aa_backup_code_sets s
+          WHERE bc.set_id = s.id AND s.user_id = ${sess.userId}
+            AND s.acked_at IS NOT NULL AND s.revoked_at IS NULL
+            AND bc.code_hash = decode(${bh}, 'hex') AND bc.used_at IS NULL
+          RETURNING s.user_id::text AS user_id`);
       if (!row) { await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("backup"); }
     } else {
       const urow = await q1<{ enc: string | null; last: number | null; active: boolean }>(s.db,
@@ -418,6 +495,113 @@ adminRoute.delete("/devices/:id", async (c) => guarded(c, async () => {
 }));
 
 
+// GET /admin-v2/users -> paginated user list (admin, users.view).
+adminRoute.get("/users", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.view" })(c);
+  const qp = c.req.query();
+  return c.json(await listUsers(s.db, {
+    role: qp.role, active: qp.active, q: qp.q,
+    limit: qp.limit ? Number(qp.limit) : 50,
+    offset: qp.offset ? Number(qp.offset) : 0,
+  }));
+}));
+
+// GET /admin-v2/users/:id -> user detail + grants + access history.
+adminRoute.get("/users/:id", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.view" })(c);
+  const detail = await getUserDetail(s.db, c.req.param("id") ?? "");
+  if (!detail) return c.json({ error: "Not found" }, 404);
+  return c.json(detail);
+}));
+
+// GET /admin-v2/permissions/registry -> grouped registry for the access matrix.
+adminRoute.get("/permissions/registry", async (c) => guarded(c, async () => {
+  await guard({ perm: "users.view" })(c);
+  return c.json(registryPayload());
+}));
+
+// GET /admin-v2/auth-log -> filterable auth timeline (admin, authlog.view).
+adminRoute.get("/auth-log", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "authlog.view" })(c);
+  const qp = c.req.query();
+  return c.json(await listAuthLog(s.db, {
+    event: qp.event, status: qp.status, q: qp.q,
+    limit: qp.limit ? Number(qp.limit) : 50,
+    offset: qp.offset ? Number(qp.offset) : 0,
+  }));
+}));
+
+// GET /admin-v2/blocks -> device/IP blocks for the security console.
+adminRoute.get("/blocks", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "blocks.manage" })(c);
+  return c.json({ blocks: await listBlocksAdmin(s.db) });
+}));
+
+// DELETE /admin-v2/blocks/:id -> lift a block (step-up, logged by caller).
+adminRoute.delete("/blocks/:id", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireStepUp(c);
+  const ok = await liftBlock(s.db, c.req.param("id") ?? "", sess.userId);
+  if (!ok) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true });
+}));
+
+// GET /admin-v2/account-requests -> lost-email queue (?status=open|all).
+adminRoute.get("/account-requests", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "account_requests.manage" })(c);
+  return c.json({ requests: await listAccountRequests(s.db, c.req.query().status || "open") });
+}));
+
+// POST /admin-v2/account-requests/:id/resolve {action} -> resolve/dismiss.
+adminRoute.post("/account-requests/:id/resolve", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireStepUp(c);
+  const { action } = await json<{ action?: string }>(c);
+  if (action !== "resolved" && action !== "dismissed") throw new AuthRejectError("action");
+  const ok = await resolveAccountRequest(s.db, c.req.param("id") ?? "", action, sess.userId);
+  if (!ok) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true });
+}));
+
+// GET /admin-v2/notifications -> open requests + dead letters + live blocks.
+adminRoute.get("/notifications", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await requireSession(c);
+  return c.json(await listNotifications(s.db));
+}));
+
+// PATCH /admin-v2/users/:id -> names, role, active/staff flags (step-up).
+// Role/active/staff changes bump perms_version or session_version so the
+// target's access changes on the next request without a logout.
+adminRoute.patch("/users/:id", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireStepUp(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) throw new AuthRejectError("user");
+  if (target.id === sess.userId) throw new AuthForbiddenError("Cannot change your own access");
+  const body = await json<Record<string, unknown>>(c);
+  const updates: string[] = [];
+  if (typeof body.first_name === "string" && body.first_name.length <= 80) updates.push("first");
+  if (typeof body.last_name === "string" && body.last_name.length <= 80) updates.push("last");
+  if (typeof body.role === "string" && ["mono", "general", "admin"].includes(body.role)) updates.push("role");
+  if (typeof body.is_active === "boolean") updates.push("active");
+  if (typeof body.is_staff === "boolean") updates.push("staff");
+  if (updates.length === 0) throw new AuthRejectError("update");
+  await patchUser(s.db, target.id, {
+    firstName: typeof body.first_name === "string" ? body.first_name : undefined,
+    lastName: typeof body.last_name === "string" ? body.last_name : undefined,
+    role: typeof body.role === "string" ? body.role : undefined,
+    isActive: typeof body.is_active === "boolean" ? body.is_active : undefined,
+    isStaff: typeof body.is_staff === "boolean" ? body.is_staff : undefined,
+  });
+  return c.json({ ok: true, updated: updates });
+}));
+
 // POST /admin/users -> create a user (users.manage + step-up for the admin role).
 adminRoute.post("/users", async (c) => guarded(c, async () => {
   const s = authInit(c);
@@ -481,6 +665,12 @@ adminRoute.post("/users/:id/force-logout", async (c) => guarded(c, async () => {
   await forceLogout(s.db, target.id);
   return c.json({ ok: true });
 }));
+
+// The v2 orders surface (spec §5.4). Mounted here so it inherits this router's
+// flagGate + originGuard + securityHeaders, and authenticates by session cookie
+// through guard() — the same model as every route above, never the Access
+// header the legacy /admin/* router uses.
+adminRoute.route("/orders", orderV2Routes);
 
 // --- Cleanup janitor (spec §5.10). Batched, safe (never an active lock or
 // session). Exposed as a cron-secret-guarded route so the SAME external

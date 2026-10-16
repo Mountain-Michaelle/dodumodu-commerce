@@ -5,16 +5,19 @@ import type { Context } from "hono";
 import { afterResponse } from "./ctx";
 
 export interface EmailProvider {
-  send(to: string, subject: string, text: string, idempotencyKey: string): Promise<void>;
+  send(to: string, subject: string, text: string, idempotencyKey: string): Promise<boolean>;
 }
 
-const EMAIL_TIMEOUT_MS = 3000;
+const EMAIL_TIMEOUT_MS = 10000;
 
-/** Resend provider. One retry with the same idempotency key (spec §6). */
+/** Resend provider. One retry with the same idempotency key (spec §6).
+ * Returns true on accept, false on provider failure. Never logs code/body. */
 export function resendProvider(apiKey: string, from: string): EmailProvider {
   return {
-    async send(to, subject, text, idempotencyKey) {
+    async send(to, subject, text, idempotencyKey): Promise<boolean> {
       const body = JSON.stringify({ from, to, subject, text });
+      let lastStatus: number | null = null;
+      let lastText = "";
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
@@ -27,19 +30,22 @@ export function resendProvider(apiKey: string, from: string): EmailProvider {
             body,
             signal: AbortSignal.timeout(EMAIL_TIMEOUT_MS),
           });
-          if (res.ok) return;
+          lastStatus = res.status;
+          lastText = await res.text().catch(() => "");
+          if (res.ok) return true;
         } catch {
-          // retry once with the same key, then give up (email failure is
-          // invisible to the client — the response already returned).
+          // retry once with the same key, then give up
         }
       }
+      console.error(`[auth] email send failed to ${to}: status=${lastStatus} body=${lastText.slice(0, 200)}`);
+      return false;
     },
   };
 }
 
 /** No-op provider for tests / when no key is set. */
 export const nullProvider: EmailProvider = {
-  async send() {},
+  async send(): Promise<boolean> { return true; },
 };
 
 /**
@@ -51,8 +57,9 @@ export const nullProvider: EmailProvider = {
 export const testMailbox = new Map<string, { subject: string; text: string; at: number }>();
 
 export const captureProvider: EmailProvider = {
-  async send(to, subject, text) {
+  async send(to, subject, text): Promise<boolean> {
     testMailbox.set(to.toLowerCase(), { subject, text, at: Date.now() });
+    return true;
   },
 };
 
@@ -68,22 +75,30 @@ export function providerForEnv(
   return providerFor(apiKey, from);
 }
 
+/** From address override (env AUTH_FROM_EMAIL). Must be a Resend-verified domain/sender. */
+export function fromForEnv(env: Record<string, string | undefined>): string {
+  return env.AUTH_FROM_EMAIL ?? "auth@example.com";
+}
+
 /** Send inside waitUntil; never throws into the request path. */
 export function sendInBackground(
   c: Context, provider: EmailProvider,
   to: string, subject: string, text: string, key: string,
 ): void {
-  void afterResponse(c, provider.send(to, subject, text, key));
+  void afterResponse(c, provider.send(to, subject, text, key).then((ok) => {
+    if (!ok) console.error(`[auth] ${subject} send failed to ${to} (Resend rejected or error)`);
+  }));
 }
 
-/** The login-code email (code never logged). */
+/** The login-code email (code never logged). Returns true when Resend accepts. */
 export async function sendLoginCode(
   provider: EmailProvider, to: string, code: string,
-): Promise<void> {
-  await provider.send(
+  idempotencyKey?: string,
+): Promise<boolean> {
+  return provider.send(
     to, "Your sign-in code",
     `Your code is ${code}. It expires in 3 minutes. If you did not request it, ignore this email.`,
-    `login-code:${to}`,
+    idempotencyKey ?? `login-code:${to}`,
   );
 }
 

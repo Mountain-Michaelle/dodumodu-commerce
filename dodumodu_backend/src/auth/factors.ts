@@ -8,6 +8,7 @@ import { emailTag, pairKey, tokenHashHex } from "./keys";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { AuthRejectError, AuthLockedError, AuthServerFaultError } from "./errors";
 import { loadFlow, type VerifySecrets, type Stage } from "./flows";
+import { CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS } from "./config";
 
 /**
  * POST /auth/code {code}. Real codes only verify on REAL flows (user_id NOT
@@ -23,7 +24,7 @@ export async function verifyCode(
   const key = pairKey(tag, ip);
   let reservation;
   try {
-    reservation = await reserve(db, key, "anon");
+    reservation = await reserve(db, key, "anon", CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS);
   } catch (e) {
     if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(() => {});
     throw e;
@@ -44,7 +45,10 @@ export async function verifyCode(
                 AND stage = 'otp' AND expires_at > now())
           RETURNING user_id)
         UPDATE aa_auth_flows f
-           SET stage = CASE WHEN u.phrase_hash IS NULL THEN 'enroll_phrase' ELSE 'phrase' END
+           SET stage = CASE
+             WHEN u.totp_enabled_at IS NOT NULL THEN 'totp'        -- enrolled -> normal login
+             WHEN now() < u.enroll_window_until THEN 'totp_enroll' -- new user, window open -> enroll
+             ELSE 'dead' END                                      -- out of window, no TOTP -> dead
           FROM used JOIN aa_users u ON u.id = used.user_id
          WHERE f.id = ${flow.id} AND f.stage = 'otp'
         RETURNING f.stage`);

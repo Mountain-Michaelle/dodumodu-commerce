@@ -153,9 +153,11 @@ export const ordersRepo = {
       sort: { field: string; direction: "asc" | "desc" };
       limit: number;
       offset: number;
+      // Row-level scope (Phase 6); undefined for admin/general and every v1 caller.
+      scope?: SQL;
     },
   ): Promise<{ rows: OrderListItem[]; total: number }> {
-    const where = buildOrderWhere(opts.search, opts.filters);
+    const where = buildOrderWhere(opts.search, opts.filters, opts.scope);
     const ordered = opts.sort.direction === "asc"
       ? asc(orderSortColumn(opts.sort.field))
       : desc(orderSortColumn(opts.sort.field));
@@ -427,11 +429,12 @@ export const ordersRepo = {
     search: string | null,
     filters: OrderListFilters,
     cap: number,
+    scope?: SQL,
   ): Promise<number[]> {
     const rows = await db.select({ id: orders.id }).from(orders)
       .innerJoin(products, eq(orders.productId, products.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(buildOrderWhere(search, filters))
+      .where(buildOrderWhere(search, filters, scope))
       .orderBy(desc(orders.createdAt), desc(orders.id))
       .limit(cap);
     return rows.map((row) => row.id);
@@ -483,9 +486,13 @@ export const ordersRepo = {
       .orderBy(desc(orderStatusHistory.id));
   },
 
-  async findByIds(db: Db, ids: number[]): Promise<OrderRow[]> {
+  async findByIds(db: Db, ids: number[], scope?: SQL): Promise<OrderRow[]> {
     if (ids.length === 0) return [];
-    return db.select().from(orders).where(inArray(orders.id, ids));
+    const byId = inArray(orders.id, ids);
+    // A scoped caller (mono) only ever reads their own orders out of the id set,
+    // so an id they do not own silently does not exist — the same concealment a
+    // scoped list gives. Admin/general pass no scope and read the set as-is.
+    return db.select().from(orders).where(scope ? and(byId, scope) : byId);
   },
 
   /**
@@ -663,7 +670,7 @@ const orderSortColumn = (field: string) => {
  * Built once and handed to both the page query and the count query, because the
  * two drifting is how a listing ends up with a page 3 that does not exist.
  */
-function buildOrderWhere(search: string | null, filters: OrderListFilters) {
+function buildOrderWhere(search: string | null, filters: OrderListFilters, scope?: SQL) {
   const conditions = [];
 
   if (search) {
@@ -716,6 +723,12 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
   // must be invisible unless an operator asks for it, and asking is one filter.
   if (filters.deleted) conditions.push(sql`${orders.deletedAt} IS NOT NULL`);
   else conditions.push(sql`${orders.deletedAt} IS NULL`);
+
+  // Row-level scope (Phase 6). A mono operator only ever sees their own
+  // assigned orders; admin/general pass no scope and are untouched, so the v1
+  // console (which never passes one) behaves exactly as before. Folded in last
+  // and ANDed with everything above — it can only ever narrow the result set.
+  if (scope) conditions.push(scope);
 
   return conditions.length === 0 ? undefined : and(...conditions);
 }

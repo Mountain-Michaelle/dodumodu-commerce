@@ -13,7 +13,9 @@ export const OTP_RESEND_MAX = 3;
 export const OTP_SENDS_PER_HOUR = 10;
 export const OTP_SENDS_PER_HOUR_IP = 4;
 export const SEND_CAP_WINDOW = "1 hour";
-export const PAIR_THRESHOLD = 3;
+export const PAIR_THRESHOLD = 5;
+export const CODE_VERIFY_THRESHOLD = 10;
+export const CODE_VERIFY_DECAY_SECS = 10;
 export const LOCK_STEP_MIN = 10;
 export const LOCK_MAX_MIN = 1440;
 export const DEVICE_THRESHOLD = 5;
@@ -28,6 +30,11 @@ export const ROUND_DECAY_HOURS = 24;
 export const FLOW_TTL_SECS = 900;
 export const PHRASE_MIN = 12;
 export const PHRASE_MAX = 64;
+// Recovery thresholds (spec §4.3/§4.4). 3rd wrong TOTP unlocks the recovery
+// panel; the 5th kills the flow. 3rd wrong phrase/backup blocks device+IP.
+export const TOTP_FAILS_TO_UNLOCK_RECOVERY = 3;
+export const TOTP_MAX_FAILS_PER_FLOW = 5;
+export const PHRASE_MAX_ATTEMPTS = 3;
 export const SESSION_IDLE_SECS_STAFF = 3600;
 export const SESSION_IDLE_SECS_ADMIN = 3600;
 export const SESSION_IDLE_SECS_STRICT = 600;
@@ -45,6 +52,11 @@ export const RESUME_COOKIE_MAX_SECS = 18000;
 export const STEPUP_WINDOW_SECS = 300;
 export const STEPUP_WINDOW_SECS_STRICT = 120;
 export const BACKUP_CODE_COUNT = 8;
+export const ENROLL_WINDOW_HOURS = 72;
+export const VID_TTL_SECS = 31536000;          // 365 days
+export const BLOCK_IP_TTL_HOURS = 24;          // ip block after 3 wrong phrases
+export const LOST_EMAIL_MAX_ATTEMPTS = 3;      // per IP, per round
+export const LOST_EMAIL_ALERT_COOLDOWN_HOURS = 24;
 export const ADMIN_DEVICE_MAX = 3;
 export const DEVICE_TTL_SECS = 7776000;
 export const DEVICE_INVITE_TTL_SECS = 900;
@@ -66,14 +78,51 @@ export function adminAuthEnabled(env: Record<string, string | undefined>): boole
 // Staff privileges registry (spec §5.8 decision 9). Deliberately distinct
 // strings from the v1 adminAuth.ts capabilities ("orders:read") so the two
 // systems cannot collide while both exist. Admins implicitly hold all.
+// Extended by Phase 5: every key in auth/registry.ts is a valid v2 perm.
+// The registry (not this map) is the source of truth for roles/adminOnly.
 export const PERMISSIONS = {
   ordersView: "orders.view",
   ordersAdd: "orders.add",
   ordersChange: "orders.change",
+  ordersStatusDelivered: "orders.status.delivered",
+  ordersStatusPaid: "orders.status.paid",
+  ordersStatusFailed: "orders.status.failed",
+  ordersStatusCancelled: "orders.status.cancelled",
+  ordersStatusNotPicking: "orders.status.not_picking",
   ordersDelete: "orders.delete",
   ordersExport: "orders.export",
+  ordersFilterStaff: "orders.filter_staff",
+  ordersAuditView: "orders.audit.view",
+  ordersAssign: "orders.assign",
+  ordersSpam: "orders.spam",
+  dashboardView: "dashboard.view",
+  productsView: "products.view",
+  productsAdd: "products.add",
+  productsChange: "products.change",
+  productsPriceChange: "products.price.change",
+  productsStockChange: "products.stock.change",
+  productsDelete: "products.delete",
+  categoriesView: "categories.view",
+  categoriesAdd: "categories.add",
+  categoriesChange: "categories.change",
+  categoriesDelete: "categories.delete",
+  testimonialsView: "testimonials.view",
+  testimonialsAdd: "testimonials.add",
+  testimonialsChange: "testimonials.change",
+  testimonialsApprove: "testimonials.approve",
+  testimonialsDelete: "testimonials.delete",
+  abuseView: "abuse.view",
+  abuseResolve: "abuse.resolve",
+  abuseDismiss: "abuse.dismiss",
+  abuseDelete: "abuse.delete",
   reportsView: "reports.view",
+  reportsExport: "reports.export",
+  usersView: "users.view",
   usersManage: "users.manage",
+  accessManage: "access.manage",
+  authlogView: "authlog.view",
+  blocksManage: "blocks.manage",
+  accountRequestsManage: "account_requests.manage",
 } as const;
 
 export type V2Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

@@ -1,4 +1,5 @@
 import type { Db } from "../db";
+import type { SQL } from "drizzle-orm";
 import { ordersRepo, type OrderRow } from "../data/ordersRepo";
 import { assignmentRepo } from "../data/assignmentRepo";
 import { normalizeState, displayState, isKnownState } from "./nigeriaStates";
@@ -295,6 +296,10 @@ export const orderCrmService = {
     ids: number[],
     action: OrderAction,
     actor: string,
+    // Row-level scope (Phase 6): a mono operator can only bulk-act on their own
+    // orders, so an id they do not own is concealed exactly as a scoped list
+    // would hide it. Admin/general and every v1 caller pass no scope.
+    scope?: SQL,
   ): Promise<BulkResult> {
     const result: BulkResult = { updated: [], skipped: [], errors: [] };
     if (ids.length === 0) return result;
@@ -302,7 +307,7 @@ export const orderCrmService = {
     // Read the rows rather than trusting the ids the browser sent: a page rendered
     // two minutes ago is not a statement about the database now, and every
     // transition below is checked against what is actually there.
-    const rows = await ordersRepo.findByIds(db, ids);
+    const rows = await ordersRepo.findByIds(db, ids, scope);
     const byId = new Map(rows.map((row) => [row.id, row]));
 
     for (const id of ids) {

@@ -45,3 +45,10 @@ button.ghost { background: transparent; border: 1px solid var(--border); color: 
 button.small-btn { width: auto; margin: 0; padding: 6px 12px; font-size: 0.85rem; }
 button.danger { background: var(--danger); }
 @media (min-width: 480px) { .card { padding: 34px 30px; } }
+
+/* TOTP enrolment QR panel */
+.qr-panel { margin: 16px 0 10px; text-align: center; }
+.qr-panel img { width: 200px; height: 200px; border: 1px solid var(--border); border-radius: 10px; background: #ffffff; display: block; margin: 0 auto 10px; image-rendering: pixelated; }
+.qr-setup { margin-top: 8px; }
+.qr-key { display: block; margin: 4px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; letter-spacing: 1px; color: var(--muted); word-break: break-all; }
+.qr-hint { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }

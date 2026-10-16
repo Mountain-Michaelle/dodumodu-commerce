@@ -6,7 +6,7 @@ import type { Context, Next } from "hono";
 import { createDb, type Db } from "../db";
 import { adminAuthEnabled } from "./config";
 import { lookupSession, touchSession, touchDevice, type Session } from "./session-lookup";
-import { buildCtx, afterResponse, getSidToken, getDidToken, type ReqCtx } from "./ctx";
+import { buildCtx, afterResponse, getSidToken, getDidToken, getVidToken, type ReqCtx } from "./ctx";
 import { AuthUnauthorizedError, AuthForbiddenError } from "./errors";
 
 export type AuthEnv = Record<string, string | undefined> & { DATABASE_URL: string };
@@ -18,6 +18,7 @@ export interface AuthState {
   session: Session | null;
   sessionToken: string | null;
   deviceToken: string | null;
+  vidToken: string | null; // __Host-vid: stable per-browser id for block checks
 }
 
 declare module "hono" {
@@ -35,6 +36,7 @@ export function authInit(c: Context<{ Bindings: AuthEnv }>): AuthState {
   const state: AuthState = {
     db, ctx: buildCtx(c), session: null,
     sessionToken: getSidToken(c as never), deviceToken: getDidToken(c as never),
+    vidToken: getVidToken(c as never),
   };
   c.set("aa", state);
   return state;
@@ -124,6 +126,37 @@ export async function requireStepUp(c: Context<{ Bindings: AuthEnv }>) {
   const s = await requireAdmin(c);
   if (!s.stepupOk) throw new AuthForbiddenError("Step-up required");
   return s;
+}
+
+/**
+ * guard({perm, scope?}) — the ONE decision tree for v2 routes (spec §5.4).
+ * 401 missing/invalid session; 404 out-of-scope record (concealment);
+ * 403 authenticated but privilege missing. Unknown perm keys fail closed.
+ * `scopeCheck` returns true when an in-scope record exists; false → 404.
+ */
+export function guard(opts: { perm: string; scopeCheck?: () => Promise<boolean> }) {
+  return async (c: Context<{ Bindings: AuthEnv }>) => {
+    const { registryGet } = await import("./registry");
+    const entry = registryGet(opts.perm);
+    if (!entry) throw new AuthForbiddenError(); // unknown perm: fail closed
+    const s = await requireSession(c);
+    if (s.role !== "admin") {
+      if (entry.adminOnly) throw new AuthForbiddenError();
+      if (!s.perms.includes(opts.perm)) throw new AuthForbiddenError();
+      // requires chain already normalized at grant time; re-check section live
+      // so a revoked section takes effect on the next request.
+      for (const req of entry.requires) {
+        if (!s.perms.includes(req)) throw new AuthForbiddenError();
+      }
+    }
+    if (opts.scopeCheck && !(await opts.scopeCheck())) {
+      // Out of scope: conceal as 404, never 403 (no existence signal).
+      const { AuthRejectError } = await import("./errors");
+      throw new AuthRejectError("record");
+    }
+    c.header("X-Perms-Version", String((s as { permsVersion?: number }).permsVersion ?? ""));
+    return s;
+  };
 }
 
 /**

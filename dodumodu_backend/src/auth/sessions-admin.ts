@@ -32,7 +32,7 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
       u AS (
        SELECT f.user_id, f.device_id, f.via, us.session_version
          FROM f JOIN aa_users us ON us.id = f.user_id
-          AND us.is_active AND us.role = 'admin'),
+          AND us.is_active AND us.role = 'admin' AND us.totp_enabled_at IS NOT NULL),
       act AS (
        UPDATE aa_admin_devices d
           SET status = 'active', pending_until = NULL, last_seen_at = now(),

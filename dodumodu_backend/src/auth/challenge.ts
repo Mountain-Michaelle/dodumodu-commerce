@@ -2,7 +2,7 @@
 // One row per user, reused. Unexpired row = same code (idempotent send):
 // the code is derived from (OTP_KEY, user_id, nonce) so a resend recomputes
 // the SAME code and nothing sensitive is stored (Appendix D).
-import { q1, sql } from "./sql";
+import { q, q1, sql } from "./sql";
 import type { Db } from "../db";
 import { OTP_TTL_SECS, OTP_RESEND_COOLDOWN_SECS, OTP_RESEND_MAX } from "./config";
 import { deriveCode, codeMac, toHex, fromHex } from "./crypto";
@@ -16,11 +16,31 @@ export interface ChallengeIssue {
 
 export async function issueChallenge(
   db: Db, userId: string, otpKey: Uint8Array,
+  forceNew = false,
 ): Promise<ChallengeIssue> {
   const nonce = crypto.getRandomValues(new Uint8Array(16));
   const nonceHex = toHex(nonce);
   const candidateCode = await deriveCode(otpKey, userId, nonce);
   const candidateMacHex = toHex(await codeMac(otpKey, userId, candidateCode));
+
+  // When the caller explicitly requests a new code (POST /auth/request),
+  // invalidate any existing challenge and issue a fresh one unconditionally.
+  // Resend (POST /auth/resend) calls with forceNew=false and keeps the cooldown.
+  if (forceNew) {
+    await q(db, sql`DELETE FROM aa_login_challenges WHERE user_id = ${userId}`);
+    const row = await q1<{ nonce: string; send_count: number; send_now: boolean }>(
+      db,
+      sql`INSERT INTO aa_login_challenges AS c
+        (user_id, nonce, code_mac, expires_at, send_count, last_sent_at)
+        VALUES (${userId}, decode(${nonceHex}, 'hex'), decode(${candidateMacHex}, 'hex'),
+          now() + (${OTP_TTL_SECS}::int * interval '1 second'), 1, now())
+        RETURNING encode(nonce, 'hex') AS nonce, send_count,
+          (last_sent_at = now()) AS send_now`,
+    );
+    if (!row) throw new AuthServerFaultError("issue challenge returned no row");
+    return { nonceHex: row.nonce, sendNow: row.send_now, sendCount: row.send_count };
+  }
+
   const row = await q1<{ nonce: string; send_count: number; send_now: boolean }>(
     db,
     sql`INSERT INTO aa_login_challenges AS c

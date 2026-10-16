@@ -124,6 +124,7 @@ const env: Env = {
   TOTP_ENC_KEY: process.env.TOTP_ENC_KEY ?? "",
   RESEND_API_KEY: process.env.RESEND_API_KEY ?? "",
   TURNSTILE_SECRET: process.env.TURNSTILE_SECRET ?? "",
+  AUTH_FROM_EMAIL: process.env.AUTH_FROM_EMAIL ?? "auth@example.com",
 
   // The only local-only values in the whole Env: real bindings on the Worker.
   MEDIA_BUCKET: localBucket(mediaRoot),

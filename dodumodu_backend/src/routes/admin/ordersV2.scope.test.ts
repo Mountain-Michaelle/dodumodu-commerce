@@ -58,6 +58,49 @@ const SELF_ORDER = {
   assignedTo: "mono@example.com",
 };
 
+// An admin implicitly holds every privilege; a general operator needs only the
+// orders section to reach the list route. Neither is scope-restricted, so the
+// list query they issue must carry NO scope predicate.
+const ADMIN: Session = {
+  ...MONO,
+  userId: "u-admin", email: "admin@example.com", role: "admin", perms: [],
+};
+
+const GENERAL: Session = {
+  ...MONO,
+  userId: "u-general", email: "general@example.com", role: "general",
+  perms: ["orders.view"],
+};
+
+test("admin/general/mono: list query carries scope only for the mono operator", async () => {
+  // Capture the scope the route passes into the repository. The fake driver
+  // records predicates without evaluating them, so this asserts on the exact
+  // routing boundary (which queries are narrowed) rather than the row content
+  // a fake SQL engine happened to return.
+  const scopes: unknown[] = [];
+  const origListForAdmin = ordersRepo.listForAdmin;
+  ordersRepo.listForAdmin = (async (_db: never, opts: { scope?: unknown }) => {
+    scopes.push(opts.scope);
+    return { rows: [], total: 0 };
+  }) as never;
+
+  try {
+    const admin = await callAs(ADMIN, "/");
+    const general = await callAs(GENERAL, "/");
+    const mono = await callAs(MONO, "/");
+
+    assert.equal(admin.status, 200, "an admin must reach the list route");
+    assert.equal(general.status, 200, "a general operator must reach the list route");
+    assert.equal(mono.status, 200, "a mono operator must reach the list route");
+    assert.equal(scopes.length, 3, "every list request must reach the repository");
+    assert.equal(scopes[0], undefined, "an admin query is unrestricted");
+    assert.equal(scopes[1], undefined, "a general query is unrestricted");
+    assert.notEqual(scopes[2], undefined, "a mono query is narrowed to their own rows");
+  } finally {
+    ordersRepo.listForAdmin = origListForAdmin;
+  }
+});
+
 test("mono operator: seeded order detail is readable via route layer", async () => {
   // Seed the in-memory driver with the two rows the fake `orders` table holds,
   // then exercise the route layer end to end (middleware -> guard -> scope gate

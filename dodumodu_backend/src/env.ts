@@ -134,6 +134,8 @@ export type Env = {
   TOTP_ENC_KEY: string;
   RESEND_API_KEY: string;
   TURNSTILE_SECRET: string;
+  /** From address for login codes. Must be a Resend-verified sender/domain. */
+  AUTH_FROM_EMAIL: string;
 
   // bindings — real R2/KV on the Worker, local shims under Node
   MEDIA_BUCKET: R2Bucket;

@@ -83,6 +83,7 @@ export function buildCtx(c: Context): ReqCtx {
 export const FLOW_COOKIE = "__Host-aaf";
 export const SID_COOKIE = "__Host-sid";
 export const DID_COOKIE = "__Host-did";
+export const VID_COOKIE = "__Host-vid";
 
 function hostCookie(c: Context, name: string, value: string, maxAge: number) {
   setCookie(c, name, value, {
@@ -102,9 +103,13 @@ export function setSidCookie(c: Context, token: string, maxAge: number) {
 export function setDidCookie(c: Context, token: string, maxAge: number) {
   hostCookie(c, DID_COOKIE, token, maxAge);
 }
+export function setVidCookie(c: Context, token: string, maxAge: number) {
+  hostCookie(c, VID_COOKIE, token, maxAge);
+}
 export function clearSidCookie(c: Context) {
   setCookie(c, SID_COOKIE, "", { httpOnly: true, secure: true, sameSite: "Strict", path: "/", maxAge: 0 });
 }
 export const getFlowToken = (c: Context): string | null => getCookie(c, FLOW_COOKIE) ?? null;
 export const getSidToken = (c: Context): string | null => getCookie(c, SID_COOKIE) ?? null;
 export const getDidToken = (c: Context): string | null => getCookie(c, DID_COOKIE) ?? null;
+export const getVidToken = (c: Context): string | null => getCookie(c, VID_COOKIE) ?? null;

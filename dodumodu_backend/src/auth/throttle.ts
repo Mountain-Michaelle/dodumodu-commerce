@@ -65,13 +65,38 @@ function msUntilLock(lockedUntil: string | null): number {
  * Reserve one attempt on a single key. Returns a Reservation when allowed.
  * Throws AuthLockedError (-> 429 with a countdown) when the key is locked.
  * Any DB/throw is a server fault: the caller answers 503 and does NOT get here.
+ *
+ * `thrOverride` sets the failure threshold before lock (default from tier).
+ * `decaySecs` sets how old a failure must be before the counter resets
+ * (default 24 hours). A short decay (e.g. 10s) makes the throttle a rate
+ * limiter: N failures within N seconds triggers a lock, catching bots that
+ * fire codes faster than a human can type.
  */
-export async function reserve(db: Db, key: string, tier: LockTier): Promise<Reservation> {
+export async function reserve(
+  db: Db, key: string, tier: LockTier, thrOverride?: number, decaySecs?: number,
+): Promise<Reservation> {
   const p = TIERS[tier];
+  const thr = thrOverride ?? p.thr;
+  const stepMin = p.stepMin;
+  const maxMin = p.maxMin;
+
+  if (decaySecs !== undefined) {
+    // Short-decay rate limit: call aa_auth_bump directly with a custom decay
+    // window so N failures within N seconds triggers a lock (bot detection).
+    const row = await q1<{ allowed: boolean; locked_until: string | null }>(
+      db,
+      sql`SELECT allowed, locked_until::text AS locked_until
+          FROM aa_auth_bump(${key}, ${thr}, ${stepMin}, ${maxMin}, ${decaySecs} * interval '1 second')`,
+    );
+    if (!row) throw new AuthServerFaultError("reserve returned no row");
+    if (!row.allowed) throw new AuthLockedError(msUntilLock(row.locked_until));
+    return { key, lockedUntil: row.locked_until };
+  }
+
   const row = await q1<{ allowed: boolean; locked_until: string | null }>(
     db,
     sql`SELECT allowed, locked_until::text AS locked_until
-        FROM aa_auth_reserve_v2(${key}, ${p.thr}, ${p.stepMin}, ${p.maxMin})`,
+        FROM aa_auth_reserve_v2(${key}, ${thr}, ${stepMin}, ${maxMin})`,
   );
   if (!row) throw new AuthServerFaultError("reserve returned no row");
   if (!row.allowed) throw new AuthLockedError(msUntilLock(row.locked_until));

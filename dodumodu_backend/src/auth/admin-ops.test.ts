@@ -12,7 +12,7 @@ import { PERMISSIONS } from "./config";
 import { AuthRejectError } from "./errors";
 
 const databaseUrl = process.env.DATABASE_URL;
-const tag = `ops:${Date.now().toString(36)}`;
+const tag = `ops-${Date.now().toString(36)}`;
 
 async function cleanup(db: Db) {
   await q(db, sql`DELETE FROM aa_user_permissions WHERE user_id IN (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"})`);
