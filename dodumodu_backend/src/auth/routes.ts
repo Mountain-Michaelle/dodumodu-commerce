@@ -1,3 +1,4 @@
+// ===== FILE: <your-auth-dir>/routes.ts =====
 // Auth v2 HTTP surface — spec §5.7. Mounted at AUTH_BASE (/auth) and
 // ADMIN_BASE (/admin). Every route is behind flagGate (404 when off) and
 // originGuard for unsafe methods. Errors map to neutral 401 / 429 {retry_after}
@@ -26,7 +27,8 @@ function maskEmail(email: string): string {
 }
 import { requestCode } from "./entry";
 import { verifyCode } from "./factors";
-import { totpEnrollStart, totpEnrollConfirm, genBackupCodes, ackBackupCodes } from "./totp";
+import { totpEnrollStart, totpEnrollConfirm, genBackupCodes, ackBackupCodes,
+  normalizeBackupCode, normalizeTotpCode } from "./totp";
 import { verifyTotp } from "./totp-verify";
 import { requestLostEmail } from "./lost-email";
 import { recoverWithBackup } from "./recovery";
@@ -129,7 +131,7 @@ adminRoute.use("*", flagGate);
 adminRoute.use("*", originGuard);
 adminRoute.use("*", securityHeaders);
 
-// POST /auth/device/available -> does THIS browser hold an active device for
+// GET /auth/device/available -> does THIS browser hold an active device for
 // some admin? Used by the UI to show "Use this trusted device". Never leaks
 // whether a specific email has a device: it only reads the caller's own cookie.
 authRoute.get("/device/available", async (c) => {
@@ -231,7 +233,8 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
   return c.json({ ok: true }, 202);
 }));
 
-// POST /auth/code {code} -> next stage.
+// POST /auth/code {code} -> next stage. (10-char emailed code ONLY; an
+// authenticator code sent here is rejected by design.)
 authRoute.post("/code", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const { code } = await json<{ code?: string }>(c);
@@ -243,16 +246,21 @@ authRoute.post("/code", async (c) => guarded(c, async () => {
 }));
 
 // POST /auth/device/start {email} + __Host-did -> always 202 + flow cookie.
+// Returns the flow's REAL stage as `next` so the UI never has to guess (the
+// device path starts at the authenticator step, not the emailed-code step).
+// flowStage ignores user_id, so real and dummy flows answer identically.
 authRoute.post("/device/start", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const { email } = await json<{ email?: string }>(c);
   const out = await deviceStart(s.db, secretsOf(c).throttleKey, email ?? "",
     s.deviceToken, s.ctx.ip, s.ctx.prefix, s.ctx.country, s.ctx.ua, ensureVid(c, s));
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);
-  return c.json({ ok: true, tier: out.tier }, 202);
+  const next = await flowStage(s.db, out.flowToken).then((f) => f.stage).catch(() => "totp");
+  return c.json({ ok: true, tier: out.tier, next }, 202);
 }));
 
-// once at generation; required before a session exists (stage machine gates).
+// POST /auth/backup-codes/ack: codes were shown once at generation; this is
+// required before a session exists (stage machine gates).
 authRoute.post("/backup-codes/ack", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const token = getFlowToken(c as never);
@@ -281,15 +289,16 @@ authRoute.post("/lost-email", async (c) => guarded(c, async () => {
   return c.json({ ok: true }, 202);
 }));
 
-
-// POST /auth/totp/enroll/start -> {secret, otpauth_uri} once.
+// POST /auth/totp/enroll/start -> {secret, otpauth_uri, expires_in}.
+// May be called again while the flow is alive: the unconfirmed secret is
+// replaced, so the previous QR/key stops working.
 authRoute.post("/totp/enroll/start", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const token = getFlowToken(c as never);
   if (!token) throw new AuthRejectError("flow");
   const email = await flowEmail(s.db, token);
   const out = await totpEnrollStart(s.db, secretsOf(c), token, email);
-  return c.json({ secret: out.secret, otpauth_uri: out.otpauthUri });
+  return c.json({ secret: out.secret, otpauth_uri: out.otpauthUri, expires_in: out.expiresIn });
 }));
 
 authRoute.post("/totp", async (c) => guarded(c, async () => {
@@ -343,7 +352,6 @@ authRoute.post("/recovery/backup-code", async (c) => guarded(c, async () => {
   return c.json({ ok: false, attempts_left: g.attemptsLeft ?? 0 }, 401);
 }));
 
-
 // POST /auth/stepup {code} or {backup_code} -> opens a fresh step-up window.
 // Session-based (not flow-based): verifies the admin's TOTP or a backup code
 // against the enrolled secret, then grants the window on THIS session.
@@ -358,7 +366,7 @@ authRoute.post("/stepup", async (c) => guarded(c, async () => {
   try {
     const hashHex = await tokenHashHex(s.sessionToken!);
     if (backup_code !== undefined) {
-      const bh = toHex(await sha256(backup_code.replace("-", "")));
+      const bh = toHex(await sha256(normalizeBackupCode(String(backup_code))));
       const row = await q1<{ user_id: string }>(s.db,
         sql`UPDATE aa_backup_codes bc SET used_at = now()
           FROM aa_backup_code_sets s
@@ -374,7 +382,7 @@ authRoute.post("/stepup", async (c) => guarded(c, async () => {
       if (!urow?.enc || !urow.active) { await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("totp"); }
       const secret = await decryptSecret(secrets.totpEncKey, urow.enc).catch(() => null);
       if (!secret) throw new AuthServerFaultError("totp decrypt");
-      const step = await totpMatch(secret, code ?? "");
+      const step = await totpMatch(secret, normalizeTotpCode(code ?? ""));
       if (step === null || (urow.last !== null && step <= urow.last)) {
         await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("totp");
       }
@@ -443,7 +451,6 @@ authRoute.post("/sessions/revoke-others", async (c) => guarded(c, async () => {
   return c.json({ ok: true, revoked: n });
 }));
 
-
 authRoute.post("/backup-codes/regenerate", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireStepUp(c);
@@ -496,7 +503,6 @@ adminRoute.delete("/devices/:id", async (c) => guarded(c, async () => {
   await revokeDevice(s.db, c.req.param("id") ?? "", sess.userId, false);
   return c.json({ ok: true });
 }));
-
 
 // GET /admin-v2/users -> paginated user list (admin, users.view).
 adminRoute.get("/users", async (c) => guarded(c, async () => {
@@ -667,6 +673,8 @@ adminRoute.route("/orders", orderV2Routes);
 // --- Cleanup janitor (spec §5.10). Batched, safe (never an active lock or
 // session). Exposed as a cron-secret-guarded route so the SAME external
 // scheduler that drives reconcile can call it — no Cron Trigger assumed.
+// (The retired "resets" task was removed: its SQL was a syntax error that
+// aborted the whole janitor before "devices" and "invites" could run.)
 const CLEAN_TASKS: Array<[string, string]> = [
   ["flows", `delete from aa_auth_flows where id in (
      select id from aa_auth_flows where expires_at < now() - interval '1 day'
@@ -682,10 +690,6 @@ const CLEAN_TASKS: Array<[string, string]> = [
       where last_fail_at < now() - interval '48 hours'
         and (locked_until is null or locked_until < now())
       limit $1) returning 1`],
-  ["resets", `-- retired: phrase resets removed; no-op sweep
-  select 1 where false where token_hash in (
-     select token_hash from aa_recovery_attempts_placeholder where expires_at < now() - interval '7 days'
-     limit $1) returning 1`],
   ["devices", `delete from aa_admin_devices where id in (
      select id from aa_admin_devices
       where (status = 'revoked' and revoked_at < now() - interval '30 days')
@@ -724,5 +728,3 @@ adminRoute.post("/internal/cleanup", async (c) => guarded(c, async () => {
   const counts = await runCleanup(s.db, 500);
   return c.json({ ok: true, counts });
 }));
-
-

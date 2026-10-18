@@ -1,3 +1,4 @@
+// ===== FILE: <your-auth-dir>/totp-verify.ts =====
 // TOTP authenticator / backup-code verification at stage 'totp'.
 import { q1, sql } from "./sql";
 import type { Db } from "../db";
@@ -6,6 +7,7 @@ import { emailTag } from "./keys";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { AuthRejectError, AuthLockedError, AuthRecoverableError, AuthServerFaultError } from "./errors";
 import { loadFlow, type VerifySecrets, type Stage } from "./flows";
+import { normalizeBackupCode, normalizeTotpCode } from "./totp";
 import {
   CODE_VERIFY_THRESHOLD,
   CODE_VERIFY_DECAY_SECS,
@@ -37,11 +39,8 @@ export async function verifyTotp(
   const key = totpKey(tag, ip);
   let reservation;
   try {
-    // The per-flow TOTP counter (unlock@3, dead@5) is the authoritative limit
-    // for THIS login; the throttle is a coarser per-IP backstop. Reserve with a
-    // threshold above the flow cap so the flow's own counter is what fires, not
-    // the tighter v1 pair lock (spec §4.4b layered limits). Code verification
-    // uses a 10-attempt / 10-second decay window as a bot/attack detector.
+    // The per-flow counter (unlock@3, dead@5) is the authoritative limit for THIS
+    // login; the throttle is a coarser per-IP backstop (spec §4.4b).
     reservation = await reserve(db, key, "anon", CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS);
   } catch (e) {
     if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(() => {});
@@ -56,8 +55,7 @@ export async function verifyTotp(
     }
     if (input.backupCode !== undefined) {
       if (!allowBackup) throw new AuthRejectError("backup");
-      const norm = input.backupCode.replace("-", "");
-      const hashHex = toHex(await sha256(norm));
+      const hashHex = toHex(await sha256(normalizeBackupCode(input.backupCode)));
       // Consume from the ACKED, UNREVOKED generation and advance with the
       // same completion CASE as the authenticator path.
       const row = await q1<{ stage: Stage; remaining: number }>(db,
@@ -98,9 +96,8 @@ export async function verifyTotp(
       await clearKeys(db, [key]);
       return { next: row.stage, remaining: row.remaining, usedBackup: true };
     }
-    const urow = await q1<{ enc: string | null; last: number | null; active: boolean }>(db,
-      sql`SELECT totp_secret_enc AS enc, totp_last_step AS last,
-        (totp_enabled_at IS NOT NULL) AS active
+    const urow = await q1<{ enc: string | null; active: boolean }>(db,
+      sql`SELECT totp_secret_enc AS enc, (totp_enabled_at IS NOT NULL) AS active
         FROM aa_users WHERE id = ${flow.user_id}`);
     if (!urow?.enc || !urow.active) {
       await noteFuse(db, tag).catch(() => {});
@@ -111,31 +108,29 @@ export async function verifyTotp(
       await refund(db, reservation).catch(() => {});
       throw new AuthServerFaultError("totp decrypt");
     }
-    const step = await totpMatch(secret, input.code ?? "", nowMs);
+    const step = await totpMatch(secret, normalizeTotpCode(input.code ?? ""), nowMs);
     if (step === null) {
-      // Wrong code: bump this flow's fail counter in ONE guarded statement. The
-      // 3rd fail unlocks recovery (recovery_unlocked=true, surfaced to the UI);
-      // the 5th kills the flow. A replay of an already-used step is rejected
-      // WITHOUT burning an attempt (it needs a captured valid code, so counting
-      // it would let an attacker burn the victim's attempts).
-      const fail = await q1<{ recovery_unlocked: boolean }>(db,
-        sql`UPDATE aa_auth_flows
-               SET totp_fails = totp_fails + 1,
-                   recovery_unlocked = (totp_fails + 1 >= ${TOTP_FAILS_TO_UNLOCK_RECOVERY}),
-                   stage = CASE WHEN totp_fails + 1 >= ${TOTP_MAX_FAILS_PER_FLOW} THEN 'dead' ELSE stage END
-             WHERE id = ${flow.id} AND stage = 'totp' AND expires_at > now()
-             RETURNING recovery_unlocked`);
-      await noteFuse(db, tag).catch(() => {});
-      if (fail?.recovery_unlocked) throw new AuthRecoverableError("totp");
+      // Wrong code: bump this flow's fail counter in ONE guarded statement. 3rd
+      // fail unlocks recovery; 5th kills the flow. Run alongside noteFuse (independent).
+      const [fail] = await Promise.all([
+        q1<{ recovery_unlocked: boolean; stage: string }>(db,
+          sql`UPDATE aa_auth_flows
+                 SET totp_fails = totp_fails + 1,
+                     recovery_unlocked = (totp_fails + 1 >= ${TOTP_FAILS_TO_UNLOCK_RECOVERY}),
+                     stage = CASE WHEN totp_fails + 1 >= ${TOTP_MAX_FAILS_PER_FLOW} THEN 'dead' ELSE stage END
+               WHERE id = ${flow.id} AND stage = 'totp' AND expires_at > now()
+               RETURNING recovery_unlocked, stage`),
+        noteFuse(db, tag).catch(() => {}),
+      ]);
+      // Never advertise recovery on a flow that has just died.
+      if (fail && fail.stage !== "dead" && fail.recovery_unlocked) {
+        throw new AuthRecoverableError("totp");
+      }
       throw new AuthRejectError("totp");
     }
-    // Success: a valid code from this 30s step advances the flow. Replay
-    // within this short window is tolerated — throttle + flow TTL + 30s
-    // step expiry already bound the risk, and the per-user last-step marker
-    // caused false rejects right after enrollment.
-    // Advance with the completion CASE: TOTP is proven now, so hand the flow
-    // to whatever enrollment piece is still missing (an unacked
-    // backup generation), or ready when fully enrolled (spec §5.1, M2/M4).
+    // Success: advance with the completion CASE (unacked backup generation ->
+    // backup_codes, otherwise ready). Replay inside the 30s step is tolerated;
+    // throttle + flow TTL bound the risk.
     const adv = await q1<{ stage: Stage }>(db,
       sql`UPDATE aa_auth_flows f
            SET stage = CASE

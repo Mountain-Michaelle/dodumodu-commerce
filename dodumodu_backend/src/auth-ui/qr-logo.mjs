@@ -1,71 +1,76 @@
-import qrcode from './qr.js';
+// ===== FILE: <your-static-dir>/qr-logo.mjs =====
+import qrcode from "./qr.js";
 
-// Dodumodu brand orange — used for QR corner markers (~#f59e0b)
-const BRAND_ORANGE = '#f59e0b';
+const SVG_NS = "http://www.w3.org/2000/svg";
+const INK = "#0f172a";
+const PAPER = "#ffffff";
+const LABEL = "TOTP enrolment QR code";
+const LEVELS = new Set(["L", "M", "Q", "H"]);
+const HEX = /^#[0-9a-f]{3,8}$/i;
 
-// ECC levels: 'L', 'M', 'Q', 'H' (strings, per qrcode-generator API)
-// 'H' = highest error correction (~30% damage tolerance)
-const ECC_MAP = { L: 'L', M: 'M', Q: 'Q', H: 'H' };
+/** Build the QR matrix and a compact path (one run per row, unit coordinates). */
+function layout(data, opts = {}) {
+  const size = Number(opts.size) > 0 ? Number(opts.size) : 220;
+  const quiet = Number.isInteger(opts.quiet) && opts.quiet >= 0 ? opts.quiet : 4;
+  const ecc = LEVELS.has(opts.ecc) ? opts.ecc : "M";
 
-/**
- * Generate an SVG QR code with brand-orange corner markers.
- * No centered logo — nothing covers the QR data modules.
- * Returns an SVG string safe to use as `src="data:image/svg+xml;base64,..."`
- */
-export function makeQrSvg(data, opts = {}) {
-  const size = opts.size || 260;
-  const margin = opts.margin || 24;
-  const ecc = ECC_MAP[opts.ecc || 'H'] ?? 'H';
-
-  const qr = qrcode(0, ecc);
-  qr.addData(data);
+  const qr = qrcode(0, ecc); // 0 = auto-pick the smallest version that fits
+  qr.addData(String(data), "Byte");
   qr.make();
-  const count = qr.getModuleCount();
-  const cell = (size - margin * 2) / count;
-  const qrWidth = count * cell;
-  const qrX = margin;
-  const qrY = margin;
 
-  const parts = [];
-  parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" ` +
-      `viewBox="0 0 ${size} ${size}" role="img" aria-label="TOTP enrolment QR code">`,
-  );
-  parts.push(`<rect width="100%" height="100%" fill="#ffffff"/>`);
+  const n = qr.getModuleCount();
+  const total = n + quiet * 2;
 
-  // Draw QR modules
-  for (let r = 0; r < count; r++) {
-    for (let c = 0; c < count; c++) {
-      if (qr.isDark(r, c)) {
-        const x = margin + c * cell;
-        const y = margin + r * cell;
-        parts.push(
-          `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${cell.toFixed(2)}" ` +
-            `height="${cell.toFixed(2)}" fill="#0f172a"/>`,
-        );
-      }
+  let d = "";
+  for (let r = 0; r < n; r++) {
+    let c = 0;
+    while (c < n) {
+      if (!qr.isDark(r, c)) { c++; continue; }
+      const start = c;
+      while (c < n && qr.isDark(r, c)) c++;
+      d += `M${start + quiet} ${r + quiet}h${c - start}v1h-${c - start}z`;
     }
   }
 
-  // Brand-orange corner markers — four corners of the QR grid area.
-  // Each marker is a small orange square inset slightly from the outer edge,
-  // so they frame the QR without touching its data modules.
-  const markerSize = cell * 1.6;
-  const markerInset = cell * 0.6;
-  const cornerPositions = [
-    { x: qrX + markerInset, y: qrY + markerInset },                                   // top-left
-    { x: qrX + qrWidth - markerInset - markerSize, y: qrY + markerInset },             // top-right
-    { x: qrX + markerInset, y: qrY + qrWidth - markerInset - markerSize },             // bottom-left
-    { x: qrX + qrWidth - markerInset - markerSize, y: qrY + qrWidth - markerInset - markerSize }, // bottom-right
-  ];
-  for (const pos of cornerPositions) {
-    parts.push(
-      `<rect x="${pos.x.toFixed(2)}" y="${pos.y.toFixed(2)}" ` +
-        `width="${markerSize.toFixed(2)}" height="${markerSize.toFixed(2)}" ` +
-        `fill="${BRAND_ORANGE}"/>`,
-    );
+  // Optional accent: recolours only the inner 3x3 of each finder "eye".
+  // Use a DARK colour; light colours reduce scan reliability.
+  let eyes = "";
+  const accent = typeof opts.accent === "string" && HEX.test(opts.accent) ? opts.accent : null;
+  if (accent) {
+    for (const [r, c] of [[2, 2], [2, n - 5], [n - 5, 2]]) {
+      eyes += `M${c + quiet} ${r + quiet}h3v3h-3z`;
+    }
   }
+  return { size, total, d, eyes, accent };
+}
 
-  parts.push('</svg>');
-  return parts.join('');
+/** SVG as a string (tests, downloads, server-side use). */
+export function makeQrSvg(data, opts = {}) {
+  const { size, total, d, eyes, accent } = layout(data, opts);
+  return (
+    `<svg xmlns="${SVG_NS}" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" ` +
+    `shape-rendering="crispEdges" role="img" aria-label="${LABEL}">` +
+    `<rect width="${total}" height="${total}" fill="${PAPER}"/>` +
+    `<path d="${d}" fill="${INK}"/>` +
+    (eyes ? `<path d="${eyes}" fill="${accent}"/>` : "") +
+    `</svg>`
+  );
+}
+
+/** SVG as a live DOM element. Not affected by CSP img-src: use this in the page. */
+export function makeQrElement(data, opts = {}) {
+  const { size, total, d, eyes, accent } = layout(data, opts);
+  const el = (name, attrs) => {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    return node;
+  };
+  const svg = el("svg", {
+    width: size, height: size, viewBox: `0 0 ${total} ${total}`,
+    "shape-rendering": "crispEdges", role: "img", "aria-label": LABEL,
+  });
+  svg.appendChild(el("rect", { width: total, height: total, fill: PAPER }));
+  svg.appendChild(el("path", { d, fill: INK }));
+  if (eyes) svg.appendChild(el("path", { d: eyes, fill: accent }));
+  return svg;
 }

@@ -1,13 +1,11 @@
-// TOTP + backup codes — spec §5.6, Appendices C/E3, realigned (M6/M8).
-//   totp_enroll: start (secret shown once) -> confirm (first valid code ->
-//     authenticator on; next stage is ALWAYS backup_codes with a NEW generation
-//     else backup_codes with a NEW backup generation) in ONE statement.
-//   backup_codes: codes are shown once at generation; ackBackupCodes marks the
-//     generation acknowledged and moves the flow to ready. A user is
-//     backup-ready iff an acked, unrevoked generation exists.
-// Backup codes are XXXXX-XXXXX base32 (~50 bits), stored as SHA-256 hex in
-// GENERATIONS (aa_backup_code_sets + aa_backup_codes); issuing a new generation
-// revokes every earlier one. Refused on the strict device path (route-level).
+// ===== FILE: <your-auth-dir>/totp.ts =====
+// TOTP enrolment + backup codes.
+//   start:   fresh pending secret (re-issuable while the flow is alive; only a
+//            CONFIRMED secret ever reaches aa_users).
+//   confirm: first valid code enables TOTP, issues a NEW backup generation
+//            (revoking earlier ones) and moves the flow to backup_codes, in one statement.
+//   ack:     marks the generation acknowledged and moves the flow to ready.
+// Backup codes: XXXXX-XXXXX base32 (50 bits), stored as SHA-256 hex.
 import { q1, sql } from "./sql";
 import type { Db } from "../db";
 import { BACKUP_CODE_COUNT } from "./config";
@@ -18,21 +16,36 @@ import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { AuthRejectError, AuthLockedError, AuthServerFaultError } from "./errors";
 import { loadFlow, type VerifySecrets, type Stage } from "./flows";
 
+const ISSUER = "dodumodu";
+
 function totpKey(tag: string, ip: string): string {
   return `totp:${tag}:${ip}`;
 }
 
-export interface TotpStart { secret: string; otpauthUri: string; }
+/** Single source of truth for backup-code normalisation (hash + lookup must match). */
+export function normalizeBackupCode(raw: string): string {
+  return raw.toUpperCase().replace(/[\s-]/g, "");
+}
+/** Authenticator codes are often pasted as "123 456". */
+export function normalizeTotpCode(raw: string): string {
+  return raw.replace(/[\s-]/g, "");
+}
 
-/** Generate a fresh backup-code set (plain + hex hashes), for regenerate. */
+export interface TotpStart { secret: string; otpauthUri: string; expiresIn: number; }
+
+/** Generate a fresh backup-code set (plain + hex hashes). */
 export async function genBackupCodes(): Promise<{ codes: string[]; hashes: string[] }> {
   const codes = Array.from({ length: BACKUP_CODE_COUNT }, backupCode);
   const hashes = await Promise.all(
-    codes.map(async (c) => toHex(await sha256(c.replace("-", "")))));
+    codes.map(async (c) => toHex(await sha256(normalizeBackupCode(c)))));
   return { codes, hashes };
 }
 
-/** Begin enrollment: fresh secret stored pending, shown ONCE (reload = new flow). */
+/**
+ * Begin (or re-issue) enrolment: fresh secret stored as pending. Calling again
+ * while the flow is alive REPLACES the unconfirmed secret, so the old QR stops
+ * working. expiresIn = real seconds left on the flow.
+ */
 export async function totpEnrollStart(
   db: Db, secrets: VerifySecrets & { totpEncKey: Uint8Array },
   flowToken: string, accountEmail: string,
@@ -43,16 +56,16 @@ export async function totpEnrollStart(
   }
   const secret = newTotpSecret();
   const enc = await encryptSecret(secrets.totpEncKey, secret);
-  const row = await q1<{ id: string }>(db,
+  const row = await q1<{ ttl: number }>(db,
     sql`UPDATE aa_auth_flows SET pending_totp_enc = ${enc}
       WHERE id = ${flow.id} AND stage = 'totp_enroll'
-        AND pending_totp_enc IS NULL
         AND expires_at > now()
-      RETURNING id::text AS id`);
+      RETURNING GREATEST(0, floor(extract(epoch FROM (expires_at - now()))))::int AS ttl`);
   if (!row) throw new AuthRejectError("flow");
-  const uri = `otpauth://totp/${encodeURIComponent(accountEmail)}` +
-    `?secret=${secret}&issuer=${encodeURIComponent("dodumodu")}&digits=6&period=30`;
-  return { secret, otpauthUri: uri };
+  const label = `${encodeURIComponent(ISSUER)}:${encodeURIComponent(accountEmail)}`;
+  const uri = `otpauth://totp/${label}?secret=${secret}` +
+    `&issuer=${encodeURIComponent(ISSUER)}&algorithm=SHA1&digits=6&period=30`;
+  return { secret, otpauthUri: uri, expiresIn: row.ttl };
 }
 
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -67,11 +80,7 @@ function backupCode(): string {
 
 export interface TotpConfirm { next: Stage; backupCodes: string[]; }
 
-/**
- * Confirm enrollment with the first valid code: authenticator on, then the
- * flow advances to backup_codes. Backup codes are returned
- * shown once (E3).
- */
+/** Confirm enrolment with the first valid code; backup codes are returned shown-once. */
 export async function totpEnrollConfirm(
   db: Db, secrets: VerifySecrets & { totpEncKey: Uint8Array }, flowToken: string, code: string, ip: string,
   nowMs = Date.now(),
@@ -96,29 +105,22 @@ export async function totpEnrollConfirm(
       await noteFuse(db, tag).catch(() => {});
       throw new AuthRejectError("totp");
     }
-    const blob = prow.pending_totp_enc;
-    const secret = await decryptSecret(secrets.totpEncKey, blob).catch(() => null);
+    const secret = await decryptSecret(secrets.totpEncKey, prow.pending_totp_enc).catch(() => null);
     if (!secret) {
       await refund(db, reservation).catch(() => {});
       throw new AuthServerFaultError("totp decrypt");
     }
-    const step = await totpMatch(secret, code, nowMs);
+    const step = await totpMatch(secret, normalizeTotpCode(code), nowMs);
     if (step === null) {
       await noteFuse(db, tag).catch(() => {});
       throw new AuthRejectError("totp");
     }
-    const codes = Array.from({ length: BACKUP_CODE_COUNT }, backupCode);
-    const hashes = await Promise.all(
-      codes.map(async (c) => toHex(await sha256(c.replace("-", "")))));
-    // Scalar hex params via sql.join — one array param serializes per-driver
-    // (see the clearKeys probe). Same bytea[] semantics as REGEN_RECOVERY.
+    const { codes, hashes } = await genBackupCodes();
+    // Scalar hex params via sql.join: one array param serialises per-driver.
     const vals = sql.join(
       hashes.map((h) => sql`(decode(${h}, 'hex'))`), sql`, `);
-    // One statement: enable TOTP, then advance. A user WITHOUT a phrase goes to
-    // backup_codes (v2 order: TOTP -> backup -> ready); a recovery-
-    // generation (revoking earlier ones). Backup codes are the only recovery
-    // artifact; secret phrases were removed.
-    // (this comment superseded: codes are issued on every enroll confirm).
+    // One statement: enable TOTP, advance the flow, revoke earlier backup
+    // generations, insert the new generation and its codes.
     const row = await q1<{ stage: Stage; has_codes: boolean }>(db,
       sql`WITH e AS (
          UPDATE aa_users u
@@ -164,13 +166,7 @@ export async function totpEnrollConfirm(
   }
 }
 
-/**
- * POST /auth/backup-codes/ack (stage='backup_codes'). Marks the current
- * unacked, unrevoked generation acknowledged and moves the flow to ready.
- * The codes were shown once at generation; an admin regenerate is the only
- * way to see a fresh set. One guarded statement; no throttle (the flow token
- * is the capability and the stage is single-use).
- */
+/** POST /auth/backup-codes/ack (stage='backup_codes'): ack the generation, move to ready. */
 export async function ackBackupCodes(db: Db, flowToken: string): Promise<{ next: Stage }> {
   const flow = await loadFlow(db, flowToken);
   if (!flow || flow.stage !== "backup_codes" || flow.user_id === null) {
