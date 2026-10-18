@@ -75,8 +75,7 @@ export async function verifyTotp(
           adv AS (
            UPDATE aa_auth_flows f
               SET stage = CASE
-                WHEN u.phrase_hash IS NULL THEN 'enroll_phrase'
-                WHEN EXISTS (SELECT 1 FROM aa_backup_code_sets s2
+                                WHEN EXISTS (SELECT 1 FROM aa_backup_code_sets s2
                   WHERE s2.user_id = u.id AND s2.acked_at IS NULL AND s2.revoked_at IS NULL)
                   THEN 'backup_codes'
                 ELSE 'ready' END
@@ -135,16 +134,16 @@ export async function verifyTotp(
     // step expiry already bound the risk, and the per-user last-step marker
     // caused false rejects right after enrollment.
     // Advance with the completion CASE: TOTP is proven now, so hand the flow
-    // to whatever enrollment piece is still missing (phrase, then an unacked
+    // to whatever enrollment piece is still missing (an unacked
     // backup generation), or ready when fully enrolled (spec §5.1, M2/M4).
     const adv = await q1<{ stage: Stage }>(db,
       sql`UPDATE aa_auth_flows f
            SET stage = CASE
-             WHEN u.phrase_hash IS NULL THEN 'enroll_phrase'
-             WHEN EXISTS (SELECT 1 FROM aa_backup_code_sets s
+                          WHEN EXISTS (SELECT 1 FROM aa_backup_code_sets s
                WHERE s.user_id = u.id AND s.acked_at IS NULL AND s.revoked_at IS NULL)
                THEN 'backup_codes'
-             ELSE 'ready' END
+             ELSE 'ready' END,
+               last_step_at = now()
           FROM aa_users u
          WHERE f.id = ${flow.id} AND f.stage = 'totp'
            AND f.expires_at > now() AND u.id = f.user_id AND u.is_active

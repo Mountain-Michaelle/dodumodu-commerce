@@ -48,7 +48,7 @@ export const SESSION_LOOKUP_MAX_IDLE_SECS = Math.max(
   3600,
   600,
 );
-export const RESUME_COOKIE_MAX_SECS = 18000;
+export const FLOW_STEP_RESUME_SECS = 300;
 export const STEPUP_WINDOW_SECS = 300;
 export const STEPUP_WINDOW_SECS_STRICT = 120;
 export const BACKUP_CODE_COUNT = 8;

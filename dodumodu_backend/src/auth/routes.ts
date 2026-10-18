@@ -11,14 +11,25 @@ import type { AuthEnv } from "./middleware";
 import { flagGate, originGuard, authInit, guard,
   requireSession, requireAdmin, requireStepUp, securityHeaders } from "./middleware";
 import { loadAuthSecrets } from "./secrets";
-import { FLOW_TTL_SECS, DEVICE_TTL_SECS, SESSION_ABSOLUTE_SECS, VID_TTL_SECS, isV2Perm } from "./config";
+import { FLOW_TTL_SECS, FLOW_STEP_RESUME_SECS, DEVICE_TTL_SECS, SESSION_ABSOLUTE_SECS, VID_TTL_SECS, isV2Perm } from "./config";
+
+/** Mask an email for the status endpoint (o***@e*** shape). Never leaks full address. */
+function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 0) return "***";
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const dl = local.length <= 1 ? local : local[0] + "***";
+  const at2 = domain.indexOf(".");
+  const dom = at2 <= 0 ? domain[0] + "***" : domain[0] + "***" + domain.slice(at2);
+  return `${dl}@${dom}`;
+}
 import { requestCode } from "./entry";
 import { verifyCode } from "./factors";
-import { enrollPhrase } from "./phrase";
 import { totpEnrollStart, totpEnrollConfirm, genBackupCodes, ackBackupCodes } from "./totp";
 import { verifyTotp } from "./totp-verify";
-import { recoverWithPhrase, recoverWithBackup } from "./recovery";
 import { requestLostEmail } from "./lost-email";
+import { recoverWithBackup } from "./recovery";
 import { finishStaffSession } from "./sessions";
 import { finishAdminSession } from "./sessions-admin";
 import { deviceStart } from "./devices";
@@ -26,7 +37,7 @@ import { createDeviceInvite, acceptDeviceInvite, revokeDevice, listDevices } fro
 import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin,
   listAccountRequests, resolveAccountRequest, listNotifications } from "./admin-reads";
 import { liftBlock } from "./blocks";
-import { createPhraseReset, consumePhraseReset, grantStepup, listSessions,
+import { grantStepup, listSessions,
   revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
   deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
@@ -132,6 +143,28 @@ authRoute.get("/device/available", async (c) => {
   return c.json({ available: !!row });
 });
 
+// GET /auth/status -> where is this browser's in-progress flow? Lets the UI
+// resume the current stage after a refresh (5-min step window). Never leaks
+// the full email (masked only) or user_id; 404 = start at email.
+authRoute.get("/status", async (c) => {
+  const s = authInit(c);
+  const token = getFlowToken(c as never);
+  if (!token) return c.json({ error: "Not found" }, 404);
+  const row = await q1<{ stage: string; email: string; via: string; ip_prefix: string | null }>(s.db,
+    sql`SELECT stage, email, via, ip_prefix FROM aa_auth_flows
+      WHERE token_hash = decode(${await tokenHashHex(token)}, 'hex')
+        AND expires_at > now()
+        AND user_id IS NOT NULL
+        AND last_step_at > now() - (${FLOW_STEP_RESUME_SECS}::int * interval '1 second')
+        AND stage NOT IN ('done', 'dead')`);
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json({
+    stage: row.stage,
+    email_masked: maskEmail(row.email),
+    strict: row.via === "device" && row.ip_prefix !== null,
+  });
+});
+
 // GET /auth/test/mailbox/:email -> last captured email for a recipient.
 // EXISTS ONLY when ALLOW_TEST_IP=1 (a .dev.vars-only var). Returns 404 otherwise,
 // so it is unreachable in any deployed config. Used by Playwright + attack tests
@@ -216,20 +249,9 @@ authRoute.post("/device/start", async (c) => guarded(c, async () => {
   const out = await deviceStart(s.db, secretsOf(c).throttleKey, email ?? "",
     s.deviceToken, s.ctx.ip, s.ctx.prefix, s.ctx.country, s.ctx.ua, ensureVid(c, s));
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);
-  return c.json({ ok: true }, 202);
+  return c.json({ ok: true, tier: out.tier }, 202);
 }));
 
-// POST /auth/phrase/enroll {phrase, confirm} -> {next: backup_codes, backup_codes}.
-authRoute.post("/phrase/enroll", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  const { phrase, confirm } = await json<{ phrase?: string; confirm?: string }>(c);
-  const token = getFlowToken(c as never);
-  if (!token) throw new AuthRejectError("flow");
-  const out = await enrollPhrase(s.db, secretsOf(c), token, phrase ?? "", confirm ?? "", s.ctx.ip);
-  return c.json({ next: out.next, backup_codes: out.backupCodes });
-}));
-
-// POST /auth/backup-codes/ack -> {next: ready}. Acknowledges the codes shown
 // once at generation; required before a session exists (stage machine gates).
 authRoute.post("/backup-codes/ack", async (c) => guarded(c, async () => {
   const s = authInit(c);
@@ -270,31 +292,6 @@ authRoute.post("/totp/enroll/start", async (c) => guarded(c, async () => {
   return c.json({ secret: out.secret, otpauth_uri: out.otpauthUri });
 }));
 
-// POST /auth/recovery/phrase {phrase} — only after 3 TOTP fails (recovery_unlocked).
-// Resets TOTP inside the flow (no session yet). Wrong -> 401 with attempts_left;
-// the 3rd wrong -> blocked:true (flow dead).
-authRoute.post("/recovery/phrase", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  const token = getFlowToken(c as never);
-  const { phrase } = await json<{ phrase?: string }>(c);
-  if (!token || !phrase) throw new AuthRejectError("flow");
-  const r = await recoverWithPhrase(s.db, secretsOf(c), token, phrase, s.ctx.ip);
-  if ("next" in r) return c.json({ next: r.next });
-  return c.json({ error: "Incorrect phrase", attempts_left: r.attemptsLeft, blocked: !!r.blocked }, 401);
-}));
-
-// POST /auth/recovery/backup-code {code} — same gate + counters as the phrase.
-authRoute.post("/recovery/backup-code", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  const token = getFlowToken(c as never);
-  const { code } = await json<{ code?: string }>(c);
-  if (!token || !code) throw new AuthRejectError("flow");
-  const r = await recoverWithBackup(s.db, secretsOf(c), token, code, s.ctx.ip);
-  if ("next" in r) return c.json({ next: r.next });
-  return c.json({ error: "Incorrect code", attempts_left: r.attemptsLeft, blocked: !!r.blocked }, 401);
-}));
-
-// POST /auth/totp {code} or {backup_code} at totp / totp_enroll -> next.
 authRoute.post("/totp", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const { code, backup_code } = await json<{ code?: string; backup_code?: string }>(c);
@@ -329,6 +326,21 @@ authRoute.post("/session", async (c) => guarded(c, async () => {
   if (fin.deviceToken) setDidCookie(c as never, fin.deviceToken, DEVICE_TTL_SECS);
   clearFlowCookie(c as never);
   return c.json({ ok: true });
+}));
+
+// Recovery: backup code resets TOTP inside the flow (spec §4.4). Gate:
+// stage 'totp' + recovery_unlocked (3 TOTP fails). Same shape as /auth/totp
+// on success ({next}), attempts-left on wrong codes, 403+blocked on the 3rd.
+authRoute.post("/recovery/backup-code", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const { code } = await json<{ code?: string }>(c);
+  const token = getFlowToken(c as never);
+  if (!token || typeof code !== "string") throw new AuthRejectError("flow");
+  const out = await recoverWithBackup(s.db, secretsOf(c), token, code, s.ctx.ip);
+  if ("next" in out && out.next) return c.json({ next: out.next });
+  const g = out as { attemptsLeft?: number; blocked?: boolean };
+  if (g.blocked) throw new AuthForbiddenError("No attempts left");
+  return c.json({ ok: false, attempts_left: g.attemptsLeft ?? 0 }, 401);
 }));
 
 
@@ -432,15 +444,6 @@ authRoute.post("/sessions/revoke-others", async (c) => guarded(c, async () => {
 }));
 
 
-// POST /auth/phrase-reset/:token {phrase} -> sets phrase, ends all sessions.
-authRoute.post("/phrase-reset/:token", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  const { phrase } = await json<{ phrase?: string }>(c);
-  await consumePhraseReset(s.db, c.req.param("token") ?? "", phrase ?? "");
-  return c.json({ ok: true });
-}));
-
-// POST /auth/backup-codes/regenerate -> new set shown once (admin + step-up).
 authRoute.post("/backup-codes/regenerate", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireStepUp(c);
@@ -611,17 +614,6 @@ adminRoute.post("/users", async (c) => guarded(c, async () => {
   return c.json({ ok: true, id });
 }));
 
-// POST /admin/users/:id/phrase-reset -> email a single-use reset link.
-adminRoute.post("/users/:id/phrase-reset", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  const sess = await requireStepUp(c);
-  const target = await resolveUser(s.db, c.req.param("id") ?? "");
-  if (!target) throw new AuthRejectError("user");
-  const token = await createPhraseReset(s.db, target.id, sess.userId);
-  return c.json({ ok: true, reset_url: `${origin(c)}/auth/phrase-reset/${token}` });
-}));
-
-// PUT /admin/users/:id/permissions -> grant or revoke (needs step-up).
 adminRoute.put("/users/:id/permissions", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireStepUp(c);
@@ -690,8 +682,9 @@ const CLEAN_TASKS: Array<[string, string]> = [
       where last_fail_at < now() - interval '48 hours'
         and (locked_until is null or locked_until < now())
       limit $1) returning 1`],
-  ["resets", `delete from aa_phrase_resets where token_hash in (
-     select token_hash from aa_phrase_resets where expires_at < now() - interval '7 days'
+  ["resets", `-- retired: phrase resets removed; no-op sweep
+  select 1 where false where token_hash in (
+     select token_hash from aa_recovery_attempts_placeholder where expires_at < now() - interval '7 days'
      limit $1) returning 1`],
   ["devices", `delete from aa_admin_devices where id in (
      select id from aa_admin_devices

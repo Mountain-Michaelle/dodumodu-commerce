@@ -18,13 +18,25 @@ type AC = Context<{ Bindings: Env }>;
 
 const LOGIN_PATH = "/admin/sign-in/";
 
+// Security headers shared by every admin UI response. Login has no inline
+// scripts or styles (all external), so a strict CSP is safe.
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self'; style-src 'self'; " +
+    "img-src 'self'; connect-src 'self'; form-action 'self'; " +
+    "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+};
+
 function assetResponse(c: AC, filePath: string) {
   const buffer = readFileSync(filePath);
   const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   return c.body(bytes, 200, {
     "Content-Type": contentTypeFor(filePath),
     "Cache-Control": "no-cache",
-    "X-Content-Type-Options": "nosniff",
+    ...SECURITY_HEADERS,
   });
 }
 
@@ -92,7 +104,7 @@ export function mountAdminPages(app: Hono<{ Bindings: Env }>, backendRoot: strin
     const resolved = resolveWithinRoot(uiRoot, "login.html");
     if (!resolved) return c.text("Not found", 404);
     const html = readFileSync(resolved, "utf8").replaceAll("/auth-ui/", "/admin/assets/");
-    return c.html(html);
+    return c.html(html, 200, SECURITY_HEADERS);
   });
 
   // Guarded console + sub-pages.

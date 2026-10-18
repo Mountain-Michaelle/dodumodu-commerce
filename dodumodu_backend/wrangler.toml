@@ -14,6 +14,11 @@ ANALYTICS_WARMUP_ENABLED = "false"
 # Independently revertible without a code change.
 ASSIGNMENT_MODE_ENABLED = "false"
 
+# Admin Auth v2. "0" (default) keeps /auth/* and /admin-v2/* at 404.
+# Flip to "1" to enable email OTP + TOTP admin login (requires OTP_KEY,
+# THROTTLE_KEY, TOTP_ENC_KEY secrets set via `wrangler secret put`).
+ADMIN_AUTH_V2 = "0"
+
 # ---- image pipeline ----
 # Every one of these has the same default in src/config/imageConfig.ts, so a missing
 # value degrades to a working configuration rather than a broken deployment.

@@ -220,6 +220,16 @@ export function initProductPage({ slug, productId }) {
 
   stateSelect?.addEventListener("change", refreshPaymentOptions);
 
+  // Switching payment method is a different intent, so the key minted for the
+  // previous one must not travel with it — a key from a failed Pay-now attempt
+  // replayed against a COD submit (or the reverse) is refused server-side, and
+  // paying for that rejected round trip teaches the customer nothing. Only a
+  // genuine user click fires `change` on a radio: the gate's programmatic
+  // fall-back above assigns `.value` directly and never lands here.
+  for (const radio of form.querySelectorAll('input[name="paymentMethod"]')) {
+    radio.addEventListener("change", clearIdempotencyKey);
+  }
+
   // ---- Draft --------------------------------------------------------------
   let draftTimer = null;
   form.addEventListener("input", (event) => {
@@ -365,8 +375,16 @@ export function initProductPage({ slug, productId }) {
         window.location.href = "/thank-you.html";
         return;
       } catch (err) {
-        if (err.status && err.status < 500 && err.status !== 429) {
-          // A real validation/business error — retrying won't help.
+        if (err.status && err.status !== 429) {
+          // A real validation/business error (including 500s the server chose
+          // to return as a response) — retrying won't help.
+          //
+          // The attempt is over, so the idempotency key goes too: the next
+          // submit is a new intent. Keeping the key would replay this
+          // rejection forever — and any order an older build half-created
+          // before failing would keep answering in place of the one the
+          // customer now wants.
+          clearIdempotencyKey();
           if (err.fields) {
             for (const field of form.querySelectorAll(".field")) {
               const name = field.dataset.field;

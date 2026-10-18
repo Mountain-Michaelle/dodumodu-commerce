@@ -3,7 +3,7 @@ import type { Env } from "../env";
 import { createDb } from "../db";
 import { orderGuard, noteOrderOutcome } from "../middleware/orderGuard";
 import { orderSchema } from "../validation/orderSchema";
-import { orderService, ProductNotFoundError, PackageNotFoundError, InvalidQuantityError } from "../services/orderService";
+import { orderService, ProductNotFoundError, PackageNotFoundError, InvalidQuantityError, PaymentUnavailableError, PaymentMethodMismatchError } from "../services/orderService";
 import type { OrderRow } from "../data/ordersRepo";
 import { CodNotAvailableError } from "../services/codPolicyService";
 
@@ -111,6 +111,18 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
         fields: { paymentMethod: [err.message] },
         codReason: err.reason,
       }, 400);
+    }
+    if (err instanceof PaymentUnavailableError) {
+      // Pay Now can't proceed (OPay not configured, or provider down).
+      // Return 400 so the client shows a real message instead of a 500.
+      return c.json({ error: err.message }, 400);
+    }
+    if (err instanceof PaymentMethodMismatchError) {
+      // The idempotency key is being replayed with a different payment method:
+      // the stored order is a different intent than this request. 400 (not 409)
+      // on purpose — the client treats every non-429 rejection as terminal and
+      // drops the key, so the very next submit starts clean.
+      return c.json({ error: err.message }, 400);
     }
 
     throw err;

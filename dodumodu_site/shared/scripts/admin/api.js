@@ -1,3 +1,5 @@
+import { track } from "./dm.js";
+
 // The only module that talks to the API.
 //
 // Every admin endpoint answers a failure with the same envelope:
@@ -52,9 +54,12 @@ async function request(path, { method = "GET", body, formData, signal } = {}) {
     init.body = JSON.stringify(body);
   }
 
+  // Every admin request moves the top-bar logo while it is pending (§4d).
+  const fetchNow = () => fetch(`${API_BASE}/admin${path}`, init);
+
   let res;
   try {
-    res = await fetch(`${API_BASE}/admin${path}`, init);
+    res = await track(fetchNow());
   } catch (err) {
     // An abort is a REQUEST WE CANCELLED, not a failure to reach the server, and the
     // two must not look alike. A cancelled search is the normal case when someone

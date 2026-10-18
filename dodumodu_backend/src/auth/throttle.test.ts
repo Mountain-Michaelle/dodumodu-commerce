@@ -3,7 +3,7 @@
 // Skipped when DATABASE_URL is absent (matches the repo's house integration pattern).
 //
 // These verify the exact semantics the service depends on:
-//   - reserve: PAIR_THRESHOLD=3 allowed, 4th trips a ~10 min lock (escalation round 1)
+//   - reserve: PAIR_THRESHOLD allows thr-1, the thr-th trips a ~10 min lock (escalation round 1)
 //   - blocked requests: reserve throws AuthLockedError (never counted again)
 //   - clearKeys: success resets the counter entirely
 //   - refund non-lock: fails decremented by 1, never below zero
@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { registerDbDriver } from "../db";
 import { pgDriver, closePools } from "../dbDrivers/pg";
 import { reserve, refund, noteFuse, clearKeys, sendCap } from "./throttle";
+import { PAIR_THRESHOLD } from "./config";
 import { q, q1, sql } from "./sql";
 import type { Db } from "../db";
 import { AuthLockedError } from "./errors";
@@ -40,15 +41,16 @@ test("throttle lifecycle: reserve, lock, settle, refund, fuse, send cap", { skip
 
   const key = `${tag}:otp:hmac:1.2.3.4`;
 
-  // 1. Two reserves allowed, counter climbs (pair tier: thr=3).
+  // 1. Reserves below the pair threshold are allowed; the counter climbs.
   const r1 = await reserve(db, key, "anon");
   assert.equal(r1.key, key);
   assert.equal(r1.lockedUntil, null);
-  await reserve(db, key, "anon"); // r2
-  assert.equal((await throttleRow(db, key))?.fails, 2);
+  for (let i = 2; i < PAIR_THRESHOLD; i++) await reserve(db, key, "anon");
+  assert.equal((await throttleRow(db, key))?.fails, PAIR_THRESHOLD - 1);
 
-  // 2. The 3rd reserve is allowed AND trips the pair lock (round 1 => ~10 min):
-  // fails resets to 0, round=1. The reservation carries full-precision lock text.
+  // 2. The PAIR_THRESHOLD-th reserve is allowed AND trips the pair lock
+  // (round 1 => ~10 min): fails resets to 0, round=1. The reservation carries
+  // full-precision lock text.
   const r3 = await reserve(db, key, "anon");
   const locked = await throttleRow(db, key);
   assert.equal(locked?.fails, 0);
@@ -64,11 +66,11 @@ test("throttle lifecycle: reserve, lock, settle, refund, fuse, send cap", { skip
     return true;
   });
 
-  // 4. Refund with the EXACT tripped string clears the lock (fails back to thr-1=2).
+  // 4. Refund with the EXACT tripped string clears the lock (fails back to thr-1).
   assert.equal(await refund(db, r3), true);
   const afterRefund = await throttleRow(db, key);
   assert.equal(afterRefund?.locked_until, null);
-  assert.equal(afterRefund?.fails, 2);
+  assert.equal(afterRefund?.fails, PAIR_THRESHOLD - 1);
 
   // 5. Refund a non-lock reservation: fails decremented by 1.
   const before = (await throttleRow(db, key))?.fails ?? 0;

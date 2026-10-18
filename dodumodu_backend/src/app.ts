@@ -16,6 +16,7 @@ import { AUTH_BASE, ADMIN_BASE } from "./auth/config";
 import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
+import { site } from "./site";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -107,3 +108,9 @@ app.route("/admin", adminRoute);
 // middleware and guard above are never wrapped or reordered (spec §2.4).
 app.route(AUTH_BASE, adminAuthRoute);
 app.route(ADMIN_BASE, adminAuthAdminRoute);
+
+// The storefront: serves the generated root HTML (ETag revalidation + strict
+// CSP) and the content-hashed JS (immutable cache). Registered last so every
+// API and admin route above wins its own path first; anything else falls
+// through to mountStatic (local dev) or 404 (Worker).
+app.route('/', site);

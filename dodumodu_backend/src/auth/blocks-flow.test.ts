@@ -1,5 +1,5 @@
-// Slice 7: block-on-3rd-wrong-phrase wiring + entry enforcement (live DB).
-// 3 wrong recovery phrases kill the flow AND create a device block (on the
+// Slice 7: block-on-3rd-wrong-backup-code wiring + entry enforcement (live DB).
+// 3 wrong recovery codes kill the flow AND create a device block (on the
 // flow's __Host-vid, until lifted) plus a 24 h ip block (the network). Entry
 // (requestCode) then answers the identical dummy-flow 202 for that vid/IP;
 // a different network still works; lifting the blocks restores access.
@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { registerDbDriver, createDb, type Db } from "../db";
 import { pgDriver, closePools } from "../dbDrivers/pg";
 import { q, q1, sql } from "./sql";
-import { recoverWithPhrase } from "./recovery";
+import { recoverWithBackup } from "./recovery";
 import { requestCode, type EntrySecrets } from "./entry";
 import { liftBlock, vidHashHex } from "./blocks";
 import { loadKey, randomToken } from "./crypto";
@@ -35,7 +35,7 @@ after(async () => {
   await closePools();
 });
 
-test("3rd wrong phrase blocks the vid + ip; entry refuses; lift restores", { skip: !databaseUrl }, async () => {
+test("3rd wrong backup code blocks the vid + ip; entry refuses; lift restores", { skip: !databaseUrl }, async () => {
   const email = `${tag}-u@example.com`;
   const ins = await q1<{ id: string }>(db,
     sql`INSERT INTO aa_users (email, role, totp_enabled_at, enroll_window_until)
@@ -54,14 +54,14 @@ test("3rd wrong phrase blocks the vid + ip; entry refuses; lift restores", { ski
          RETURNING id::text AS id`))!.id;
 
   // 2 wrong: rejected, nothing blocked yet.
-  let r = await recoverWithPhrase(db, secrets, flowToken, "totally-wrong-phrase", IP);
+  let r = await recoverWithBackup(db, secrets, flowToken, "totally-wrong-code", IP);
   assert.ok(!("next" in r) && r.attemptsLeft === 2);
   assert.equal((await q(db, sql`SELECT 1 FROM aa_blocks WHERE user_id = ${userId}::uuid`)).length, 0);
-  r = await recoverWithPhrase(db, secrets, flowToken, "still-wrong-phrase!!", IP);
+  r = await recoverWithBackup(db, secrets, flowToken, "still-wrong-code!!", IP);
   assert.ok(!("next" in r) && r.attemptsLeft === 1);
   assert.equal((await q(db, sql`SELECT 1 FROM aa_blocks WHERE user_id = ${userId}::uuid`)).length, 0);
   // 3rd wrong: flow dead AND blocks created.
-  r = await recoverWithPhrase(db, secrets, flowToken, "third-wrong-phrase!!!", IP);
+  r = await recoverWithBackup(db, secrets, flowToken, "third-wrong-code!!!", IP);
   assert.ok(!("next" in r) && r.blocked === true, `expected blocked, got ${JSON.stringify(r)}`);
 
   // The 3rd wrong created an ip block (24 h TTL) + a device block (until lifted).
@@ -73,10 +73,10 @@ test("3rd wrong phrase blocks the vid + ip; entry refuses; lift restores", { ski
   assert.equal(blocks[0].expires_at, null);
   assert.equal(blocks[1].kind, "ip", "ip block is time-boxed");
   assert.ok(blocks[1].expires_at !== null);
-  assert.equal(blocks[0].reason, `phrase_fails:${flowId}`);
+  assert.equal(blocks[0].reason, `recovery_fails:${flowId}`);
   // Alert queued (idempotent per flow).
   const outbox = await q(db,
-    sql`SELECT 1 FROM aa_alert_outbox WHERE dedupe_key = ${`phrase_block:${flowId}`}`);
+    sql`SELECT 1 FROM aa_alert_outbox WHERE dedupe_key = ${`recovery_block:${flowId}`}`);
   assert.equal(outbox.length, 1);
 
   // Entry from the blocked vid/IP: identical dummy 202 — no email, no user.

@@ -9,7 +9,7 @@ const AUTH = "/auth";
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  stage: "email",      // email | otp | enroll_phrase | totp | totp_enroll | backup_codes | ready | done
+  stage: "email",      // email | otp | totp | totp_enroll | backup_codes | recovery | ready | done
   device: false,
   strict: false,
   showBackup: true,
@@ -18,9 +18,7 @@ const state = {
   enrollStarted: false, // totp_enroll secret fetched once per visit
   cooldownUntil: 0,
   timer: null,
-  qrRefreshTimer: null,
-  qrExpiresAt: 0,
-  inFlight: false,     // prevents double-submit races on code/phrase/TOTP entry
+  inFlight: false,     // prevents double-submit races on code/TOTP entry
 };
 
 function showNote(kind, text) {
@@ -33,12 +31,17 @@ function setHint(text) { const h = $("hint"); h.textContent = text || ""; h.hidd
 function busy(b) { $("submit").disabled = b; }
 
 async function api(path, body) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    return { status: 0, data: { error: "Unable to reach the server. Check your connection and try again." } };
+  }
   let data = {};
   try { data = await res.json(); } catch { /* empty body */ }
   return { status: res.status, data };
@@ -47,15 +50,17 @@ async function api(path, body) {
 const STAGES = {
   email:          { label: "Email",           type: "email",    ac: "username",        btn: "Continue", sub: "Enter your email to receive a one-time code." },
   otp:            { label: "Code",            type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter the code we emailed you." },
-  enroll_phrase:  { label: "Choose a phrase", type: "password", ac: "new-password",    btn: "Continue", sub: "Choose a sign-in phrase (12-64 characters, no spaces)." },
   totp:           { label: "Authenticator",   type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter the 6-digit code from your authenticator app." },
   totp_enroll:    { label: "Authenticator",   type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter the 6-digit code from your authenticator app." },
+  recovery:       { label: "Backup code",     type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter one of your backup codes (XXXXX-XXXXX)." },
   backup_codes:   { label: "Ready",           type: "text",     ac: "off",             btn: "Continue", sub: "Backup codes saved. Continue to finish signing in." },
+  recovery:       { label: "Backup code",     type: "text",     ac: "one-time-code",   btn: "Verify",   sub: "Enter one of your backup codes (XXXXX-XXXXX)." },
   ready:          { label: "Ready",           type: "text",     ac: "off",             btn: "Sign in",  sub: "All checks passed. Continue to sign in." },
 };
 
 function stopQrRefresh() {
-  if (state.qrRefreshTimer) { clearInterval(state.qrRefreshTimer); state.qrRefreshTimer = null; }
+  // No-op retained for render() call sites: enrollment fetches its secret once,
+  // so there is no polling timer to stop.
 }
 function hideEnrollBox() {
   const box = $("enroll-box");
@@ -73,7 +78,7 @@ function render() {
     state.enrollStarted = false;
   }
   $("form").hidden = false;
-  state.useBackup = false;
+  if (state.stage !== "totp" && state.stage !== "recovery") state.useBackup = false;
   $("field-label").textContent = cfg.label;
   const input = $("input");
   input.type = cfg.type;
@@ -86,7 +91,7 @@ function render() {
     setHint("Extra checks are on because your network changed.");
   } else { setHint(""); }
   const backup = $("backup-link");
-  if (backup) backup.hidden = !(state.stage === "totp" && state.showBackup && !state.strict);
+  if (backup) backup.hidden = !(state.stage === "totp" && state.showBackup && !state.strict && !state.useBackup);
   const resend = $("resend-link");
   if (resend) { resend.hidden = state.stage !== "otp"; tick(); }
   const dev = $("device-link");
@@ -99,7 +104,8 @@ function render() {
 }
 
 // totp_enroll: POST /auth/totp/enroll/start, render QR code + setup key once.
-// QR auto-refreshes every 60s (each refresh invalidates the previous secret).
+// Fetched ONCE per visit: the backend stores a single pending secret (a second
+// start is rejected), so no auto-refresh — the flow TTL governs expiry.
 async function enrollStart() {
   const res = await fetch(AUTH + "/totp/enroll/start", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -144,7 +150,7 @@ async function enrollStart() {
   // Hint
   const hint = document.createElement("div");
   hint.className = "qr-hint";
-  hint.textContent = "Scan with your authenticator app. The QR refreshes every 2 minutes.";
+  hint.textContent = "Scan with your authenticator app, then enter the 6-digit code below.";
   box.appendChild(hint);
 
   // "I saved it" button — just focus the input, keep QR visible so the user
@@ -155,27 +161,6 @@ async function enrollStart() {
   box.appendChild(ok);
 
   box.hidden = false;
-
-  // Auto-refresh QR every 2 minutes (silently, no user-visible countdown).
-// Only refreshes when the current secret has expired.
-  state.qrExpiresAt = Date.now() + 120000;
-  if (state.qrRefreshTimer) clearInterval(state.qrRefreshTimer);
-  state.qrRefreshTimer = setInterval(async () => {
-    // Skip refresh while the current secret is still valid (2 minutes).
-    if (Date.now() < state.qrExpiresAt) return;
-    // Re-fetch a new secret (invalidates the previous one)
-    try {
-      const r2 = await fetch(AUTH + "/totp/enroll/start", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        credentials: "same-origin", body: "{}",
-      });
-      if (r2.status !== 200) { return; }
-      const { secret: newSecret, otpauth_uri: newUri } = await r2.json();
-      qrImg.src = "data:image/svg+xml;base64," + btoa(makeQrSvg(newUri, { size: 220, margin: 20, ecc: "H" }));
-      keyText.textContent = newSecret;
-      state.qrExpiresAt = Date.now() + 120000;
-    } catch { /* silent failure — retry next tick */ }
-  }, 2000);
 }
 
 // "Use a backup code instead" -> switch the totp input to accept a backup code.
@@ -195,13 +180,15 @@ if ($("backup-link")) {
 }
 
 async function refreshMe() {
-  const res = await fetch(AUTH + "/me", { credentials: "same-origin" });
-  if (res.status === 200) {
-    const me = await res.json();
-    if (me.role === "admin") $("devices-link").hidden = false;
-    $("sessions-link").hidden = false;
-    return me;
-  }
+  try {
+    const res = await fetch(AUTH + "/me", { credentials: "same-origin" });
+    if (res.status === 200) {
+      const me = await res.json();
+      if (me.role === "admin") $("devices-link").hidden = false;
+      $("sessions-link").hidden = false;
+      return me;
+    }
+  } catch { /* ignore â€” finishLogin continues without user role */ }
   return null;
 }
 
@@ -233,11 +220,11 @@ async function onSubmit(ev) {
     switch (state.stage) {
       case "email":        await doRequest(value); break;
       case "otp":          await doCode(value); break;
-      case "enroll_phrase":await doEnroll(value); break;
+      case "totp":         await doTotp(value); break;
+      case "recovery":     await doTotp(value); break;
+      case "totp_enroll":  await doTotpEnroll(value); break;
       case "backup_codes": await doAck(value); break;
       case "ready":        await finishLogin(); break;
-      case "totp":
-      case "totp_enroll":  await doTotp(value); break;
     }
   } finally {
     state.inFlight = false;
@@ -256,17 +243,29 @@ async function handleResult(status, data) {
     startLockCountdown(data && data.retry_after);
     return;
   }
-  // 401: the input the user just typed was rejected (expired code, wrong phrase,
+  // 401: the input the user just typed was rejected (expired code, wrong code,
   // wrong TOTP/backup). Same neutral wording on every stage so the stages cannot
-  // be told apart (anti-enumeration).
+  // be told apart (anti-enumeration). The one exception: recovery_available
+  // (3rd TOTP fail) reveals the backup-code recovery step for THIS flow only.
   if (status === 401) {
+    if (data && data.recovery_available && state.stage === "totp") {
+      state.stage = "recovery";
+      showNote("error", "Invalid or expired code. You can use a backup code to reset your authenticator.");
+      render();
+      return;
+    }
     showNote("error", "Invalid or expired code");
     return;
   }
   // Anything else (404 feature-disabled / not found, 5xx, other 4xx) is a server or
   // configuration fault — never the user's input. Say so neutrally and never blame
-  // the code/passphrase/email the user typed. The email stage must never mention
+  // the code/email the user typed. The email stage must never mention
   // "code" in any message.
+  // 0: network error (fetch threw) — surface it neutrally.
+  if (status === 0) {
+    showNote("error", data && data.error ? data.error : "Unable to reach the server. Please try again.");
+    return;
+  }
   if (status >= 400) {
     showNote("error", "Sign-in is unavailable right now. Please try again shortly.");
     return;
@@ -276,6 +275,10 @@ async function handleResult(status, data) {
     if (data.next === "ready") { state.stage = "ready"; await finishLogin(); return; }
     state.stage = data.next;
     render();
+  } else if (status === 200) {
+    // A 200 without a `next` is a malformed success response — surface it
+    // instead of silently freezing the form.
+    showNote("error", "Sign-in response was incomplete. Please try again.");
   }
 }
 
@@ -302,21 +305,19 @@ async function doCode(code) {
   await handleResult(status, data);
 }
 
-async function doPhrase(phrase) {
-  const { status, data } = await api(AUTH + "/phrase", { phrase });
-  await handleResult(status, data);
-}
-
-async function doEnroll(phrase) {
-  const { status, data } = await api(AUTH + "/phrase/enroll", { phrase, confirm: phrase });
-  if (status === 200 && data && Array.isArray(data.backup_codes) && data.backup_codes.length > 0) {
-    showBackupCodes(data.backup_codes);
+async function doTotp(code) {
+  if (state.stage === "recovery") {
+    // Recovery mode: backup code resets TOTP inside the flow (POST
+    // /auth/recovery/backup-code -> totp_enroll in recovery_reset mode).
+    // Attempts-left is surfaced on 401; the 3rd wrong locks (403+blocked).
+    const { status, data } = await api(AUTH + "/recovery/backup-code", { code });
+    if (status === 401 && data && typeof data.attempts_left === "number") {
+      showNote("error", `Invalid or expired code (${data.attempts_left} attempt${data.attempts_left === 1 ? "" : "s"} left)`);
+      return;
+    }
+    await handleResult(status, data);
     return;
   }
-  await handleResult(status, data);
-}
-
-async function doTotp(code) {
   const body = state.useBackup ? { backup_code: code } : { code };
   const { status, data } = await api(AUTH + "/totp", body);
   // 200 from totp_enroll confirm may already carry the one-time backup codes.
@@ -460,7 +461,7 @@ if ($("resend-link")) {
   });
 }
 
-// "Use this trusted device" -> the device path (phrase -> TOTP -> session).
+// "Use this trusted device" -> the device path joins the normal email OTP flow.
 if ($("device-link")) {
   $("device-link").addEventListener("click", async (ev) => {
     ev.preventDefault();
@@ -470,7 +471,10 @@ if ($("device-link")) {
     try {
       const { status, data } = await api(AUTH + "/device/start", { email });
       if (status === 202) {
-        state.stage = "enroll_phrase";
+        state.stage = "otp";
+        // The device path starts at TOTP, not email-code: strict tier means
+        // backup codes are off and extra checks apply.
+        state.strict = data && data.tier === "strict";
         showNote("");
         render();
       } else { await handleResult(status, data); }

@@ -1,5 +1,5 @@
 // TOTP + backup codes integration tests — spec §5.6 (realigned M2/M4/M6/M8).
-// First login order: otp -> totp_enroll -> enroll_phrase -> backup_codes ->
+// First login order: otp -> totp_enroll -> confirm (-> backup_codes) ->
 // ack -> ready. Returning logins: otp -> totp -> ready. Part 1 covers enroll +
 // authenticator + step replay; part 2 (totp-backup.test.ts) covers backup codes.
 import { test } from "node:test";
@@ -10,7 +10,6 @@ import { pgDriver, closePools } from "../dbDrivers/pg";
 import { q, sql } from "./sql";
 import { requestCode, type EntrySecrets } from "./entry";
 import { verifyCode } from "./factors";
-import { enrollPhrase } from "./phrase";
 import { totpEnrollStart, totpEnrollConfirm, ackBackupCodes } from "./totp";
 import { verifyTotp } from "./totp-verify";
 import { loadKey, normalizeEmail, hotp } from "./crypto";
@@ -18,7 +17,6 @@ import { AuthRejectError } from "./errors";
 
 export const tag = `totp-${Date.now().toString(36)}`;
 export const CTX = { ip: "10.2.3.4", prefix: "10.2.3", country: "NG", ua: "itest" };
-export const PHRASE = "correct-horse-99!";   // §5.2.1: no spaces
 
 export function secrets(): EntrySecrets & { totpEncKey: Uint8Array } {
   return {
@@ -52,7 +50,7 @@ export async function loginToTotp(db: Db, s: ReturnType<typeof secrets>, email: 
 
 const databaseUrl = process.env.DATABASE_URL;
 
-test("totp part 1: first login TOTP->phrase->backup->ack, authenticator, step replay", { skip: !databaseUrl }, async (t) => {
+test("totp part 1: first login TOTP->backup->ack, authenticator, step replay", { skip: !databaseUrl }, async (t) => {
   registerDbDriver(pgDriver);
   const db = pgDriver(databaseUrl!);
   t.after(async () => { await cleanup(db); await closePools(); });
@@ -76,14 +74,11 @@ test("totp part 1: first login TOTP->phrase->backup->ack, authenticator, step re
   const step = Math.floor(Date.now() / 30000);
   const good = await hotp(start.secret, step);
   const conf = await totpEnrollConfirm(db, s, req.flowToken, good, CTX.ip);
-  assert.equal(conf.next, "enroll_phrase", "TOTP first, then the phrase");
-  assert.deepEqual(conf.backupCodes, [], "codes come only at the backup stage");
+  assert.equal(conf.next, "backup_codes", "TOTP confirm hands over the backup codes");
+  assert.equal(conf.backupCodes.length, 8);
   await assert.rejects(
     totpEnrollConfirm(db, s, req.flowToken, good, CTX.ip), AuthRejectError);
 
-  const e = await enrollPhrase(db, s, req.flowToken, PHRASE, PHRASE, CTX.ip);
-  assert.equal(e.next, "backup_codes");
-  assert.equal(e.backupCodes.length, 8);
   const ack = await ackBackupCodes(db, req.flowToken);
   assert.equal(ack.next, "ready");
 
@@ -96,8 +91,11 @@ test("totp part 1: first login TOTP->phrase->backup->ack, authenticator, step re
   assert.equal(ok.next, "ready");
   assert.equal(ok.usedBackup, false);
 
-  // Same step, same nowMs, fresh flow: replay guard fires (deterministic).
+  // Same step, same nowMs, fresh flow: replay within the 30s window is
+  // tolerated (documented tradeoff — flow TTL + step expiry bound the risk;
+  // the old last-step marker caused false rejects right after enrollment).
   const f3 = await loginToTotp(db, s, email, "10.6.6.6");
-  await assert.rejects(verifyTotp(db, s, f3,
-    { code: fixedCode }, "10.6.6.6", true, fixedNow), AuthRejectError);
+  const replay = await verifyTotp(db, s, f3, { code: fixedCode }, "10.6.6.6", true, fixedNow);
+  assert.equal(replay.next, "ready");
+  assert.equal(replay.usedBackup, false);
 });

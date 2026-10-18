@@ -1,6 +1,10 @@
 import { el, mount, $ } from "./admin/dom.js";
 import { loadIdentity, loadV2Identity, ApiError, v2api } from "./admin/api.js";
 import { buildShell } from "./admin/layout.js";
+// dm.js runs as an ES module inside the bundle (exports below) AND as a global
+// (window.dm) when the IIFE body executes. admin.js uses the bundle import;
+// api.js guards `window.dm` for contexts where only the global exists.
+import { show, hide } from "./admin/dm.js";
 import { toast, errorState, openModal, confirmDialog } from "./admin/ui.js";
 import { ordersView } from "./admin/views/orders.js";
 import { categoriesView } from "./admin/views/categories.js";
@@ -107,7 +111,12 @@ function render() {
  */
 async function boot() {
   const root = $("#app");
+  // Reveal the logo splash immediately (200 ms anti-flicker delay inside dm.show).
+  // It stays outside #app so buildShell() can never wipe it.
+  show();
   try {
+    // Every admin request moves the top-bar logo while pending (§4d) —
+    // loadIdentity() already routes through track() inside api.js.
     identity = await loadIdentity();
   } catch (err) {
     const unauthorized = err instanceof ApiError && (err.isUnauthorized || err.isForbidden);
@@ -117,6 +126,11 @@ async function boot() {
         ? "This console is behind Cloudflare Access. Sign in through the admin address, then reload."
         : (err?.message || "The admin API could not be reached.") }),
       el("button", { class: "button", type: "button", text: "Reload", onclick: () => window.location.reload() })));
+    // The shell never mounts on this path, so dismiss the splash explicitly —
+    // otherwise the overlay sits on top of the error forever ("loading forever").
+    // requestAnimationFrame lets the failure paint first; hide() is idempotent.
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => hide());
+    else hide();
     return;
   }
 
@@ -149,6 +163,8 @@ async function boot() {
   window.addEventListener("unhandledrejection", (event) => showFatal(event.reason));
 
   render();
+  // The shell is built and the first render is done — dismiss the logo splash.
+  hide();
 }
 
 /** Re-fetch identity when the server's perms_version moves. */

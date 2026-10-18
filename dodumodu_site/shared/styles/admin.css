@@ -74,6 +74,14 @@ p:last-child { margin-bottom: 0; }
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
+/* The logo's visually-hidden label, used by the splash, the top-bar logo and
+   the sidebar brand head. Kept here (not in brand-motion.css) because nothing
+   on a customer page may reference it — the customer CSS budget is tight. */
+.dm-vh {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
 /* Keyboard focus stays visible everywhere. A console where you cannot see where the
    cursor is is unusable, and :focus-visible keeps it off mouse clicks. */
 :focus-visible {
@@ -107,6 +115,29 @@ p:last-child { margin-bottom: 0; }
   letter-spacing: .06em; opacity: .7;
 }
 
+/* Topbar logo (§4c): full moving logo with speed lines — the global activity light.
+   Still when idle, rolling + shooting out lines while any request is in flight.
+   The bar is dark teal, so the navy re-themes to white via --dm-ink. */
+.dm-topbar-logo{display:inline-flex;align-items:center;padding:8px 0;line-height:0;--dm-ink:#fff}
+.dm-bar{width:clamp(140px,40vw,170px);color:#fff}
+
+/* Splash (§4a): covers the first load, never blank. `data-boot` arms the 10 s
+   safety timer (CSS hides it if JS errors); `dm.hide()` removes it. */
+.dm-splash{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:var(--dm-bg,#fff8f5)}
+.dm-splash[hidden]{display:none!important;visibility:hidden!important;pointer-events:none!important}
+.dm-splash-logo{width:clamp(200px,60vw,320px)}
+#dm-splash[data-boot]{animation:dm-x .01s 10s forwards}
+@keyframes dm-x{to{visibility:hidden}}
+
+/* Splash/boot centring: the splash markup reuses .boot for the fallback
+   (no-JS keeps the explanation) and adds .dm-splash for the overlay. */
+.boot#dm-splash{display:grid;place-items:center;align-content:center;gap:14px}
+
+/* Login (§3a): logo centred above the card + a live status line. */
+.dm-login{display:flex;flex-direction:column;align-items:center;gap:10px;margin:0 auto 24px;text-align:center}
+.dm-login-logo{width:clamp(200px,64vw,280px)}
+.dm-login-status{min-height:1.3em;margin:0;font-size:.85rem;color:#6b5f59}
+
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: .875rem; }
 .topbar-link { color: rgba(255, 255, 255, .85); font-size: .8125rem; text-decoration: none; }
 .topbar-link:hover { color: #fff; text-decoration: underline; }
@@ -135,6 +166,12 @@ p:last-child { margin-bottom: 0; }
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
+
+/* Sidebar brand (§4d): the company logo at the head of the left panel — the
+   same still drawing as the splash (cart + wheels + speed lines). The panel is
+   white, so the navy keeps the default --dm-ink (#1f2a44), orange #F7A21B. */
+.dm-side-brand { display: block; padding: 0 0 .75rem .5rem; margin: 0 0 .875rem; border-bottom: 1px solid var(--border); line-height: 0; }
+.dm-side { width: clamp(150px, 40vw, 176px); }
 
 .nav-group + .nav-group { margin-top: 1.25rem; }
 .nav-group-title {

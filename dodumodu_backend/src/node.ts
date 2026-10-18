@@ -185,6 +185,7 @@ const server = serve({ fetch: fetchWithLocalIdentity, port }, (info) => {
     lines.push(`  /admin is open locally as ${LOCAL_ADMIN_EMAIL} (no Cloudflare Access in front of it).`);
   }
   console.log(lines.join("\n"));
+  console.log(`  admin-auth v2  ${env.ADMIN_AUTH_V2 === "1" ? "ON" : "OFF"}`);
 });
 
 // A taken port is the one startup failure a developer hits for real - a dev

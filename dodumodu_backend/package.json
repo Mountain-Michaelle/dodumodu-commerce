@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/node.ts",
+    "build:site": "node scripts/build-site.mjs",
+    "dev": "npm run build:site && tsx watch src/node.ts",
     "dev:worker": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build:site && wrangler deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx migrations/migrate.ts",
     "db:baseline": "tsx migrations/migrate.ts --baseline",

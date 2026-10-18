@@ -48,7 +48,7 @@ export async function verifyCode(
            SET stage = CASE
              WHEN u.totp_enabled_at IS NOT NULL THEN 'totp'        -- enrolled -> normal login
              WHEN now() < u.enroll_window_until THEN 'totp_enroll' -- new user, window open -> enroll
-             ELSE 'dead' END                                      -- out of window, no TOTP -> dead
+             ELSE 'dead' END, last_step_at = now()                                      -- out of window, no TOTP -> dead
           FROM used JOIN aa_users u ON u.id = used.user_id
          WHERE f.id = ${flow.id} AND f.stage = 'otp'
         RETURNING f.stage`);

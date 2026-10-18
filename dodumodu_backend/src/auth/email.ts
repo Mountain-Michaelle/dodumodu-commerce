@@ -105,19 +105,6 @@ export async function sendLoginCode(
 // --- Notification emails (spec §5.10). One stable idempotency key per event.
 // Bodies never contain codes, phrases, tokens or full IPs.
 
-/** Phrase reset link (single-use, 15 min). Token is the only secret in the body. */
-export async function sendPhraseReset(
-  provider: EmailProvider, to: string, resetUrl: string,
-): Promise<void> {
-  await provider.send(
-    to, "Reset your sign-in phrase",
-    `Use this link to choose a new sign-in phrase. It works once and expires in 15 minutes: ${resetUrl}\n` +
-      `If you did not request this, ignore this email — your current phrase still works.`,
-    `phrase-reset:${to}`,
-  );
-}
-
-/** A backup code was used (spec §5.6). */
 export async function sendBackupUsed(
   provider: EmailProvider, to: string, remaining: number,
 ): Promise<void> {
@@ -174,17 +161,6 @@ export async function sendDeviceEvent(
       ? "A trusted-device invite was created for your admin account. It works once and expires in 15 minutes."
       : "A new trusted device was just registered for your admin account. If this wasn't you, revoke it now.",
     `device-${kind}:${to}`,
-  );
-}
-
-/** Phrase reset requested (to the user, when an admin triggers it). */
-export async function sendPhraseResetRequested(
-  provider: EmailProvider, to: string,
-): Promise<void> {
-  await provider.send(
-    to, "A sign-in phrase reset was requested",
-    "An administrator requested a reset of your sign-in phrase. Check your inbox for the reset link.",
-    `phrase-reset-requested:${to}`,
   );
 }
 

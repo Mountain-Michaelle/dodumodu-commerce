@@ -13,8 +13,16 @@ export type WebhookOutcome =
   | { kind: "applied"; order: OrderRow }
   | { kind: "no_op"; order: OrderRow };
 
+/**
+ * What a checkout session is created FROM: everything opayClient reads off an
+ * order. Deliberately a Pick rather than the full row — orderService creates
+ * the session BEFORE the row exists (see the checkout-first comment there),
+ * passing just the reference/amount/currency it has already computed.
+ */
+export type CheckoutSubject = Pick<OrderRow, "reference" | "amount" | "currency">;
+
 export const paymentService = {
-  async createCheckout(env: Env, order: OrderRow) {
+  async createCheckout(env: Env, order: CheckoutSubject) {
     const result = await opayClient.createCheckoutSession(env, order);
     return result.checkoutUrl;
   },

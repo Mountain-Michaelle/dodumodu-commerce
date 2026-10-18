@@ -4,7 +4,7 @@ import type { Db } from "../db";
 import { tokenHashHex } from "./keys";
 
 export type Stage =
-  | "otp" | "phrase" | "enroll_phrase" | "totp" | "totp_enroll"
+  | "otp" | "totp" | "totp_enroll"
   | "backup_codes" | "recovery" | "ready" | "done" | "dead";
 
 export interface FlowRow {

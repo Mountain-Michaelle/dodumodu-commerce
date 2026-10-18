@@ -1,6 +1,6 @@
 // TOTP + backup codes — spec §5.6, Appendices C/E3, realigned (M6/M8).
 //   totp_enroll: start (secret shown once) -> confirm (first valid code ->
-//     authenticator on; next stage is enroll_phrase when no phrase exists,
+//     authenticator on; next stage is ALWAYS backup_codes with a NEW generation
 //     else backup_codes with a NEW backup generation) in ONE statement.
 //   backup_codes: codes are shown once at generation; ackBackupCodes marks the
 //     generation acknowledged and moves the flow to ready. A user is
@@ -46,6 +46,7 @@ export async function totpEnrollStart(
   const row = await q1<{ id: string }>(db,
     sql`UPDATE aa_auth_flows SET pending_totp_enc = ${enc}
       WHERE id = ${flow.id} AND stage = 'totp_enroll'
+        AND pending_totp_enc IS NULL
         AND expires_at > now()
       RETURNING id::text AS id`);
   if (!row) throw new AuthRejectError("flow");
@@ -68,8 +69,8 @@ export interface TotpConfirm { next: Stage; backupCodes: string[]; }
 
 /**
  * Confirm enrollment with the first valid code: authenticator on, then the
- * flow advances (enroll_phrase | backup_codes). Backup codes are returned
- * ONLY on the backup_codes branch (shown once). All or nothing (E3).
+ * flow advances to backup_codes. Backup codes are returned
+ * shown once (E3).
  */
 export async function totpEnrollConfirm(
   db: Db, secrets: VerifySecrets & { totpEncKey: Uint8Array }, flowToken: string, code: string, ip: string,
@@ -114,10 +115,10 @@ export async function totpEnrollConfirm(
     const vals = sql.join(
       hashes.map((h) => sql`(decode(${h}, 'hex'))`), sql`, `);
     // One statement: enable TOTP, then advance. A user WITHOUT a phrase goes to
-    // enroll_phrase (v2 order: TOTP -> phrase -> backup -> ready); a recovery-
-    // reset user already has a phrase, so a NEW backup generation is issued
-    // (revoking any earlier one) and the flow moves to backup_codes. Fresh
-    // backup codes exist only for the phrase-havers branch.
+    // backup_codes (v2 order: TOTP -> backup -> ready); a recovery-
+    // generation (revoking earlier ones). Backup codes are the only recovery
+    // artifact; secret phrases were removed.
+    // (this comment superseded: codes are issued on every enroll confirm).
     const row = await q1<{ stage: Stage; has_codes: boolean }>(db,
       sql`WITH e AS (
          UPDATE aa_users u
@@ -127,22 +128,22 @@ export async function totpEnrollConfirm(
           WHERE f.id = ${flow.id} AND f.stage = 'totp_enroll' AND f.expires_at > now()
             AND f.pending_totp_enc IS NOT NULL
             AND u.id = f.user_id AND u.totp_enabled_at IS NULL
-          RETURNING u.id, u.phrase_hash),
+          RETURNING u.id),
         adv AS (
          UPDATE aa_auth_flows f
-            SET stage = CASE WHEN e.phrase_hash IS NULL THEN 'enroll_phrase'
-              ELSE 'backup_codes' END, pending_totp_enc = NULL
+            SET stage = 'backup_codes', pending_totp_enc = NULL,
+                last_step_at = now()
            FROM e WHERE f.id = ${flow.id} AND f.stage = 'totp_enroll'
           RETURNING f.stage),
         rev AS (
          UPDATE aa_backup_code_sets SET revoked_at = now()
           WHERE revoked_at IS NULL
-            AND user_id IN (SELECT id FROM e WHERE phrase_hash IS NOT NULL)),
+            AND user_id IN (SELECT id FROM e)),
         ns AS (
          INSERT INTO aa_backup_code_sets (user_id, generation)
          SELECT e.id, COALESCE((SELECT max(generation) + 1
                                   FROM aa_backup_code_sets b WHERE b.user_id = e.id), 1)
-           FROM e WHERE e.phrase_hash IS NOT NULL
+           FROM e
           RETURNING id),
         ins AS (
          INSERT INTO aa_backup_codes (set_id, code_hash)
@@ -155,7 +156,7 @@ export async function totpEnrollConfirm(
       throw new AuthRejectError("totp");
     }
     await clearKeys(db, [key]);
-    return { next: row.stage, backupCodes: row.has_codes ? codes : [] };
+    return { next: row.stage, backupCodes: codes };
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError) throw e;
     await refund(db, reservation).catch(() => {});
@@ -181,7 +182,7 @@ export async function ackBackupCodes(db: Db, flowToken: string): Promise<{ next:
           WHERE user_id = ${flow.user_id} AND acked_at IS NULL AND revoked_at IS NULL
           RETURNING id),
         adv AS (
-         UPDATE aa_auth_flows SET stage = 'ready'
+         UPDATE aa_auth_flows SET stage = 'ready', last_step_at = now()
           WHERE id = ${flow.id} AND stage = 'backup_codes' AND expires_at > now()
           RETURNING stage)
         SELECT (SELECT stage FROM adv) AS stage

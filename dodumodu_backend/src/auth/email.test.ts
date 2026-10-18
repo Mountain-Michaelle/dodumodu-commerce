@@ -4,9 +4,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  providerFor, nullProvider, sendLoginCode, sendPhraseReset, sendBackupUsed,
+  providerFor, nullProvider, sendLoginCode, sendBackupUsed,
   sendPermChange, sendDeniedAlert, sendNewNetwork, sendDeviceEvent,
-  sendPhraseResetRequested, type EmailProvider,
+  type EmailProvider,
 } from "./email";
 
 interface Sent { to: string; subject: string; text: string; key: string }
@@ -36,19 +36,15 @@ test("login code: body has the code, key is stable per recipient", async () => {
 
 test("notification bodies never leak secrets and keys are stable", async () => {
   const { provider, sent } = recordingProvider();
-  await sendPhraseReset(provider, "u@x.com", "https://h/auth/phrase-reset/TOKEN");
   await sendBackupUsed(provider, "u@x.com", 3);
   await sendPermChange(provider, "u@x.com", "orders.view", true);
   await sendDeniedAlert(provider, "u@x.com");
   await sendNewNetwork(provider, "u@x.com", "NG");
   await sendDeviceEvent(provider, "u@x.com", "registered");
-  await sendPhraseResetRequested(provider, "u@x.com");
-  assert.equal(sent.length, 7);
+  assert.equal(sent.length, 5);
   for (const s of sent) {
     assert.ok(s.key.length > 0, "every send has an idempotency key");
     // No full IP addresses anywhere in any body.
     assert.doesNotMatch(s.text, /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
   }
-  // The only place a token appears is the reset URL, and only the path token.
-  assert.match(sent[0].text, /phrase-reset\/TOKEN/);
 });

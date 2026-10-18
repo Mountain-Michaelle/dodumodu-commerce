@@ -1,5 +1,5 @@
-// Admin ops — spec §5.5/5.7. Permissions grant/revoke, user create, phrase
-// reset, deactivate/demote (guarded, last-admin protected), force-logout,
+// Admin ops — spec §5.5/5.7. Permissions grant/revoke, user create,
+// deactivate/demote (guarded, last-admin protected), force-logout,
 // TOTP reset, step-up grant, own-sessions list/revoke. Every sensitive caller
 // route must have verified a fresh step-up BEFORE calling these.
 import { q, q1, sql } from "./sql";
@@ -7,10 +7,7 @@ import type { Db } from "../db";
 import { isV2Perm, STEPUP_WINDOW_SECS, STEPUP_WINDOW_SECS_STRICT,
   FIRST_DEVICE_WINDOW_HOURS, SESSION_IDLE_SECS_STAFF, ENROLL_WINDOW_HOURS } from "./config";
 import { registryGet, cascadeOnRevoke, effectivePerms } from "./registry";
-import { normalizeEmail, randomToken } from "./crypto";
-import { assertPhraseFormat } from "./phrase";
-import { tokenHashHex } from "./keys";
-import { hashPhrase } from "./argon2";
+import { normalizeEmail } from "./crypto";
 import { AuthRejectError, AuthServerFaultError, AuthForbiddenError } from "./errors";
 
 /** Grant a permission to a user (admins implicitly hold all; no-op for them). */
@@ -50,7 +47,7 @@ export async function revokePerm(db: Db, userId: string, perm: string): Promise<
   const cascaded = cascadeOnRevoke(held.map((r) => r.perm), perm);
   if (cascaded.length > 0) {
     await q(db, sql`DELETE FROM aa_user_permissions
-      WHERE user_id = ${userId} AND perm = ANY(${cascaded})`);
+      WHERE user_id = ${userId} AND perm = ANY(ARRAY[${sql.join(cascaded.map((k) => sql`${k}`), sql`, `)}])`);
     await q(db, sql`UPDATE aa_users SET perms_version = perms_version + 1 WHERE id = ${userId}`);
   }
   return cascaded;
@@ -73,7 +70,7 @@ export async function replaceGrants(
   const toRemove = currentKeys.filter((k) => !normalized.has(k));
   if (toRemove.length > 0) {
     await q(db, sql`DELETE FROM aa_user_permissions
-      WHERE user_id = ${userId} AND perm = ANY(${toRemove})`);
+      WHERE user_id = ${userId} AND perm = ANY(ARRAY[${sql.join(toRemove.map((k) => sql`${k}`), sql`, `)}])`);
   }
   for (const k of toAdd) {
     await q(db, sql`INSERT INTO aa_user_permissions (user_id, perm, granted_by)
@@ -89,7 +86,7 @@ export async function replaceGrants(
 export async function createUser(
   db: Db, rawEmail: unknown, role: string, createdBy: string,
 ): Promise<string> {
-  if (role !== "staff" && role !== "admin") throw new AuthRejectError("role");
+  if (!["admin", "staff", "mono", "general"].includes(role)) throw new AuthRejectError("role"); // staff = legacy v1; mono/general = v2
   const email = normalizeEmail(rawEmail);
   if (!email) throw new AuthRejectError("email");
   const row = await q1<{ id: string }>(db,
@@ -102,38 +99,6 @@ export async function createUser(
       RETURNING id::text AS id`);
   if (!row) throw new AuthRejectError("email"); // duplicate treated as 401
   return row.id;
-}
-
-/** Request a phrase reset: single-use link (admin-triggered). */
-export async function createPhraseReset(
-  db: Db, targetUserId: string, createdBy: string, ttlSecs = 900,
-): Promise<string> {
-  const token = randomToken();
-  const hashHex = await tokenHashHex(token);
-  const row = await q1<{ token_hash: string }>(db,
-    sql`SELECT encode(aa_phrase_reset_create(
-      ${targetUserId}, decode(${hashHex}, 'hex'), ${createdBy}, ${ttlSecs}), 'hex') AS token_hash`);
-  if (!row?.token_hash) throw new AuthRejectError("user");
-  return token;
-}
-
-/** Consume a reset token: sets the new phrase, bumps session_version (kills all sessions). */
-export async function consumePhraseReset(
-  db: Db, resetToken: string, newPhrase: string,
-): Promise<void> {
-  assertPhraseFormat(newPhrase);
-  const hashHex = await tokenHashHex(resetToken);
-  const newHash = await hashPhrase(newPhrase);
-  const row = await q1<{ id: string }>(db,
-    sql`WITH r AS (
-       UPDATE aa_phrase_resets SET used_at = now()
-        WHERE token_hash = decode(${hashHex}, 'hex')
-          AND used_at IS NULL AND expires_at > now()
-       RETURNING user_id)
-      UPDATE aa_users u SET phrase_hash = ${newHash}, session_version = u.session_version + 1
-       FROM r WHERE u.id = r.user_id AND u.is_active
-      RETURNING u.id::text AS id`);
-  if (!row) throw new AuthRejectError("reset");
 }
 
 /** Deactivate a user (guarded: refuses last active admin). */
@@ -172,8 +137,7 @@ export async function adminResetTotp(db: Db, targetId: string, actingAdminId: st
         WHERE id = ${targetId} AND id <> ${actingAdminId} AND role = 'admin'
        RETURNING id),
       b AS (UPDATE aa_backup_code_sets SET revoked_at = now()
-             WHERE revoked_at IS NULL AND user_id IN (SELECT id FROM u)),
-      d AS (DELETE FROM aa_recovery_codes WHERE user_id IN (SELECT id FROM u)),
+             WHERE revoked_at IS NULL AND user_id IN (SELECT id FROM u)))
       s AS (DELETE FROM aa_sessions WHERE user_id IN (SELECT id FROM u))
       SELECT id::text AS id FROM u`);
   if (!row?.id) throw new AuthRejectError("user");

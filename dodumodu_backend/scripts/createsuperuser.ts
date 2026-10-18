@@ -116,7 +116,7 @@ try {
     await c.query("COMMIT");
     console.log(
       `\n  Admin created: ${email} (username: ${uname}).\n` +
-        `  Open /auth, log in with the email OTP, then enroll TOTP + your secret phrase\n` +
+        `  Open /auth, log in with the email OTP, then enroll TOTP + save your backup codes\n` +
         `  and claim your first device within ${ENROLL_HOURS}h.\n`,
     );
   } else if (
@@ -130,7 +130,7 @@ try {
     const byEmail = await c.query("select 1 from aa_users where is_superuser and email = $1", [email]);
     if (sess.rowCount !== 0 || byEmail.rowCount === 0) {
       await c.query("ROLLBACK");
-      die("Admin already exists. Aborting.");
+      die("Something special was broken, wait while I send report for fix. Aborting..."); //admin exists
     }
     await c.query(
       `update aa_users set enroll_window_until = now() + ($1 || ' hours')::interval,

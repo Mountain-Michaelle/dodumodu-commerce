@@ -1,5 +1,5 @@
 // Factors integration tests: full staff journey + reject paths (v2 realigned).
-// request -> code -> totp_enroll -> enroll_phrase -> backup_codes -> ack ->
+// request -> code -> totp_enroll -> confirm (-> backup_codes) -> ack ->
 // ready; a returning user goes code -> totp -> ready. Unknown flow -> 401;
 // replay -> 401; wrong code -> 401; wrong stage -> 401; dummy rejects identically.
 import { test } from "node:test";
@@ -10,7 +10,6 @@ import { pgDriver, closePools } from "../dbDrivers/pg";
 import { q, sql } from "./sql";
 import { requestCode, type EntrySecrets } from "./entry";
 import { verifyCode } from "./factors";
-import { enrollPhrase } from "./phrase";
 import { totpEnrollStart, totpEnrollConfirm, ackBackupCodes } from "./totp";
 import { verifyTotp } from "./totp-verify";
 import { loadKey, normalizeEmail, hotp } from "./crypto";
@@ -19,7 +18,6 @@ import { AuthRejectError } from "./errors";
 const databaseUrl = process.env.DATABASE_URL;
 const tag = `factors-${Date.now().toString(36)}`;
 const CTX = { ip: "10.1.2.3", prefix: "10.1.2", country: "NG", ua: "itest" };
-const PHRASE = "correct-horse-99!";
 
 function secrets(): EntrySecrets & { totpEncKey: Uint8Array } {
   return {
@@ -56,25 +54,15 @@ test("factors: staff first login otp->totp_enroll->enroll_phrase->backup_codes->
   assert.equal(v.next, "totp_enroll");
   // Replay of the same code: consumed -> 401 (flow already left otp anyway).
   await assert.rejects(verifyCode(db, s, req.flowToken, code, CTX.ip), AuthRejectError);
-  // Phrase enrollment is not reachable before TOTP: wrong stage -> 401.
-  await assert.rejects(
-    enrollPhrase(db, s, req.flowToken, PHRASE, PHRASE, CTX.ip), AuthRejectError);
 
-  // Enroll TOTP: wrong confirm code -> 401, then the current step -> enroll_phrase.
+  // Enroll TOTP: wrong confirm code -> 401, then the current step -> backup_codes.
   const start = await totpEnrollStart(db, s, req.flowToken, email);
   await assert.rejects(totpEnrollConfirm(db, s, req.flowToken, "000000", CTX.ip), AuthRejectError);
   const step = Math.floor(Date.now() / 30000);
   const conf = await totpEnrollConfirm(db, s, req.flowToken, await hotp(start.secret, step), CTX.ip);
-  assert.equal(conf.next, "enroll_phrase");
-  assert.deepEqual(conf.backupCodes, [], "no backup codes before the phrase stage");
-
-  // Mismatched confirm: 401. Then enroll -> backup_codes + 8 codes shown once.
-  await assert.rejects(
-    enrollPhrase(db, s, req.flowToken, PHRASE, "different-phrase-99!", CTX.ip), AuthRejectError);
-  const e = await enrollPhrase(db, s, req.flowToken, PHRASE, PHRASE, CTX.ip);
-  assert.equal(e.next, "backup_codes");
-  assert.equal(e.backupCodes.length, 8);
-  assert.ok(e.backupCodes.every((c) => /^[A-Z2-7]{5}-[A-Z2-7]{5}$/.test(c)));
+  assert.equal(conf.next, "backup_codes");
+  assert.equal(conf.backupCodes.length, 8, "8 backup codes shown once at confirm");
+  assert.ok(conf.backupCodes.every((c: string) => /^[A-Z2-7]{5}-[A-Z2-7]{5}$/.test(c)));
 
   // A session is impossible before the ack; ack -> ready; double ack -> 401.
   const a = await ackBackupCodes(db, req.flowToken);

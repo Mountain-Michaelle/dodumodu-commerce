@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Db } from "../db";
 import type { Env } from "../env";
 import type { OrderInput } from "../validation/orderSchema";
-import { orderService, ProductNotFoundError, InvalidQuantityError } from "./orderService";
+import { orderService, ProductNotFoundError, InvalidQuantityError, PaymentUnavailableError, PaymentMethodMismatchError } from "./orderService";
 import { CodNotAvailableError } from "./codPolicyService";
 import { ordersRepo } from "../data/ordersRepo";
 import { productsRepo } from "../data/productsRepo";
@@ -152,4 +152,37 @@ test("an unknown product is refused before anything else happens", async () => {
   );
   assert.equal(inserted.length, 0);
   productsRepo.findById = async () => PRODUCT as never;
+});
+
+test("a checkout failure writes NOTHING, so no zombie can hold the key hostage", async () => {
+  // The provider call used to run AFTER the insert: OPay rejecting it left a
+  // pay_now/awaiting_payment row behind, and every later attempt with that key
+  // — even a COD one — replayed the dead order instead of creating a real one.
+  paymentService.createCheckout = async () => { throw new Error("OPay 401"); };
+  await assert.rejects(
+    () => orderService.createOrder(db, env, order({ paymentMethod: "pay_now" })),
+    (err: unknown) => err instanceof PaymentUnavailableError,
+  );
+  assert.equal(inserted.length, 0, "a failed checkout must leave no order row");
+  paymentService.createCheckout = async () => "https://pay.test/checkout";
+});
+
+test("a key replayed with a different payment method is refused, not answered with the old order", async () => {
+  ordersRepo.findByIdempotencyKey = async () =>
+    ({ id: 7, paymentMethod: "pay_now", status: "awaiting_payment" }) as never;
+  await assert.rejects(
+    () => orderService.createOrder(db, env, order({ paymentMethod: "cod" })),
+    (err: unknown) => err instanceof PaymentMethodMismatchError,
+  );
+  assert.equal(inserted.length, 0, "a mismatched replay must not write a second order");
+  ordersRepo.findByIdempotencyKey = async () => null;
+});
+
+test("a same-method replay still returns the stored order and writes nothing", async () => {
+  const stored = { id: 9, paymentMethod: "cod", status: "confirmed_cod" } as never;
+  ordersRepo.findByIdempotencyKey = async () => stored;
+  const { order: created } = await orderService.createOrder(db, env, order());
+  assert.equal(created, stored, "the stored order wins — first successfully created order, full stop");
+  assert.equal(inserted.length, 0, "a replay must not insert a duplicate");
+  ordersRepo.findByIdempotencyKey = async () => null;
 });

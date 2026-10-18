@@ -37,8 +37,11 @@ function callAs(session: Session, path: string, init: RequestInit = {}) {
     await next();
   });
   app.route("/admin-v2/orders", orderV2Routes);
+  // "/" means the collection root; the trailing slash is NOT the same route
+  // in Hono, so normalize it away instead of 404-ing the list handler.
+  const suffix = path === "/" ? "" : path;
   return app.request(
-    `http://localhost/admin-v2/orders${path}`,
+    `http://localhost/admin-v2/orders${suffix}`,
     { ...init, headers: { "Content-Type": "application/json", ...(init.headers ?? {}) } },
     { DATABASE_URL: "postgres://test" } as unknown as AuthEnv,
   );

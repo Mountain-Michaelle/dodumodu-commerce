@@ -48,9 +48,29 @@ test("external asset paths are the shipped ones", () => {
   }
 });
 
-test("autocomplete hints match the spec (one-time-code, passwords)", () => {
+test("auth flow endpoints match the backend routes", () => {
   const js = read("auth.js");
-  assert.match(js, /one-time-code/, "emailed code + TOTP use one-time-code");
-  assert.match(js, /current-password/, "phrase uses current-password");
-  assert.match(js, /new-password/, "enrollment uses new-password");
+  assert.match(js, /AUTH \+ "\/request"/, "email stage posts /auth/request");
+  assert.match(js, /AUTH \+ "\/code"/, "otp stage posts /auth/code");
+  assert.match(js, /AUTH \+ "\/totp"/, "totp stage posts /auth/totp");
+  assert.match(js, /AUTH \+ "\/totp\/enroll\/start"/, "enroll fetches /auth/totp/enroll/start once");
+  assert.match(js, /AUTH \+ "\/backup-codes\/ack"/, "backup_codes stage posts /auth/backup-codes/ack");
+  assert.match(js, /AUTH \+ "\/recovery\/backup-code"/, "recovery stage posts /auth/recovery/backup-code");
+  assert.match(js, /AUTH \+ "\/session"/, "ready stage posts /auth/session");
+  assert.doesNotMatch(js, /session\/ready/, "no dead /auth/session/ready call");
+  assert.doesNotMatch(js, /enroll\/start\/pending/, "no dead /auth/totp/enroll/start/pending call");
+  assert.doesNotMatch(js, /backup_entry/, "backend stage is recovery, not backup_entry");
+});
+
+test("recovery is reachable: backend unlocks it, UI routes it", () => {
+  const js = read("auth.js");
+  assert.match(js, /recovery_available/, "UI surfaces the server's recovery_available signal");
+  assert.match(js, /case "recovery"/, "the recovery stage submits through the form");
+});
+
+test("autocomplete hints match the spec (one-time-code, no passwords)", () => {
+  const js = read("auth.js");
+  assert.match(js, /one-time-code/, "emailed code + TOTP + backup codes use one-time-code");
+  assert.doesNotMatch(js, /current-password/, "recovery phrase removed: no current-password hint");
+  assert.doesNotMatch(js, /new-password/, "recovery phrase removed: no new-password hint");
 });

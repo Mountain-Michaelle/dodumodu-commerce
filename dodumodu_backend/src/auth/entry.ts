@@ -1,11 +1,14 @@
 // Entry routing — spec §5.1. POST /auth/request {email} always looks the same
-// on the wire (202 + flow cookie), but internally there are three cases:
-//   REAL    known + active + (staff OR admin with an active device, a pending
-//           device, or an open first-device window) -> challenge + email code
-//   DENIED  admin, no valid device, window closed -> dummy flow + ONE
-//           rate-limited alert email to the admin (max 1 per 6 h)
-//   DUMMY   unknown or inactive email -> dummy flow, no email
-// Unknown, staff and denied-admin get identical responses, counters and
+// on the wire (202 + flow cookie), but internally there are two cases:
+//   REAL    known + active + (enrolled TOTP or open enrollment window) ->
+//           challenge + email code, in ANY browser. A new/unrecognized device
+//           only faces STRICT-tier throttling on the pair key (thr=3, 15-min
+//           steps) — the flow itself is never denied for device reasons.
+//   DUMMY   unknown or inactive email, or no TOTP and no open window ->
+//           dummy flow, no email (a rate-limited alert may go to an admin
+//           whose account cannot log in anyway).
+// Admin device/IP blocks still silence (same dummy 202, §4.5).
+// Unknown, inactive and unable-to-log-in get identical responses, counters and
 // (best-effort) timing: no registration endpoint exists (spec §4).
 import { q, q1, sql } from "./sql";
 import type { Db } from "../db";
@@ -32,9 +35,10 @@ export interface RequestOutcome {
 
 interface Resolved {
   user_id: string; role: string; is_active: boolean; window_open: boolean;
-  has_phrase: boolean; has_totp: boolean; enroll_open: boolean;
+  has_totp: boolean; enroll_open: boolean;
   device_id: string | null;
   device_status: string | null; last_ip_prefix: string | null; last_country: string | null;
+  recognized: boolean;
 }
 
 /** One round trip for entry routing and tier (Appendix F3 DEVICE_RESOLVE). */
@@ -44,17 +48,17 @@ async function resolveUser(
   return q1<Resolved>(db,
     sql`SELECT u.id::text AS user_id, u.role, u.is_active,
       COALESCE(u.device_window_until > now(), false) AS window_open,
-      (u.phrase_hash IS NOT NULL) AS has_phrase,
       (u.totp_enabled_at IS NOT NULL) AS has_totp,
       COALESCE(u.enroll_window_until > now(), false) AS enroll_open,
       d.id::text AS device_id, d.status AS device_status,
-      d.last_ip_prefix, d.last_country
+      d.last_ip_prefix, d.last_country,
+      (d.id IS NOT NULL) AS recognized
       FROM aa_users u LEFT JOIN aa_admin_devices d
         ON d.user_id = u.id AND d.status IN ('active', 'pending')
        AND d.expires_at > now()
        AND (d.status = 'active' OR d.pending_until > now())
        AND ${deviceHashHex === null ? sql`TRUE` : sql`d.token_hash = decode(${deviceHashHex}, 'hex')`}
-       AND ${deviceHashHex === null ? sql`FALSE` : sql`TRUE`}
+       AND TRUE
      WHERE u.email = ${email}`);
 }
 
@@ -102,30 +106,47 @@ export async function requestCode(
     });
     return { flowToken, sendCode: null, sendDeniedAlert: null, friction: false };
   }
+  // Early recognition: an EXISTING user's email arriving from a NEW device
+  // (no matching __Host-did) reserves the pair key at the STRICT tier —
+  // thr=3 / 15-min steps — instead of anon. Unknown emails stay anon; the
+  // pair shape binds email+IP in both cases (R-NOLOCK-1).
+  const deviceHashHex = deviceToken ? await tokenHashHex(deviceToken) : null;
+  let early: Resolved | null = null;
+  let earlyStrict = false;
+  if (email && deviceHashHex === null) {
+    early = await resolveUser(db, email, null).catch(() => null);
+    earlyStrict = early !== null && early.is_active &&
+      (early.has_totp || early.enroll_open) && !early.recognized;
+  }
   let reservation;
   try {
-    reservation = await reserve(db, key, "anon");
+    reservation = await reserve(db, key, earlyStrict ? "strict" : "anon");
   } catch (e) {
     if (e instanceof AuthLockedError && email) await noteFuse(db, tag).catch(() => {});
     throw e;
   }
   try {
-    const deviceHashHex = deviceToken ? await tokenHashHex(deviceToken) : null;
-    const found = email ? await resolveUser(db, email, deviceHashHex) : null;
+    // Reuse the early recognition when the caller sent no device cookie;
+    // otherwise resolve with the cookie (cookie-match = recognized).
+    const found = early !== null || deviceHashHex === null
+      ? early ?? (email ? await resolveUser(db, email, null) : null)
+      : email ? await resolveUser(db, email, deviceHashHex) : null;
     // REAL requires an enrolled authenticator OR an open enrollment window: a
     // user with neither cannot complete any v2 login (spec §5.1/M9), so they
     // take the identical dummy path — no email, no oracle.
+    // Device recognition NEVER gates the flow: existing users get a real flow
+    // in ANY browser. Unrecognized devices only face harsher (strict-tier)
+    // throttling (see the early reserve above). Only admin blocks silence.
     const enrollOk = found !== null && (found.has_totp || found.enroll_open);
-    const real = found !== null && found.is_active && enrollOk &&
-      (found.role !== "admin" || found.device_status === "active" ||
-        found.device_status === "pending" || found.window_open);
+    const real = found !== null && found.is_active && enrollOk;
     if (!real) {
       const flowToken = await createFlow(db, email ?? probe, null, ctx, vidHash);
       let sendDeniedAlert: { to: string } | null = null;
-      // Denied alert = the DEVICE gate only: an active admin with enrollment
-      // in order but no valid device/window. Never sent when the account could
-      // not log in anyway (no TOTP and no open window).
-      if (found !== null && found.is_active && found.role === "admin" && enrollOk && email) {
+      // Denied alert: an active admin whose account cannot log in anyway (no
+      // TOTP and no open window) still gets a rate-limited notice (max 1/6h)
+      // so a real admin learns someone probed their address. Merely-new
+      // devices get the OTP (real flow above) — no alert.
+      if (found !== null && found.is_active && found.role === "admin" && !enrollOk && email) {
         const allowed = await sendCap(db, `denied:${tag}`, 1, `${DENIED_ALERT_COOLDOWN_HOURS} hours`);
         if (allowed) sendDeniedAlert = { to: email };
       }

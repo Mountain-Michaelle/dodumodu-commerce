@@ -9,7 +9,6 @@ import { pgDriver, closePools } from "../dbDrivers/pg";
 import { q, sql } from "./sql";
 import { requestCode, type EntrySecrets } from "./entry";
 import { verifyCode } from "./factors";
-import { enrollPhrase } from "./phrase";
 import { totpEnrollStart, totpEnrollConfirm, ackBackupCodes } from "./totp";
 import { finishStaffSession, tierFor } from "./sessions";
 import { finishAdminSession } from "./sessions-admin";
@@ -20,7 +19,6 @@ import { AuthRejectError } from "./errors";
 
 const databaseUrl = process.env.DATABASE_URL;
 const tag = `sess-${Date.now().toString(36)}`;
-const PHRASE = "correct-horse-99!";        // §5.2.1: no spaces
 const A = { ip: "10.91.1.1", prefix: "10.91.1", country: "NG", ua: "itest" };
 
 function secrets(): EntrySecrets & { totpEncKey: Uint8Array } {
@@ -54,9 +52,8 @@ async function firstLoginToReady(db: Db, s: ReturnType<typeof secrets>, email: s
   const start = await totpEnrollStart(db, s, r.flowToken, email);
   const step = Math.floor(Date.now() / 30000);
   const conf = await totpEnrollConfirm(db, s, r.flowToken, await hotp(start.secret, step), ip);
-  assert.equal(conf.next, "enroll_phrase");
-  const e = await enrollPhrase(db, s, r.flowToken, PHRASE, PHRASE, ip);
-  assert.equal(e.next, "backup_codes");
+  assert.equal(conf.next, "backup_codes");
+  assert.equal(conf.backupCodes.length, 8);
   const a = await ackBackupCodes(db, r.flowToken);
   assert.equal(a.next, "ready");
   return r.flowToken;

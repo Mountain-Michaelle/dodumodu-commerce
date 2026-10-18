@@ -14,6 +14,17 @@ import { normalizePhone } from "../shared/normalizePhone";
 export class ProductNotFoundError extends Error {}
 export class PackageNotFoundError extends Error {}
 export class InvalidQuantityError extends Error {}
+export class PaymentUnavailableError extends Error {}
+/**
+ * The idempotency key is one INTENT. If the stored order was placed with a
+ * different payment method than the request replaying the key, the customer has
+ * changed their mind — the stored row is a different order (typically a failed
+ * Pay-now attempt whose key the client never got to clear). Returning it would
+ * hand back an order they no longer want; creating a second one would silently
+ * duplicate. Refusing with this error lets the client drop the key and the very
+ * next submit creates the order they actually asked for.
+ */
+export class PaymentMethodMismatchError extends Error {}
 
 type PackageOption = { id: string; label: string; price?: number };
 
@@ -65,9 +76,19 @@ export const orderService = {
       ? options.prefetched
       : await ordersRepo.findByIdempotencyKey(db, input.idempotencyKey);
     if (existing) {
-      const checkoutUrl = existing.paymentMethod === "pay_now" && existing.status === "awaiting_payment"
-        ? await paymentService.createCheckout(env, existing)
-        : undefined;
+      if (existing.paymentMethod !== input.paymentMethod) {
+        throw new PaymentMethodMismatchError(
+          "Your previous order attempt used a different payment method. Please place your order again.",
+        );
+      }
+      let checkoutUrl: string | undefined;
+      if (existing.paymentMethod === "pay_now" && existing.status === "awaiting_payment") {
+        try {
+          checkoutUrl = await paymentService.createCheckout(env, existing);
+        } catch {
+          throw new PaymentUnavailableError("Pay now is not available at the moment. Please choose Pay on delivery instead.");
+        }
+      }
       return { order: existing, checkoutUrl };
     }
 
@@ -108,6 +129,26 @@ export const orderService = {
     const deliveryFeeType = deliveryService.getDeliveryFee(input.state);
     const { flaggedLate } = deliveryService.validateSubmittedDate(new Date(), input.deliveryDate);
     const reference = generateReference();
+
+    // Checkout FIRST, then insert. The provider call can fail (unconfigured
+    // credentials, outage, bad response) and an order row written BEFORE that
+    // failure is a zombie: it holds its idempotency key hostage, so the
+    // customer's next attempt — even one for a different payment method —
+    // replays it instead of creating the order they now want. With the call
+    // first, a failure means NOTHING was written and a retry starts clean.
+    // The only window this opens — a checkout session registered at OPay a
+    // instant before the row exists — is covered by the webhook's
+    // order_not_found answer (OPay retries) and by reconcilePending (§5.9).
+    // Matches the schema default on orders.currency (schema.ts): the row does
+    // not exist yet, so the column default cannot supply it here.
+    let checkoutUrl: string | undefined;
+    if (input.paymentMethod === "pay_now") {
+      try {
+        checkoutUrl = await paymentService.createCheckout(env, { reference, amount, currency: "NGN" });
+      } catch {
+        throw new PaymentUnavailableError("Pay now is not available at the moment. Please choose Pay on delivery instead.");
+      }
+    }
 
     let order: OrderRow;
     try {
@@ -166,12 +207,7 @@ export const orderService = {
       quantity: order.quantity, discountPercent: order.discountPercent,
     }));
 
-    if (input.paymentMethod === "pay_now") {
-      const checkoutUrl = await paymentService.createCheckout(env, order);
-      return { order, checkoutUrl };
-    }
-
-    return { order };
+    return { order, checkoutUrl };
   },
 };
 

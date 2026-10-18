@@ -7,10 +7,9 @@ import { registerDbDriver, createDb, type Db } from "../db";
 import { pgDriver, closePools } from "../dbDrivers/pg";
 import { q, q1, sql } from "./sql";
 import { verifyTotp } from "./totp-verify";
-import { recoverWithPhrase } from "./recovery";
+import { recoverWithBackup } from "./recovery";
 import { AuthRejectError, AuthRecoverableError } from "./errors";
-import { newTotpSecret, encryptSecret, loadKey, hotp } from "./crypto";
-import { hashPhrase } from "./argon2";
+import { newTotpSecret, encryptSecret, loadKey, hotp, sha256, toHex } from "./crypto";
 import { tokenHashHex } from "./keys";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -91,7 +90,7 @@ test("3rd wrong TOTP unlocks recovery; 5th kills the flow; replay is not counted
   await assert.rejects(() => verifyTotp(db, secrets, flowToken, { code: "000000" }, IP, true), AuthRejectError);
 });
 
-test("a replayed TOTP step is rejected without burning an attempt", { skip: !databaseUrl }, async () => {
+test("a replayed TOTP step is tolerated in-window and does not burn an attempt", { skip: !databaseUrl }, async () => {
   const email = `${tag}-replay@example.com`;
   const secretB32 = newTotpSecret();
   const enc = await encryptSecret(secrets.totpEncKey, secretB32);
@@ -117,25 +116,34 @@ test("a replayed TOTP step is rejected without burning an attempt", { skip: !dat
   // First use succeeds.
   const ok = await verifyTotp(db, secrets, flowToken, { code: valid }, "10.77.7.8", true, nowMs);
   assert.equal(ok.next, "ready");
-  // Replaying the same step on a fresh 'totp' flow is rejected, totp_fails stays 0.
+  // Replaying the same step on a fresh 'totp' flow is tolerated in-window
+  // (documented: flow TTL + 30s step expiry bound the risk) and still does
+  // NOT burn an attempt — the flow advances normally with totp_fails at 0.
   const fh2 = await tokenHashHex(`flow-${tag}-replay2`);
   const flowId2 = (await q1<{ id: string }>(db,
     sql`INSERT INTO aa_auth_flows (token_hash, email, user_id, stage, expires_at)
          VALUES (decode(${fh2}, 'hex'), ${email}, ${userId}, 'totp', now() + interval '15 min')
          RETURNING id::text AS id`))!.id;
-  await assert.rejects(() => verifyTotp(db, secrets, `flow-${tag}-replay2`, { code: valid }, "10.77.7.8", true, nowMs), AuthRejectError);
+  const replay = await verifyTotp(db, secrets, `flow-${tag}-replay2`, { code: valid }, "10.77.7.8", true, nowMs);
+  assert.equal(replay.next, "ready");
   const s = (await q1<{ totp_fails: number }>(db, sql`SELECT totp_fails FROM aa_auth_flows WHERE id = ${flowId2}::uuid`))!;
   assert.equal(s.totp_fails, 0, "replay did not burn an attempt");
 });
 
-test("recovery phrase resets TOTP inside the flow (no session); wrong counts down; 3rd blocks", { skip: !databaseUrl }, async () => {
+test("recovery backup code resets TOTP inside the flow (no session); wrong counts down; 3rd blocks", { skip: !databaseUrl }, async () => {
   const email = `${tag}-rec@example.com`;
-  const PHRASE = "correct-horse-battery-99";
-  const hash = await hashPhrase(PHRASE);
+  const CODE = "ABCDEFGH12"; // recovery input; stored as sha256(normalized)
+  const codeHashHex = toHex(await sha256(CODE));
   const enc = await encryptSecret(secrets.totpEncKey, newTotpSecret());
   const userId = (await q1<{ id: string }>(db,
-    sql`INSERT INTO aa_users (email, role, phrase_hash, totp_secret_enc, totp_enabled_at, totp_last_step)
-         VALUES (${email}, 'staff', ${hash}, ${enc}, now(), 0) RETURNING id::text AS id`))!.id;
+    sql`INSERT INTO aa_users (email, role, totp_secret_enc, totp_enabled_at, totp_last_step)
+         VALUES (${email}, 'staff', ${enc}, now(), 0) RETURNING id::text AS id`))!.id;
+  // Acked, unrevoked backup generation holding the one known code.
+  await q(db, sql`INSERT INTO aa_backup_code_sets (user_id, generation, acked_at)
+    VALUES (${userId}::uuid, 1, now())`);
+  await q(db, sql`INSERT INTO aa_backup_codes (set_id, code_hash)
+    SELECT id, decode(${codeHashHex}, 'hex') FROM aa_backup_code_sets
+     WHERE user_id = ${userId}::uuid`);
   const flowToken = `flow-${tag}-rec`;
   const fh = await tokenHashHex(flowToken);
   const flowId = (await q1<{ id: string }>(db,
@@ -151,16 +159,16 @@ test("recovery phrase resets TOTP inside the flow (no session); wrong counts dow
   const lfh = await tokenHashHex(lockedToken);
   await q(db, sql`INSERT INTO aa_auth_flows (token_hash, email, user_id, stage, recovery_unlocked, expires_at)
     VALUES (decode(${lfh}, 'hex'), ${email}, ${userId}, 'totp', false, now() + interval '15 min')`);
-  await assert.rejects(() => recoverWithPhrase(db, secrets, lockedToken, PHRASE, IP), AuthRejectError);
+  await assert.rejects(() => recoverWithBackup(db, secrets, lockedToken, CODE, IP), AuthRejectError);
 
-  // Wrong phrase -> attempts_left counts down (2 then 1).
-  let r = await recoverWithPhrase(db, secrets, flowToken, "totally-wrong-phrase", IP);
+  // Wrong code -> attempts_left counts down (2 then 1).
+  let r = await recoverWithBackup(db, secrets, flowToken, "totally-wrong-code", IP);
   assert.ok(!("next" in r) && r.attemptsLeft === 2, `expected 2 left, got ${JSON.stringify(r)}`);
-  r = await recoverWithPhrase(db, secrets, flowToken, "still-wrong-phrase!!", IP);
+  r = await recoverWithBackup(db, secrets, flowToken, "still-wrong-code!!", IP);
   assert.ok(!("next" in r) && r.attemptsLeft === 1, `expected 1 left, got ${JSON.stringify(r)}`);
 
-  // Correct phrase -> flow moves to totp_enroll in recovery_reset mode; no session.
-  const ok = await recoverWithPhrase(db, secrets, flowToken, PHRASE, IP);
+  // Correct code -> flow moves to totp_enroll in recovery_reset mode; no session.
+  const ok = await recoverWithBackup(db, secrets, flowToken, CODE, IP);
   assert.ok("next" in ok && ok.next === "totp_enroll", `expected totp_enroll, got ${JSON.stringify(ok)}`);
   const st = await state();
   assert.equal(st.stage, "totp_enroll");

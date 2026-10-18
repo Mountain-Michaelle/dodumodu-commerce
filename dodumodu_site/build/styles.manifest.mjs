@@ -9,6 +9,9 @@
 // the shared sheets without needing !important, and brand.css LAST because it
 // refines header/footer chrome over everything else - which is exactly the
 // cascade position its former after-the-sheet inline block had.
+// brand-motion.css (the logo keyframes) sits right before brand.css so logo
+// sizing wins the cascade, and is ALSO appended to ADMIN_STYLES below so the
+// splash + top-bar animations reach the admin bundle too.
 export const SITE_STYLES = [
   "tokens.css",
   "base.css",
@@ -18,8 +21,11 @@ export const SITE_STYLES = [
   "carousel.css",
   "testimonials.css",
   "product.css",
+  "brand-motion.css",
   "brand.css",
 ];
 
 // The admin console ships its own sheet and never the customer bundle's.
-export const ADMIN_STYLES = ["admin.css"];
+// brand-motion.css is shared: the logo keyframes must reach the admin
+// (splash + top-bar activity light) as well as the site pages.
+export const ADMIN_STYLES = ["admin.css", "brand-motion.css"];
