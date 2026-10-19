@@ -14,12 +14,17 @@ import {
   testimonialUpsertSchema,
 } from "./adminSchema";
 
-test("order list filters accept lifecycle action filters and reject unknown actions", () => {
+test("order list filters accept status and the availableAction quick filter", () => {
   assert.equal(orderListFiltersSchema.safeParse({ status: "cancelled" }).success, true);
   assert.equal(orderListFiltersSchema.safeParse({ status: "not_picking" }).success, true);
-  assert.equal(orderListFiltersSchema.safeParse({ action: "cancel" }).success, true);
-  assert.equal(orderListFiltersSchema.safeParse({ action: "mark-not-picking" }).success, true);
-  assert.equal(orderListFiltersSchema.safeParse({ action: "unknown-action" }).success, false);
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "today" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "yesterday" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "this-week" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "last-week" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "this-month" }).success, true);
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "last-month" }).success, true);
+  // An unknown quick-date value is rejected rather than silently ignored.
+  assert.equal(orderListFiltersSchema.safeParse({ availableAction: "next-year" }).success, false);
 });
 
 test("an allowed tag survives as a tag", () => {

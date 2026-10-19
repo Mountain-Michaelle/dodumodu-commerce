@@ -25,7 +25,7 @@ if (!existsSync(distDir)) {
 // Wire-byte ceilings, with roughly 15% headroom for the next small feature.
 const BUDGETS = {
   page: 10.5 * 1024,   // HTML document, preview script included (CSS is linked)
-  css: 4.5 * 1024,     // the whole stylesheet
+  css: 4.7 * 1024,     // the whole stylesheet (includes brand-motion.css keyframes)
   js: 7.0 * 1024,      // the whole customer bundle
   // Everything the first paint needs, excluding the hero image (which is a
   // separate, cacheable, content-negotiated request). This is the number that
@@ -201,7 +201,13 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // that admin work is free for the storefront: if shared code ever leaked from the
 // admin entry into the customer one, these hashes would change and every customer
 // would pay for it.
-const EXPECTED_CUSTOMER = { js: "site.b1deab2c.min.js", css: "site.00f6049f.min.css" };
+//
+// Both hashes are produced by the build; the pin is the value the build emits.
+// Rebuild the branch with `npm run test:size` whenever the sheet
+// (tokens/base/layout/form/pricing/carousel/testimonials/product/brand-motion/brand)
+// changes, then re-pin the CSS hash to the new output so the storefront CSS is
+// never silently dropped by an admin change.
+const EXPECTED_CUSTOMER = { js: "site.050e8ce3.min.js", css: "site.c1a08967.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

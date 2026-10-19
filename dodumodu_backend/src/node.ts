@@ -17,6 +17,7 @@ import type { Env } from "./env";
 import { backendRoot, loadRootEnv, repoRoot } from "./node/envFile";
 import { localBucket, memoryKV } from "./node/shims";
 import { mountMedia, mountStatic } from "./node/static";
+import { mountAdminPages } from "./node/adminPages";
 
 const envFileLoaded = loadRootEnv();
 
@@ -43,6 +44,7 @@ const env: Env = {
   ANALYTICS_IP_HMAC_SECRET: process.env.ANALYTICS_IP_HMAC_SECRET ?? "",
   ANALYTICS_IP_HMAC_VERSION: process.env.ANALYTICS_IP_HMAC_VERSION ?? "1",
   ANALYTICS_WARMUP_ENABLED: process.env.ANALYTICS_WARMUP_ENABLED ?? "false",
+  ASSIGNMENT_MODE_ENABLED: process.env.ASSIGNMENT_MODE_ENABLED ?? "false",
   RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: process.env.RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR ?? "5",
   // Admin limits are separate keyspaces from the customer ones. 600 reads is a
   // runaway-script backstop, not a speed limit: the console legitimately issues a
@@ -114,6 +116,16 @@ const env: Env = {
   TURNSTILE_SECRET_KEY: process.env.TURNSTILE_SECRET_KEY ?? "",
   RECONCILE_CRON_SECRET: process.env.RECONCILE_CRON_SECRET ?? "",
 
+  // admin-auth v2 (feature flag off by default; secrets only needed when on).
+  ADMIN_AUTH_V2: process.env.ADMIN_AUTH_V2 ?? "0",
+  ALLOW_TEST_IP: process.env.ALLOW_TEST_IP ?? "",
+  OTP_KEY: process.env.OTP_KEY ?? "",
+  THROTTLE_KEY: process.env.THROTTLE_KEY ?? "",
+  TOTP_ENC_KEY: process.env.TOTP_ENC_KEY ?? "",
+  RESEND_API_KEY: process.env.RESEND_API_KEY ?? "",
+  TURNSTILE_SECRET: process.env.TURNSTILE_SECRET ?? "",
+  AUTH_FROM_EMAIL: process.env.AUTH_FROM_EMAIL ?? "auth@example.com",
+
   // The only local-only values in the whole Env: real bindings on the Worker.
   MEDIA_BUCKET: localBucket(mediaRoot),
   REFERRED_SLACK_WEBHOOK_URL: process.env.REFERRED_SLACK_WEBHOOK_URL ?? "",
@@ -121,6 +133,10 @@ const env: Env = {
 };
 
 registerDbDriver(pgDriver);
+
+// Guarded admin pages must be registered before mountStatic, whose catch-all
+// would otherwise serve the raw HTML from disk with no session check.
+mountAdminPages(app, backendRoot);
 
 mountMedia(app, mediaRoot);
 if (existsSync(siteDist)) {
@@ -169,6 +185,7 @@ const server = serve({ fetch: fetchWithLocalIdentity, port }, (info) => {
     lines.push(`  /admin is open locally as ${LOCAL_ADMIN_EMAIL} (no Cloudflare Access in front of it).`);
   }
   console.log(lines.join("\n"));
+  console.log(`  admin-auth v2  ${env.ADMIN_AUTH_V2 === "1" ? "ON" : "OFF"}`);
 });
 
 // A taken port is the one startup failure a developer hits for real - a dev

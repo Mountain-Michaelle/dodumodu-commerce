@@ -11,9 +11,12 @@ import { catalogRoute } from "./routes/catalog";
 import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
+import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
+import { AUTH_BASE, ADMIN_BASE } from "./auth/config";
 import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
+import * as site from "./generated/site";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -98,3 +101,16 @@ app.route("/", visitorRetentionRoute);
     return adminWriteRateLimit(c, next);
   });
 app.route("/admin", adminRoute);
+
+// admin-auth v2 (feature-flagged). Mounted last and behind ADMIN_AUTH_V2: with
+// the flag off every route 404s (flagGate), so this is a no-op deploy. /auth has
+// no collision; the admin routes live under /admin-v2 so the existing /admin/*
+// middleware and guard above are never wrapped or reordered (spec §2.4).
+app.route(AUTH_BASE, adminAuthRoute);
+app.route(ADMIN_BASE, adminAuthAdminRoute);
+
+// The storefront: serves the generated root HTML (ETag revalidation + strict
+// CSP) and the content-hashed JS (immutable cache). Registered last so every
+// API and admin route above wins its own path first; anything else falls
+// through to mountStatic (local dev) or 404 (Worker).
+app.get("/", (c) => c.html(site.INDEX_HTML));

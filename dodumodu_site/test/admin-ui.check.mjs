@@ -216,8 +216,16 @@ const STUB = {
   "/admin/orders": { orders: [
     { id: 1, reference: "ddmd-a1b2c3d4e5f6071", createdAt: "2026-01-01T10:00:00Z", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", categoryName: "Skin", quantity: 1, unitPrice: 100, subtotal: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "paid", deliveredAt: null, updatedAt: "2026-01-01T10:00:00Z", actions: ["deliver", "cancel", "mark-not-picking"] },
     { id: 2, reference: "ddmd-e5f60718a1b2c3d", createdAt: "2026-01-02T09:30:00Z", customerName: "Adaeze", phone: "07098765432", whatsapp: "07098765432", address: "5 Ogudu Road", state: "Lagos", productName: "Serum", productSlug: "serum", categoryName: "Skin", quantity: 3, unitPrice: 100, subtotal: 300, discountPercent: 0, discountAmount: 0, amount: 300, currency: "NGN", paymentMethod: "transfer", status: "paid", deliveredAt: null, updatedAt: "2026-01-02T09:30:00Z", actions: ["deliver", "cancel", "mark-not-picking"] },
-  ], page: { ...PAGE, total: 2 } },
+  ], page: { ...PAGE, total: 2 },
+    // The env flag rides the LIST response (the server reads it, no query), so
+    // the toolbar switch exists from the first paint. The staff directory below
+    // is fetched lazily - only when the switch is first turned on.
+    assignmentEnabled: true },
   "/admin/orders/csv": { csv: "id,reference\n1,ddmd-a1b2c3d4e5f6071" },
+  "/admin/orders/staff": { staff: [
+    { name: "Amaka Obi", email: "amaka@example.com" },
+    { name: "Tunde Bello", email: "tunde@example.com" },
+  ], me: "owner@example.com" },
   "/admin/orders/1": { order: { id: 1, reference: "ddmd-a1b2c3d4e5f6071", customerName: "Chioma", phone: "08012345678", whatsapp: "08012345678", address: "12 Allen Ave", state: "Lagos", productName: "Glow", productSlug: "glow", quantity: 1, unitPrice: 100, discountPercent: 0, discountAmount: 0, amount: 100, currency: "NGN", paymentMethod: "cod", status: "cancelled", deliveredAt: null, createdAt: "2026-01-01T10:00:00Z", updatedAt: "2026-01-01T10:00:00Z", actions: ["revert-cancel"] }, history: [] },
   "/admin/categories": { categories: [{ id: 1, name: "Skin Cares", slug: "skin-cares", productCount: 1, sortOrder: 0, isActive: true, mediaR2Key: "", updatedAt: "2026-01-01T10:00:00Z" }], page: PAGE },
   "/admin/categories/tree": { tree: [{ id: 1, name: "Skin Cares", children: [] }] },
@@ -301,6 +309,24 @@ const stubFetch = () => async (input, init) => {
       status: 500, headers: { "Content-Type": "application/json" },
     });
   }
+  // Bulk actions MUTATE the stub's own rows, because the panel re-reads the
+  // list after a successful assign and the staff tag can only render from row
+  // data. A canned response would make "the assign worked" indistinguishable
+  // from "the assign posted and nothing on screen changed".
+  if (path === "/admin/orders/bulk-action") {
+    const body = init && typeof init.body === "string" ? JSON.parse(init.body) : {};
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+    const updated = [];
+    if (body.action === "assign" && typeof body.assignTo === "string") {
+      for (const row of STUB["/admin/orders"].orders) {
+        if (ids.includes(row.id)) {
+          row.assignedTo = body.assignTo;
+          updated.push({ id: row.id });
+        }
+      }
+    }
+    return jsonResponse({ updated, skipped: [], errors: [] });
+  }
   if (Object.prototype.hasOwnProperty.call(STUB, path)) return jsonResponse(STUB[path]);
   return jsonResponse({});
 };
@@ -355,6 +381,60 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
       actionFilter?.querySelector('option[value="cancel"]') !== null
         && actionFilter?.querySelector('option[value="mark-not-picking"]') !== null);
 
+    /* ---- Assignment Mode: a toolbar pill, gated on the switch ---- */
+    // The switch exists because the list response said the server flag is on;
+    // the staff directory behind it has NOT been fetched yet (lazy load).
+    const assignSwitch = main.querySelector(".list-actions .assignment-switch");
+    const staffFilterFor = () => [...main.querySelectorAll(".assignment-controls .filter")]
+      .find((label) => label.querySelector(".filter-label")?.textContent === "Assigned to");
+    ok("the Assignment Mode switch sits in the toolbar", Boolean(assignSwitch),
+      `toolbar: ${[...main.querySelectorAll(".list-actions button")].map((b) => b.textContent.trim()).join(" | ")}`);
+    ok("the switch starts off", assignSwitch?.getAttribute("aria-checked") === "false");
+    const toolbarButtons = [...main.querySelectorAll(".list-actions button")];
+    const switchIndex = toolbarButtons.indexOf(assignSwitch);
+    const exportIndex = toolbarButtons.findIndex((b) => b.textContent.includes("Export page"));
+    ok("the switch sits before the export button",
+      switchIndex > -1 && exportIndex > -1 && switchIndex < exportIndex,
+      toolbarButtons.map((b) => b.textContent.trim()).join(" | "));
+    ok("the deleted-orders filter is drawn while the feature is on",
+      [...main.querySelectorAll(".assignment-controls .filter-label")].some((n) => n.textContent === "View"));
+    ok("the staff filter stays hidden while the mode is off", !staffFilterFor());
+    ok("the staff directory is not fetched while the mode is off",
+      !requestedUrls.some((url) => url.includes("/admin/orders/staff")),
+      requestedUrls.filter((url) => url.includes("/admin/orders/staff")).join(", "));
+    ok("the Assigned-to column stays hidden while the mode is off",
+      !main.querySelector(".col-assigned"));
+    ok("the toolbar carries light SVG icons beside the full labels",
+      main.querySelectorAll(".list-actions .toolbar-icon svg").length === 2
+        && Boolean(assignSwitch?.querySelector("svg"))
+        && [...main.querySelectorAll(".list-actions .button-label")]
+          .some((node) => node.textContent === "Export page (.xlsx)"),
+      `icons: ${main.querySelectorAll(".list-actions svg").length}`);
+
+    // The mode is a SERVER filter (unassigned=true), so the count and the rows
+    // agree; a client-side hide would make the page totals lie. The first ON also
+    // pulls the staff directory - the one and only fetch of it.
+    main.querySelector(".list-actions .assignment-switch")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const modeOnUrl = requestedUrls.filter((url) => url.startsWith("/admin/orders?")).pop() || "";
+    ok("turning Assignment Mode on requests only unassigned orders",
+      modeOnUrl.includes("unassigned=true"), `last orders request: ${modeOnUrl}`);
+    ok("the switch reports itself on",
+      main.querySelector(".list-actions .assignment-switch")?.getAttribute("aria-checked") === "true");
+    ok("turning the mode on fetches the staff directory exactly once",
+      requestedUrls.filter((url) => url.includes("/admin/orders/staff")).length === 1,
+      requestedUrls.filter((url) => url.includes("/admin/orders/staff")).join(", "));
+    ok("the Assigned-to column appears once the mode is on",
+      Boolean(main.querySelector(".col-assigned")));
+    ok("the staff filter appears once the mode is on", Boolean(staffFilterFor()));
+    main.querySelector(".list-actions .assignment-switch")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const modeOffUrl = requestedUrls.filter((url) => url.startsWith("/admin/orders?")).pop() || "";
+    ok("turning it off drops the filter from the request",
+      !modeOffUrl.includes("unassigned=true"), `last orders request: ${modeOffUrl}`);
+    ok("turning it off hides the column and staff filter again",
+      !main.querySelector(".col-assigned") && !staffFilterFor());
+
     main.querySelector(".action-menu-trigger")?.click();
     const menuText = main.querySelector(".action-menu")?.textContent || "";
     ok("Cancel and Not Picking are available in the row action dropdown",
@@ -406,13 +486,23 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
 
     main.querySelector("tbody tr")?.click();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    const detailActions = page.window.document.querySelector(".detail-actions");
+    // The modal now carries TWO action bars: the assignment block (assign /
+    // unassign) sits above History, the status actions below it. These assertions
+    // are about the STATUS bar - the one that carries "Close" - not whichever bar
+    // happens to come first in the DOM.
+    const detailBars = [...page.window.document.querySelectorAll(".detail-actions")];
+    const detailActions = detailBars
+      .find((bar) => [...bar.querySelectorAll("button")].some((button) => button.textContent.trim() === "Close"));
     const detailActionLabels = [...(detailActions?.querySelectorAll("button") || [])]
       .map((button) => button.textContent.trim());
     ok("the order detail modal offers a Revert control",
-      detailActionLabels.includes("Revert"));
+      detailActionLabels.includes("Revert"),
+      `bars: ${detailBars.map((bar) => bar.textContent.trim()).join(" | ")}`);
     ok("the detail modal does not offer forward cancellation or Not Picking actions",
       !detailActionLabels.includes("Cancel order") && !detailActionLabels.includes("Mark Not Picking"));
+    ok("the order detail hides the assignment block while the mode is off",
+      !detailBars.some((bar) => [...bar.querySelectorAll("button")]
+        .some((button) => button.textContent.trim() === "Assign to…")));
 
     /* ---- the filter bar keeps every filter the operator picks ---- */
     // The controls are built ONCE, so a pick used to spread the build-time
@@ -450,6 +540,20 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("the bulk bar appears with 1 selected",
       main.querySelector(".bulk-bar .bulk-count")?.textContent === "1 selected",
       `got: ${main.querySelector(".bulk-bar .bulk-count")?.textContent}`);
+    // A tick does NOT reveal the staff filter any more: the whole assignment
+    // workspace is gated on the switch, so a selection made with the mode off
+    // shows only the ordinary bulk actions.
+    ok("a tick does not reveal the Assigned-to staff filter while the mode is off",
+      !staffFilterFor(),
+      `controls: ${[...main.querySelectorAll(".assignment-controls .filter-label")].map((n) => n.textContent).join(" | ")}`);
+    // The bulk bar belongs at the TOP now - directly under the toolbar row,
+    // above the table - not buried in the paginator after the rows.
+    const summaryNode = main.querySelector(".list-summary");
+    ok("the bulk bar sits directly under the toolbar, above the table",
+      summaryNode?.nextElementSibling?.classList.contains("bulk-bar") === true
+        && Boolean(main.querySelector("tbody"))
+        && !main.querySelector(".pagination .bulk-bar"),
+      `after summary: ${summaryNode?.nextElementSibling?.className}`);
     tickBoxes()[1].checked = true;
     tickBoxes()[1].dispatchEvent(new page.window.Event("change", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -475,6 +579,8 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("the bulk bar offers export and copy of exactly the selection",
       bulkLabels.includes("Export (.xlsx)") && bulkLabels.includes("Copy as text"),
       bulkLabels.join(" | "));
+    ok("the bulk bar hides Assign to… while the mode is off",
+      !bulkLabels.includes("Assign to…"), bulkLabels.join(" | "));
     const pageButtons = [...main.querySelectorAll(".list-actions button")]
       .map((button) => button.textContent.trim());
     ok("the page export/copy buttons switch to the selection when rows are ticked",
@@ -596,6 +702,89 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("the row copy puts the header and that one order on the clipboard",
       rowCopyLines.length === 2 && rowCopyLines[1].startsWith("ddmd-a1b2c3d4e5f6071\t"),
       `got ${rowCopyLines.length} lines: ${JSON.stringify(rowCopyLines)}`);
+
+    /* ---- assignment: ONE confirmation, the staff tag, the staff filter ---- */
+    // The workspace exists only with the switch ON - turning it on now is free
+    // (the directory was fetched on the first toggle above) and must reveal the
+    // column, the staff filter and the bulk "Assign to…" together.
+    main.querySelector(".list-actions .assignment-switch")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    ok("the mode-on workspace shows column and staff filter together",
+      Boolean(main.querySelector(".col-assigned")) && Boolean(staffFilterFor()),
+      `controls: ${[...main.querySelectorAll(".assignment-controls .filter-label")].map((n) => n.textContent).join(" | ")}`);
+    ok("every toggle so far still cost exactly one staff fetch",
+      requestedUrls.filter((url) => url.includes("/admin/orders/staff")).length === 1,
+      requestedUrls.filter((url) => url.includes("/admin/orders/staff")).join(", "));
+    tickBoxes()[0].checked = true;
+    tickBoxes()[0].dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    tickBoxes()[1].checked = true;
+    tickBoxes()[1].dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    [...main.querySelectorAll(".bulk-bar button")]
+      .find((button) => button.textContent.trim() === "Assign to…")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // openModal stacks .overlay > .modal on document.body (the .dialog class
+    // belongs to confirm/reason dialogs only), so the assign confirmation is
+    // found by its copy, not by a dialog class.
+    const assignDialog = [...page.window.document.querySelectorAll(".overlay .modal")]
+      .find((d) => d.textContent.includes("You are about to assign 2 orders"));
+    ok("bulk assign opens one confirmation naming the count", Boolean(assignDialog),
+      `modals: ${[...page.window.document.querySelectorAll(".overlay .modal")].map((d) => d.textContent.slice(0, 60)).join(" | ")}`);
+    ok("the confirmation snapshots exactly which orders are involved",
+      Boolean(assignDialog)
+        && ["ddmd-a1b2c3d4e5f6071", "Chioma", "ddmd-e5f60718a1b2c3d", "Adaeze"]
+          .every((fragment) => assignDialog.textContent.includes(fragment)));
+    const picker = assignDialog?.querySelector(".staff-picker");
+    ok("the confirmation carries the staff picker", Boolean(picker));
+    const staffSearch = picker?.querySelector('input[type="search"]');
+    ok("the picker can be searched", Boolean(staffSearch));
+    const confirmAssign = [...(assignDialog?.querySelectorAll("button") || [])]
+      .find((button) => button.textContent.trim() === "Assign");
+    ok("confirm stays disarmed until a person is picked", confirmAssign?.disabled === true,
+      `disabled=${confirmAssign?.disabled}`);
+
+    staffSearch.value = "tunde";
+    staffSearch.dispatchEvent(new page.window.Event("input", { bubbles: true }));
+    const pickerItems = () => [...(assignDialog?.querySelectorAll(".staff-picker-item") || [])];
+    ok("search narrows the picker to one person",
+      pickerItems().length === 1 && pickerItems()[0].textContent.includes("Tunde Bello"),
+      pickerItems().map((n) => n.textContent).join(" | "));
+    pickerItems()[0]?.click();
+    ok("picking a person arms the confirm with their name",
+      [...assignDialog.querySelectorAll("button")].some((button) => button.textContent.trim() === "Assign to Tunde Bello"));
+    ok("the confirmation line names the person",
+      assignDialog.textContent.includes("You are about to assign 2 orders to Tunde Bello"));
+
+    [...assignDialog.querySelectorAll("button")]
+      .find((button) => button.textContent.trim() === "Assign to Tunde Bello")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const assignPost = posted.filter((entry) => entry.path === "/admin/orders/bulk-action").pop();
+    ok("the assign sends ids, the action and the person in one POST",
+      assignPost?.body?.action === "assign"
+        && Array.isArray(assignPost?.body?.ids) && assignPost.body.ids.length === 2
+        && assignPost?.body?.assignTo === "tunde@example.com",
+      JSON.stringify(assignPost));
+    ok("the confirmation closes after the assign",
+      ![...page.window.document.querySelectorAll(".overlay .modal")]
+        .some((d) => d.textContent.includes("You are about to assign")));
+    ok("both rows now carry the staff tag",
+      main.querySelectorAll("tbody .tag-assigned").length === 2,
+      `found ${main.querySelectorAll("tbody .tag-assigned").length}`);
+    ok("the staff tag shows the person's name",
+      [...main.querySelectorAll("tbody .tag-assigned")]
+        .every((tag) => tag.textContent.includes("Tunde Bello")));
+
+    const staffSelect = staffFilterFor()?.querySelector("select");
+    ok("the staff filter stayed revealed after the assign (sticky)", Boolean(staffSelect));
+    if (staffSelect) {
+      staffSelect.value = "tunde@example.com";
+      staffSelect.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const staffFilterUrl = requestedUrls.filter((url) => url.startsWith("/admin/orders?")).pop() || "";
+      ok("the staff filter requests that person's orders",
+        /assignedTo=tunde(@|%40)example\.com/.test(staffFilterUrl), `last orders request: ${staffFilterUrl}`);
+    }
 
     ok("the panel no longer calls the server CSV endpoint",
       !requestedUrls.some((url) => url.includes("/admin/orders/csv")),

@@ -9,6 +9,15 @@ ENVIRONMENT = "sandbox" # 'sandbox' | 'production'
 RATE_LIMIT_API_PER_MINUTE = "20"
 ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "false"
+# Assignment Mode (fulfilment routing). "true" reveals the Assignment Mode
+# toolbar switch, the "Assigned to" filter and the assign/unassign actions.
+# Independently revertible without a code change.
+ASSIGNMENT_MODE_ENABLED = "false"
+
+# Admin Auth v2. "0" (default) keeps /auth/* and /admin-v2/* at 404.
+# Flip to "1" to enable email OTP + TOTP admin login (requires OTP_KEY,
+# THROTTLE_KEY, TOTP_ENC_KEY secrets set via `wrangler secret put`).
+ADMIN_AUTH_V2 = "0"
 
 # ---- image pipeline ----
 # Every one of these has the same default in src/config/imageConfig.ts, so a missing
@@ -65,7 +74,7 @@ bucket_name = "skincare-media"
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "replace-with-real-kv-namespace-id"
+id = "25410516df5e4b01a3b7799889960037"
 
 # Secrets — set with `wrangler secret put <NAME>`, never committed:
 #   DATABASE_URL

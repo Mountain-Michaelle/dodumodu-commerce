@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Your sessions</title>
+  <link rel="stylesheet" href="/admin/assets/auth.css" />
+</head>
+<body>
+  <main class="card">
+    <h1>Your sessions</h1>
+    <p class="muted small">End any session you don't recognize.</p>
+    <div id="list" class="once"><span class="muted">Loading…</span></div>
+    <div class="links" style="margin-top:16px">
+      <button class="ghost small-btn" id="revoke-others" type="button">Sign out everywhere else</button>
+      <button class="ghost small-btn" id="logout" type="button">Sign out</button>
+      <a href="/admin/sign-in/">Back</a>
+    </div>
+    <p class="note" id="note" hidden></p>
+  </main>
+  <script src="/admin/assets/sessions.js" defer></script>
+</body>
+</html>
+

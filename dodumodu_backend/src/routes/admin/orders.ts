@@ -7,6 +7,7 @@ import {
   ordersRepo, filtersFromQuery, ORDER_SORT_FIELDS, type OrderListItem,
 } from "../../data/ordersRepo";
 import { orderCrmService, availableActions } from "../../services/orderCrmService";
+import { assignmentRepo } from "../../data/assignmentRepo";
 import { parseListQuery, pageMeta, normalizeSearch, likePattern } from "../../shared/listQuery";
 import { orderListFiltersSchema } from "../../validation/adminSchema";
 import { PERMISSIONS } from "../../auth/adminAuth";
@@ -49,8 +50,19 @@ const cancelSchema = actionSchema.extend({
 
 const bulkSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(1000),
-  action: z.enum(["deliver", "revert", "mark-paid", "mark-failed", "cancel", "revert-cancel", "mark-not-picking"]),
+  action: z.enum(["deliver", "revert", "mark-paid", "mark-failed", "cancel", "revert-cancel", "mark-not-picking", "assign", "unassign"]),
+  // Only meaningful for action "assign": the staff email to assign to. Required
+  // by the route for assign, ignored otherwise. Kept in the same body so the
+  // panel sends one request, not a second round trip.
+  assignTo: z.string().trim().toLowerCase().email().max(320).optional(),
 });
+
+// Assignment Mode ships dark. The toggle, the assign/unassign actions and the
+// staff dropdown all refuse while this is off, so the feature can be enabled
+// without a deploy and switched back just as cleanly.
+function assignmentEnabled(c: { env: Env }): boolean {
+  return c.env.ASSIGNMENT_MODE_ENABLED === "true";
+}
 
 const editSchema = z.object({
   // Strictly the fields an operator may correct on a delivery record. product,
@@ -159,7 +171,7 @@ export function orderRoutes() {
       };
     });
 
-    return c.json({ orders, page: pageMeta(query, total) });
+    return c.json({ orders, page: pageMeta(query, total), assignmentEnabled: assignmentEnabled(c) });
   });
 
   route.get("/csv", async (c) => {
@@ -190,6 +202,22 @@ export function orderRoutes() {
     return c.json({ csv: orderCsv(rows) });
   });
 
+  // The staff directory for the assign dropdown. Fails closed with the flag: an
+  // empty list when Assignment Mode is off, so the panel never offers a control
+  // the server would refuse. Always includes the operator themself so an admin
+  // can assign work to their own queue.
+  route.get("/staff", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersRead);
+    if (!assignmentEnabled(c)) return c.json({ staff: [] });
+    const db = createDb(c.env.DATABASE_URL);
+    const staff = await assignmentRepo.listStaff(db);
+    const me = actorOf(c);
+    const selfEntry: { email: string; name: string } = { email: me, name: `${me} (you)` };
+    const known = new Set(staff.map((s) => s.email));
+    const withMe = known.has(me) ? staff.map((s) => ({ email: s.email, name: s.name })) : [selfEntry, ...staff.map((s) => ({ email: s.email, name: s.name }))];
+    return c.json({ staff: withMe, me });
+  });
+
   route.get("/:id", async (c) => {
     requirePermissionOf(c, PERMISSIONS.ordersRead);
     const db = createDb(c.env.DATABASE_URL);
@@ -200,6 +228,12 @@ export function orderRoutes() {
     // detail screen that fetched the history per event would be exactly the N+1
     // this project is meant to avoid.
     const history = await ordersRepo.statusHistoryForOrder(db, order.id);
+    // Assignment history: who this order has been assigned to, newest first, so
+    // the order modal can show the current owner and the reversal control with
+    // its own trail - separate from status history, because assignment is not a
+    // status. One indexed read - skipped entirely while Assignment Mode is dark,
+    // so the flag costs nothing on the default deployment.
+    const assignments = assignmentEnabled(c) ? await assignmentRepo.listForOrder(db, order.id) : [];
     // The full spam flag lives HERE and not on the list: this is where an operator
     // has room to read a reason and decide whether to revert it.
     //
@@ -223,6 +257,10 @@ export function orderRoutes() {
     return c.json({
       order: { ...order, actions: availableActions(order) },
       history,
+      assignments: assignments.map((a) => ({
+        id: a.id, assigneeEmail: a.assigneeEmail, actorEmail: a.actorEmail,
+        action: a.action, reason: a.reason, createdAt: a.createdAt,
+      })),
       spamFlag: spamFlag && {
         id: spamFlag.id,
         phoneMasked: maskPhone(spamFlag.phoneNorm),
@@ -271,9 +309,56 @@ export function orderRoutes() {
     if (body.action === "mark-paid" || body.action === "mark-failed") {
       requirePermissionOf(c, PERMISSIONS.ordersPaymentOverride);
     }
+    const db = createDb(c.env.DATABASE_URL);
+    // Assignment is fulfilment routing, gated behind its own flag and permission.
+    // It never touches status, payment or cancellation - it only records who owns
+    // the order for fulfilment - so it reuses orders:write, not the payment-
+    // override permission.
+    if (body.action === "assign") {
+      if (!assignmentEnabled(c)) {
+        return c.json({ error: { code: "DISABLED", message: "Assignment Mode is not enabled" } }, 403);
+      }
+      if (!body.assignTo) {
+        return c.json({ error: { code: "INVALID_BODY", message: "assignTo (a staff email) is required to assign" } }, 400);
+      }
+      const result = await orderCrmService.assign(db, body.ids, body.assignTo, actorOf(c));
+      return c.json(result);
+    }
+    if (body.action === "unassign") {
+      if (!assignmentEnabled(c)) {
+        return c.json({ error: { code: "DISABLED", message: "Assignment Mode is not enabled" } }, 403);
+      }
+      const result = await orderCrmService.unassign(db, body.ids, actorOf(c));
+      return c.json(result);
+    }
     const result = await orderCrmService.bulkAction(
-      createDb(c.env.DATABASE_URL), body.ids, body.action, actorOf(c),
+      db, body.ids, body.action, actorOf(c),
     );
+    return c.json(result);
+  });
+
+  // Single-order assign/unassign, for the order modal's reversal control. Same
+  // guards as the bulk path; one id instead of a list.
+  route.post("/:id/assign", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersWrite);
+    if (!assignmentEnabled(c)) {
+      return c.json({ error: { code: "DISABLED", message: "Assignment Mode is not enabled" } }, 403);
+    }
+    const body = await readBody(c, z.object({
+      assignTo: z.string().trim().toLowerCase().email().max(320),
+    }), "assign");
+    const db = createDb(c.env.DATABASE_URL);
+    const result = await orderCrmService.assign(db, [Number(c.req.param("id"))], body.assignTo, actorOf(c));
+    return c.json(result);
+  });
+
+  route.post("/:id/unassign", async (c) => {
+    requirePermissionOf(c, PERMISSIONS.ordersWrite);
+    if (!assignmentEnabled(c)) {
+      return c.json({ error: { code: "DISABLED", message: "Assignment Mode is not enabled" } }, 403);
+    }
+    const db = createDb(c.env.DATABASE_URL);
+    const result = await orderCrmService.unassign(db, [Number(c.req.param("id"))], actorOf(c));
     return c.json(result);
   });
 

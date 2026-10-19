@@ -175,8 +175,53 @@ export const orders = pgTable("orders", {
   // Not Picking has its own previous state so cancellation and Not Picking
   // reversals each restore the state immediately before that action.
   preNotPickingStatus: text("pre_not_picking_status"),
+  // ---- assignment (migration 0018) ----
+  // Which staff member currently owns this order for fulfilment routing, and
+  // when it was assigned. Deliberately NOT a status and NOT a payment field:
+  // assignment is orthogonal to the order/payment lifecycle, exactly as the
+  // spam flag is. `assignedTo` is the operator EMAIL (the Access principal
+  // today, aa_users.email once auth lands) — there is intentionally no FK,
+  // because that table does not exist yet on this branch; email is the seam.
+  // NULL means "not yet assigned".
+  assignedTo: text("assigned_to"),
+  assignedAt: timestamp("assigned_at"),
+  // Soft delete (migration 0018). NULL means live; a timestamp means the order
+  // was deleted and is hidden from the list unless an operator filters for it.
+  // Never a hard DELETE: a delivered order is the record a parcel arrived, and
+  // removing the row destroys the only evidence it did. Reversible by design.
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ---- staff directory for order assignment (migration 0018) ----
+//
+// Who an order can be assigned to. Email is the primary key and the join key
+// to the future admin-auth table; `name` is display only. Separate from the
+// assignment history so the dropdown is one small curated table rather than a
+// derived list that changes meaning as orders move.
+export const adminStaff = pgTable("admin_staff", {
+  email: text("email").primaryKey(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ---- append-only assignment history (migration 0018) ----
+//
+// Every assign and unassign is its own row, so reassignment history survives
+// ("this bounced between three people"). Same shape and intent as
+// order_status_history. No FK to a users table for the same reason orders has
+// none: the auth identity is keyed by email here, not by an id that does not
+// exist yet on this branch.
+export const orderAssignments = pgTable("order_assignments", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  assigneeEmail: text("assignee_email").notNull(),
+  actorEmail: text("actor_email").notNull(),
+  action: text("action").notNull(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // ---- order-form abuse observation (migration 0008) ----

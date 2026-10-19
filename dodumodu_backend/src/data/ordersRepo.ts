@@ -1,7 +1,8 @@
 import { eq, and, asc, sql, like, lt, lte, gte, ne, inArray, or, desc, count, type SQL } from "drizzle-orm";
 import type { Db } from "../db";
-import { categories, orders, orderStatusHistory, products } from "../schema";
+import { categories, orders, orderStatusHistory, products, spamFlags } from "../schema";
 import { updatedAtBucketCondition } from "../shared/versionGuard";
+import { lagosDayStart } from "../abuse/orderEvidence";
 
 // §5.4b — the only transitions legal in V1. Checked here, not trusted from callers.
 // Phase 7a additions: cancelled and not_picking are terminal except for reversal,
@@ -152,9 +153,11 @@ export const ordersRepo = {
       sort: { field: string; direction: "asc" | "desc" };
       limit: number;
       offset: number;
+      // Row-level scope (Phase 6); undefined for admin/general and every v1 caller.
+      scope?: SQL;
     },
   ): Promise<{ rows: OrderListItem[]; total: number }> {
-    const where = buildOrderWhere(opts.search, opts.filters);
+    const where = buildOrderWhere(opts.search, opts.filters, opts.scope);
     const ordered = opts.sort.direction === "asc"
       ? asc(orderSortColumn(opts.sort.field))
       : desc(orderSortColumn(opts.sort.field));
@@ -426,11 +429,12 @@ export const ordersRepo = {
     search: string | null,
     filters: OrderListFilters,
     cap: number,
+    scope?: SQL,
   ): Promise<number[]> {
     const rows = await db.select({ id: orders.id }).from(orders)
       .innerJoin(products, eq(orders.productId, products.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(buildOrderWhere(search, filters))
+      .where(buildOrderWhere(search, filters, scope))
       .orderBy(desc(orders.createdAt), desc(orders.id))
       .limit(cap);
     return rows.map((row) => row.id);
@@ -482,28 +486,38 @@ export const ordersRepo = {
       .orderBy(desc(orderStatusHistory.id));
   },
 
-  async findByIds(db: Db, ids: number[]): Promise<OrderRow[]> {
+  async findByIds(db: Db, ids: number[], scope?: SQL): Promise<OrderRow[]> {
     if (ids.length === 0) return [];
-    return db.select().from(orders).where(inArray(orders.id, ids));
+    const byId = inArray(orders.id, ids);
+    // A scoped caller (mono) only ever reads their own orders out of the id set,
+    // so an id they do not own silently does not exist — the same concealment a
+    // scoped list gives. Admin/general pass no scope and read the set as-is.
+    return db.select().from(orders).where(scope ? and(byId, scope) : byId);
   },
 
   /**
-   * Deletes one order and its status history.
-   *
-   * The history rows go first, explicitly, rather than relying on a cascade.
-   * order_status_history.order_id has no ON DELETE CASCADE (0000 created it long
-   * before deleting an order was a thing anyone could do), so without this the
-   * second statement fails on the foreign key and the order survives - which
-   * looks like a successful delete to the operator while nothing happened.
-   *
-   * order_status_history is small and bounded (one row per transition), so this
-   * is a plain indexed delete rather than a cascade worth depending on being
-   * present in every environment.
+   * Soft-deletes one order by stamping deleted_at. Reversible and non-
+   * destructive: the row, its status history and its payment record all survive,
+   * because a delivered order is the only evidence a parcel arrived and a hard
+   * DELETE would erase it. The list hides a soft-deleted order unless an
+   * operator filters for it (see buildOrderWhere). Idempotent: deleting an
+   * already-deleted order is a no-op that still reports success.
    */
-  async deleteById(db: Db, id: number): Promise<boolean> {
-    await db.delete(orderStatusHistory).where(eq(orderStatusHistory.orderId, id));
-    const deleted = await db.delete(orders).where(eq(orders.id, id)).returning();
+  async softDelete(db: Db, id: number): Promise<boolean> {
+    const deleted = await db.update(orders)
+      .set({ deletedAt: sql`now()` })
+      .where(and(eq(orders.id, id), sql`${orders.deletedAt} IS NULL`))
+      .returning();
     return deleted.length !== 0;
+  },
+
+  /** Restores a soft-deleted order (clears deleted_at). Idempotent. */
+  async restore(db: Db, id: number): Promise<boolean> {
+    const restored = await db.update(orders)
+      .set({ deletedAt: null })
+      .where(and(eq(orders.id, id), sql`${orders.deletedAt} IS NOT NULL`))
+      .returning();
+    return restored.length !== 0;
   },
 };
 // ---------------------------------------------------------------------------
@@ -523,13 +537,21 @@ export const ORDER_SORT_FIELDS = [
 
 export type OrderListFilters = {
   status: string | null;
-  action: string | null;
+  availableAction: QuickDateKey | null;
   paymentMethod: "pay_now" | "cod" | null;
   phone: string | null;
   from: Date | null;
   to: Date | null;
   productId: number | null;
   categoryId: number | null;
+  // Assignment (fulfilment routing). assignedTo = one staff member's orders;
+  // unassigned = the assignment-mode view of ownerless orders.
+  assignedTo: string | null;
+  unassigned: boolean;
+  // Soft-delete visibility. false (the default) hides deleted orders from the
+  // list; true shows ONLY deleted orders (the "Deleted" filter). Never both in
+  // one result - the WHERE enforces whichever is set.
+  deleted: boolean;
 };
 
 /**
@@ -544,24 +566,86 @@ export type OrderListFilters = {
  */
 export function filtersFromQuery(input: {
   status?: string;
-  action?: string;
+  availableAction?: QuickDateKey;
   paymentMethod?: "pay_now" | "cod";
   phone?: string;
   productId?: number;
   categoryId?: number;
   from?: string;
   to?: string;
+  assignedTo?: string;
+  unassigned?: "true" | "false";
+  deleted?: "true" | "false";
 }): OrderListFilters {
   return {
     status: input.status ?? null,
-    action: input.action ?? null,
+    availableAction: input.availableAction ?? null,
     paymentMethod: input.paymentMethod ?? null,
     phone: input.phone?.trim() || null,
     productId: input.productId ?? null,
     categoryId: input.categoryId ?? null,
     from: input.from ? new Date(input.from + 'T00:00:00.000') : null,
     to: input.to ? new Date(input.to + 'T23:59:59.999') : null,
+    assignedTo: input.assignedTo ?? null,
+    unassigned: input.unassigned === "true",
+    deleted: input.deleted === "true",
   };
+}
+
+// ---- Quick Date presets (Africa/Lagos wall-clock) -------------------------
+// The operator's "today" is Lagos, not the server's clock. Workers run in UTC,
+// and a UTC midnight boundary splits every Lagos morning: an order placed
+// 00:30 WAT lands on 23:30 UTC the previous day and would vanish from "today".
+// lagosDayStart is the single source of truth for the day boundary; weeks are
+// Monday-based (the business week) and months are calendar months. Every range
+// is half-open [from, to) so a day/week/month never double-counts a boundary
+// instant, which matters because createdAt carries second/microsecond stamps.
+const LAGOS_OFFSET_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type QuickDateKey =
+  | "today"
+  | "yesterday"
+  | "this-week"
+  | "last-week"
+  | "this-month"
+  | "last-month";
+
+export function quickDateRange(
+  key: QuickDateKey,
+  now: Date = new Date(),
+): { from: Date; to: Date } {
+  const startOfToday = lagosDayStart(now);
+  // Lagos wall-clock fields, used for weekday and month arithmetic.
+  const shifted = new Date(now.getTime() + LAGOS_OFFSET_MS);
+  switch (key) {
+    case "today":
+      return { from: startOfToday, to: new Date(startOfToday.getTime() + DAY_MS) };
+    case "yesterday":
+      return { from: new Date(startOfToday.getTime() - DAY_MS), to: startOfToday };
+    case "this-week":
+    case "last-week": {
+      // getUTCDay(): 0=Sun..6=Sat; (day+6)%7 maps Mon->0 .. Sun->6.
+      const daysSinceMonday = (shifted.getUTCDay() + 6) % 7;
+      const thisMonday = new Date(startOfToday.getTime() - daysSinceMonday * DAY_MS);
+      if (key === "this-week") {
+        return { from: thisMonday, to: new Date(thisMonday.getTime() + 7 * DAY_MS) };
+      }
+      return { from: new Date(thisMonday.getTime() - 7 * DAY_MS), to: thisMonday };
+    }
+    case "this-month":
+    case "last-month": {
+      const y = shifted.getUTCFullYear();
+      const m = shifted.getUTCMonth();
+      // First day of a Lagos calendar month, as an absolute instant.
+      const monthStart = (year: number, month: number) =>
+        new Date(Date.UTC(year, month, 1) - LAGOS_OFFSET_MS);
+      if (key === "this-month") {
+        return { from: monthStart(y, m), to: monthStart(y, m + 1) };
+      }
+      return { from: monthStart(y, m - 1), to: monthStart(y, m) };
+    }
+  }
 }
 
 export type OrderListItem = OrderRow & {
@@ -586,7 +670,7 @@ const orderSortColumn = (field: string) => {
  * Built once and handed to both the page query and the count query, because the
  * two drifting is how a listing ends up with a page 3 that does not exist.
  */
-function buildOrderWhere(search: string | null, filters: OrderListFilters) {
+function buildOrderWhere(search: string | null, filters: OrderListFilters, scope?: SQL) {
   const conditions = [];
 
   if (search) {
@@ -605,19 +689,13 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
     ));
   }
   if (filters.status) conditions.push(eq(orders.status, filters.status as OrderRow["status"]));
-  if (filters.action) {
-    const actionConditions: Record<string, SQL> = {
-      deliver: inArray(orders.status, ["paid", "confirmed_cod"]),
-      revert: eq(orders.status, "delivered"),
-      "mark-paid": and(eq(orders.status, "awaiting_payment"), eq(orders.paymentMethod, "pay_now"))!,
-      "mark-failed": and(eq(orders.status, "awaiting_payment"), eq(orders.paymentMethod, "pay_now"))!,
-      cancel: inArray(orders.status, ["awaiting_payment", "paid", "confirmed_cod", "failed"]),
-      "revert-cancel": and(eq(orders.status, "cancelled"), sql`${orders.preCancellationStatus} IS NOT NULL`)!,
-      "mark-not-picking": inArray(orders.status, ["paid", "confirmed_cod"]),
-      "revert-not-picking": and(eq(orders.status, "not_picking"), sql`${orders.preNotPickingStatus} IS NOT NULL`)!,
-    };
-    const actionCondition = actionConditions[filters.action];
-    if (actionCondition) conditions.push(actionCondition);
+  // Quick Date presets resolve to a half-open Lagos-calendar range against the
+  // placed-date column (created_at). Uses createdAt (the placed timestamp) and a
+  // Lagos boundary - not a UTC server boundary - see quickDateRange for why.
+  if (filters.availableAction) {
+    const { from, to } = quickDateRange(filters.availableAction);
+    conditions.push(gte(orders.createdAt, from));
+    conditions.push(lt(orders.createdAt, to));
   }
   if (filters.paymentMethod) conditions.push(eq(orders.paymentMethod, filters.paymentMethod));
   if (filters.phone) conditions.push(like(orders.phone, filters.phone + "%"));
@@ -627,6 +705,30 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters) {
   // The only condition that reaches outside the orders table, and the reason the
   // count query has to repeat the joins rather than skip them.
   if (filters.categoryId) conditions.push(eq(products.categoryId, filters.categoryId));
+  // Assignment filters (fulfilment routing). assignedTo is one staff member's
+  // orders; unassigned is the assignment-mode queue: ownerless orders that are
+  // still actionable - delivered and spam-flagged orders are finished or toxic,
+  // so they never appear there and cannot be pulled back in by assignment.
+  // Both are direct equality/IS NULL on an indexed column - never a function
+  // on the column - so idx_orders_assigned_to serves them.
+  if (filters.assignedTo) conditions.push(eq(orders.assignedTo, filters.assignedTo));
+  if (filters.unassigned) conditions.push(and(
+    sql`${orders.assignedTo} IS NULL`,
+    ne(orders.status, "delivered"),
+    sql`${orders.phoneNorm} NOT IN (SELECT ${spamFlags.phoneNorm} FROM ${spamFlags} WHERE ${spamFlags.revertedAt} IS NULL)`,
+  )!);
+  // Soft-delete visibility. Default (deleted=false) hides deleted orders from
+  // the list entirely; the explicit "Deleted" filter (deleted=true) shows ONLY
+  // them. This is why the list query, not the UI, owns the rule: a deleted order
+  // must be invisible unless an operator asks for it, and asking is one filter.
+  if (filters.deleted) conditions.push(sql`${orders.deletedAt} IS NOT NULL`);
+  else conditions.push(sql`${orders.deletedAt} IS NULL`);
+
+  // Row-level scope (Phase 6). A mono operator only ever sees their own
+  // assigned orders; admin/general pass no scope and are untouched, so the v1
+  // console (which never passes one) behaves exactly as before. Folded in last
+  // and ANDed with everything above — it can only ever narrow the result set.
+  if (scope) conditions.push(scope);
 
   return conditions.length === 0 ? undefined : and(...conditions);
 }

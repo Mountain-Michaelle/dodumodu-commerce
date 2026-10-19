@@ -1,5 +1,7 @@
 import type { Db } from "../db";
+import type { SQL } from "drizzle-orm";
 import { ordersRepo, type OrderRow } from "../data/ordersRepo";
+import { assignmentRepo } from "../data/assignmentRepo";
 import { normalizeState, displayState, isKnownState } from "./nigeriaStates";
 import { ConflictError, NotFoundError, ValidationError } from "../shared/httpError";
 
@@ -294,6 +296,10 @@ export const orderCrmService = {
     ids: number[],
     action: OrderAction,
     actor: string,
+    // Row-level scope (Phase 6): a mono operator can only bulk-act on their own
+    // orders, so an id they do not own is concealed exactly as a scoped list
+    // would hide it. Admin/general and every v1 caller pass no scope.
+    scope?: SQL,
   ): Promise<BulkResult> {
     const result: BulkResult = { updated: [], skipped: [], errors: [] };
     if (ids.length === 0) return result;
@@ -301,7 +307,7 @@ export const orderCrmService = {
     // Read the rows rather than trusting the ids the browser sent: a page rendered
     // two minutes ago is not a statement about the database now, and every
     // transition below is checked against what is actually there.
-    const rows = await ordersRepo.findByIds(db, ids);
+    const rows = await ordersRepo.findByIds(db, ids, scope);
     const byId = new Map(rows.map((row) => [row.id, row]));
 
     for (const id of ids) {
@@ -615,6 +621,11 @@ export const orderCrmService = {
    * in the route so no future caller can skip it, and refused outright for
    * anything paid or delivered: a completed sale is the record that the parcel
    * arrived, and removing it destroys the only evidence it did.
+   *
+   * This is a SOFT delete: the row and its full history survive, stamped
+   * deleted_at and hidden from the list unless an operator filters for deleted
+   * orders. It is reversible, which is why "delete" here is safe to offer - it
+   * never erases a delivered sale.
    */
   async remove(db: Db, id: number, confirm: boolean, actor: string): Promise<void> {
     const current = await ordersRepo.findById(db, id);
@@ -630,7 +641,85 @@ export const orderCrmService = {
       );
     }
 
-    await ordersRepo.deleteById(db, id);
+    await ordersRepo.softDelete(db, id);
     console.log(JSON.stringify({ event: "order_deleted", id, reference: current.reference, by: actor }));
+  },
+
+  /* ---- assignment (fulfilment routing; Phase 7) ----
+   *
+   * Assignment is deliberately NOT a status transition and does not go through
+   * applyStatusTransition or any part of the payment/webhook state machine. It
+   * only sets who owns the order for fulfilment. It never touches status,
+   * payment, delivered_at or cancellation state - the same authority separation
+   * the rest of this service keeps.
+   */
+
+  /**
+   * Assign a set of orders to one staff member, with the cross-staff duplicate
+   * guard. Same {updated, skipped, errors} shape as bulkAction so the panel
+   * renders a partial run honestly instead of claiming flat success.
+   *
+   * Idempotent per row: an order already assigned to this staff is skipped
+   * ("already assigned") with no duplicate history row. An order whose duplicate
+   * sibling is assigned to someone else is skipped with a reason naming why.
+   */
+  async assign(db: Db, ids: number[], targetEmail: string, actor: string, reason?: string) {
+    const result: { updated: { id: number; reference: string }[]; skipped: { id: number; reference: string; reason: string }[]; errors: { id: number; reason: string }[] } =
+      { updated: [], skipped: [], errors: [] };
+    if (ids.length === 0) return result;
+
+    const rows = await ordersRepo.findByIds(db, ids);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const id of ids) {
+      const current = byId.get(id);
+      if (!current) { result.errors.push({ id, reason: "No such order" }); continue; }
+      try {
+        const outcome = await assignmentRepo.assignOrder(db, id, targetEmail);
+        if (outcome === "not_found") { result.errors.push({ id, reason: "No such order" }); continue; }
+        if (outcome === "conflict") {
+          result.skipped.push({ id, reference: current.reference, reason: "A duplicate of this order is assigned to another staff member" });
+          continue;
+        }
+        if (!outcome.changed) {
+          result.skipped.push({ id, reference: current.reference, reason: "Already assigned to this staff member" });
+          continue;
+        }
+        await assignmentRepo.writeHistory(db, id, targetEmail, actor, "assign", reason);
+        result.updated.push({ id, reference: current.reference });
+      } catch (err) {
+        result.errors.push({ id, reason: err instanceof Error ? err.message : "Unexpected error" });
+      }
+    }
+    return result;
+  },
+
+  /**
+   * Unassign a set of orders. Idempotent per row: an already-unassigned order is
+   * skipped, not errored. Never touches status, payment or cancellation.
+   */
+  async unassign(db: Db, ids: number[], actor: string, reason?: string) {
+    const result: { updated: { id: number; reference: string }[]; skipped: { id: number; reference: string; reason: string }[]; errors: { id: number; reason: string }[] } =
+      { updated: [], skipped: [], errors: [] };
+    if (ids.length === 0) return result;
+
+    const rows = await ordersRepo.findByIds(db, ids);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const id of ids) {
+      const current = byId.get(id);
+      if (!current) { result.errors.push({ id, reason: "No such order" }); continue; }
+      try {
+        const outcome = await assignmentRepo.unassignOrder(db, id);
+        if (outcome === "not_found") { result.errors.push({ id, reason: "No such order" }); continue; }
+        if (outcome === "unchanged") {
+          result.skipped.push({ id, reference: current.reference, reason: "Not currently assigned" });
+          continue;
+        }
+        await assignmentRepo.writeHistory(db, id, current.assignedTo ?? "", actor, "unassign", reason);
+        result.updated.push({ id, reference: current.reference });
+      } catch (err) {
+        result.errors.push({ id, reason: err instanceof Error ? err.message : "Unexpected error" });
+      }
+    }
+    return result;
   },
 };

@@ -74,6 +74,14 @@ p:last-child { margin-bottom: 0; }
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
+/* The logo's visually-hidden label, used by the splash, the top-bar logo and
+   the sidebar brand head. Kept here (not in brand-motion.css) because nothing
+   on a customer page may reference it — the customer CSS budget is tight. */
+.dm-vh {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
 /* Keyboard focus stays visible everywhere. A console where you cannot see where the
    cursor is is unusable, and :focus-visible keeps it off mouse clicks. */
 :focus-visible {
@@ -107,6 +115,29 @@ p:last-child { margin-bottom: 0; }
   letter-spacing: .06em; opacity: .7;
 }
 
+/* Topbar logo (§4c): full moving logo with speed lines — the global activity light.
+   Still when idle, rolling + shooting out lines while any request is in flight.
+   The bar is dark teal, so the navy re-themes to white via --dm-ink. */
+.dm-topbar-logo{display:inline-flex;align-items:center;padding:8px 0;line-height:0;--dm-ink:#fff}
+.dm-bar{width:clamp(140px,40vw,170px);color:#fff}
+
+/* Splash (§4a): covers the first load, never blank. `data-boot` arms the 10 s
+   safety timer (CSS hides it if JS errors); `dm.hide()` removes it. */
+.dm-splash{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:var(--dm-bg,#fff8f5)}
+.dm-splash[hidden]{display:none!important;visibility:hidden!important;pointer-events:none!important}
+.dm-splash-logo{width:clamp(200px,60vw,320px)}
+#dm-splash[data-boot]{animation:dm-x .01s 10s forwards}
+@keyframes dm-x{to{visibility:hidden}}
+
+/* Splash/boot centring: the splash markup reuses .boot for the fallback
+   (no-JS keeps the explanation) and adds .dm-splash for the overlay. */
+.boot#dm-splash{display:grid;place-items:center;align-content:center;gap:14px}
+
+/* Login (§3a): logo centred above the card + a live status line. */
+.dm-login{display:flex;flex-direction:column;align-items:center;gap:10px;margin:0 auto 24px;text-align:center}
+.dm-login-logo{width:clamp(200px,64vw,280px)}
+.dm-login-status{min-height:1.3em;margin:0;font-size:.85rem;color:#6b5f59}
+
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: .875rem; }
 .topbar-link { color: rgba(255, 255, 255, .85); font-size: .8125rem; text-decoration: none; }
 .topbar-link:hover { color: #fff; text-decoration: underline; }
@@ -135,6 +166,12 @@ p:last-child { margin-bottom: 0; }
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
+
+/* Sidebar brand (§4d): the company logo at the head of the left panel — the
+   same still drawing as the splash (cart + wheels + speed lines). The panel is
+   white, so the navy keeps the default --dm-ink (#1f2a44), orange #F7A21B. */
+.dm-side-brand { display: block; padding: 0 0 .75rem .5rem; margin: 0 0 .875rem; border-bottom: 1px solid var(--border); line-height: 0; }
+.dm-side { width: clamp(150px, 40vw, 176px); }
 
 .nav-group + .nav-group { margin-top: 1.25rem; }
 .nav-group-title {
@@ -221,14 +258,43 @@ p:last-child { margin-bottom: 0; }
 .search-status { font-size: .6875rem; color: var(--text-muted); white-space: nowrap; }
 .search-status:empty { display: none; }
 .list-summary {
+  position: relative;
   display: flex; align-items: center; gap: .75rem;
   padding: .5rem 1rem; border-bottom: 1px solid var(--border);
 }
-.result-count { color: var(--text-muted); font-size: .8125rem; }
+/* The result count: small-screen badge so it never crowds the buttons. At
+   <1000px the summary row stacks and the count pins top-left in light orange,
+   keeping the Export/Copy/switch row clear below it. */
+.result-count {
+  color: var(--text-muted); font-size: .8125rem;
+  background: none; border-radius: 0; padding: 0;
+}
+@media (max-width: 1000px) {
+  .list-summary { flex-wrap: wrap; padding-top: 1.75rem; }
+  .list-summary > .result-count {
+    position: absolute; top: .375rem; left: .625rem;
+    background: #fdf3e3; border: 1px solid #f0d3ac; color: #9a5b12;
+    border-radius: 999px; padding: .0625rem .5rem; font-size: .75rem; font-weight: 600;
+    white-space: nowrap; max-width: calc(100% - 1.25rem);
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .list-actions { flex: 1 1 100%; margin-left: 0; }
+  .bulk-bar { padding-top: 1.75rem; }
+  /* The selection summary rides top-right as one unit - count and Clear stay
+     together so they never wedge between the action buttons. */
+  .bulk-bar > .bulk-meta {
+    position: absolute; bottom: .375rem; right: .625rem;
+    background: #fdf3e3; border: 1px solid #f0d3ac; border-radius: 999px;
+    padding: .0625rem .375rem .0625rem .5rem;
+  }
+  .bulk-bar > .bulk-meta .bulk-count,
+  .bulk-bar > .bulk-meta .bulk-clear { color: #9a5b12; font-size: .75rem; }
+  .bulk-bar > .bulk-meta .bulk-clear { padding: 0 .125rem; min-height: 0; }
+}
 .list-summary > :last-child { margin-left: auto; }
 /* The export pair sits as ONE last child so the space-between lands on the
    group, not between the two buttons. */
-.list-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.list-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-left: auto; justify-content: flex-end; }
 
 /* align-items is what lets the new status note sit beside the box rather than
    below it, so adding one did not change the height of the controls row and
@@ -643,11 +709,25 @@ p:last-child { margin-bottom: 0; }
 /* -------------------------------------------------------------- bulk bar */
 
 .bulk-bar {
+  position: relative;
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   padding: .5rem .75rem;
   background: var(--primary-soft); border: 1px solid #c7dedd; border-radius: var(--radius-sm);
 }
 .bulk-count { font-weight: 600; font-size: .8125rem; color: var(--primary); }
+/* The count + clear ride together so they never split the action buttons apart. */
+.bulk-meta { display: inline-flex; align-items: center; gap: .5rem; }
+
+/* In the orders list the bar sits directly under the toolbar, ABOVE the table:
+   full width and flush, so it reads as part of the toolbar rather than a rounded
+   box floating over the rows. Direct-child selector: elsewhere the bar rides
+   inside .pagination, which keeps its own border. */
+.list-results > .bulk-bar {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+}
 
 /* ------------------------------------------------------------- pagination */
 
@@ -880,3 +960,154 @@ p:last-child { margin-bottom: 0; }
 @media (max-width: 900px) {
   .sidebar { position: fixed; }
 }
+
+/* ---- order assignment (fulfilment routing) ---- */
+
+/* Assignment Mode lives in the toolbar beside export, as a real switch: gray pill
+   with the knob left when off, green with the knob rolled right when on - readable
+   at a glance, not just by its label. */
+.assignment-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  align-items: flex-end;
+  grid-column: 1 / -1;
+}
+.assignment-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line, #d7dbe0);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #1a1d21);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.assignment-switch:hover { border-color: var(--accent, #2f6f4f); }
+.assignment-switch-track {
+  position: relative;
+  width: 1.9rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: #b6bcc6;
+  transition: background 0.18s ease;
+}
+.assignment-switch-knob {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.1rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s ease;
+}
+.assignment-switch-icon, .toolbar-icon { display: inline-flex; }
+.assignment-switch-icon svg, .toolbar-icon svg { display: block; }
+.assignment-switch.is-on {
+  background: var(--accent, #2f6f4f);
+  border-color: var(--accent, #2f6f4f);
+  color: #fff;
+}
+.assignment-switch.is-on .assignment-switch-track { background: rgba(255, 255, 255, 0.4); }
+.assignment-switch.is-on .assignment-switch-knob { transform: translateX(0.9rem); }
+
+/* Medium and below: the toolbar goes icon-only - the switch keeps its pill and
+   glyph, Export/Copy keep theirs, and the labels (still in the DOM for screen
+   readers) hide. 1000px breakpoint so crowded tablet widths stay icon-only. */
+@media (max-width: 1000px) {
+  .list-actions .button-label,
+  .assignment-switch-label { display: none; }
+  .list-actions .button { padding-left: .6rem; padding-right: .6rem; }
+}
+
+/* The "Assigned to" column: the owner as a quiet green staff tag (hovering shows
+   the email), muted "not yet assigned", or the duplicate tag. */
+.col-assigned { white-space: nowrap; }
+.tag-assigned {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #e7f4ec;
+  color: #1f6f4a;
+  border: 1px solid #bfe3cf;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* A duplicate order: excluded from staff performance, shown as a quiet tag so it
+   is obvious at a glance without shouting like the spam tint. */
+.tag-duplicate {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #fdf0e3;
+  color: #9a5b12;
+  border: 1px solid #f0d3ac;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* The customer's chosen delivery window, bottom of the Delivery cell: light red
+   background with a dark red face, so it reads as urgency without shouting.
+   Fixed 90px width caps the badge text to ~30 chars on narrow screens. */
+.tag-delivery {
+  display: inline-block;
+  align-self: flex-start;
+  width: 90px;
+  max-width: 90px;
+  min-width: 0;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #fdecec;
+  color: #a12020;
+  border: 1px solid #f3b8b8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The staff picker: a searchable list in a modal, reusing the modal primitive. */
+.staff-picker { display: flex; flex-direction: column; gap: 0.6rem; }
+.staff-picker-list { display: flex; flex-direction: column; gap: 0.25rem; max-height: 50vh; overflow: auto; }
+.staff-picker-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem;
+  padding: 0.5rem 0.6rem; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; font: inherit; text-align: left; cursor: pointer;
+}
+.staff-picker-item:hover { background: var(--surface-2, #f4f6f8); border-color: var(--line, #d7dbe0); }
+/* The chosen person, inside the assign confirmation dialog. */
+.staff-picker-item.is-selected {
+  border-color: var(--accent, #2f6f4f);
+  background: var(--surface-2, #f4f6f8);
+  box-shadow: inset 0 0 0 1px var(--accent, #2f6f4f);
+}
+
+/* The highlighted "you are about to assign N orders to <name>" line. */
+.assign-confirm-highlight {
+  font-weight: 700;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  background: var(--surface-2, #f4f6f8);
+  border: 1px solid var(--line, #d7dbe0);
+}
+
+/* The snapshot of exactly which orders the assign will touch - reference and
+   customer, capped, with an honest "+N more" when the selection is larger. */
+.assign-snapshot { display: flex; flex-direction: column; }
+.assign-snapshot ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.assign-snapshot li { font-size: 0.85rem; }
+.assign-snapshot li.muted { font-size: 0.8rem; }

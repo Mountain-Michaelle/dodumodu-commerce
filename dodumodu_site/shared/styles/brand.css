@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------- brand.css
-   DODUMODU logo, header CTA, footer sign-off.
+   DODUMODU logo (leaf edition), header CTA, footer sign-off.
 
    This lived as a separate inline <style id="brand-css"> on the product page so
    it could sit after the site stylesheet and win the cascade. Moving it into
@@ -8,24 +8,28 @@
    generated <style> and dist ships none. */
 
 /* The logo is an inline SVG sprite (see <body>): zero requests, paints with
-   the HTML, and its navy follows CSS `color`, so it themes like text. */
-.brand-link{display:inline-flex;align-items:center;min-height:44px;line-height:0;color:#1f2a44;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-.brand-link:hover{text-decoration:none}
-.brand-link:focus-visible,.site-nav .nav-cta:focus-visible{outline:3px solid rgba(194,105,79,.45);outline-offset:3px;border-radius:8px}
-/* pointer-events:none means a right-click / long-press lands on the link, not
-   on an "image", so there is no Save-image or drag target on the artwork. */
-.brand-logo{display:block;height:auto;aspect-ratio:2364/505;color:#1f2a44;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+   the HTML. Its COLOUR rule lives in brand-motion.css (which this sheet loads
+   immediately after): navy via `--dm-ink` (default #1f2a44), orange #F7A21B, leaf green
+   #084D02 (fixed, so it stays green on dark admin themes). The artwork (dm-logo.mjs) keeps the old frame, so the
+   .dm sizes below are unchanged; only the FULL logo's viewBox grew to 1 -16 2142 504 for the longer speed lines.
+   This sheet is LAST in the manifest, so its rules refine header/footer chrome
+   without restating `.dm` colour: brand-motion.css owns the navy. */
 
 /* Header: compact, logo left, one clear action right */
-.site-header{gap:12px;padding:6px 0;min-height:58px}
-.site-header .brand-logo{width:clamp(128px,38vw,172px)}
-.site-nav .nav-cta{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 16px;border-radius:999px;background:var(--color-primary-dark);color:#fff;font-size:.82rem;font-weight:700;letter-spacing:.02em;white-space:nowrap;transition:background .15s,transform .12s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-.site-nav .nav-cta:hover{background:#8c4330;text-decoration:none}
-.site-nav .nav-cta:active{transform:scale(.97)}
+.site-header{padding:10px 0;gap:12px;min-height:58px}
+.site-logo{display:inline-flex;align-items:center;padding:4px 0;line-height:0}
+.site-logo .dm{width:clamp(136px,40vw,176px)}
+.site-nav{display:flex}
 
 /* Footer: the brand as a quiet sign-off above the links */
-.footer-brand-row{display:flex;justify-content:center;margin:0 0 14px}
-.brand-logo--footer{width:clamp(150px,46vw,210px)}
+.footer-brand{display:flex;justify-content:center;padding:6px 0;margin:0 0 12px;line-height:0}
+.dm-foot{width:120px;opacity:.92}
+@media (min-width:768px){.site-logo .dm{width:184px}.dm-foot{width:132px}}
+
+/* "Order Now" as a real button. #a5533c on white is 5.4:1 contrast (the lighter primary is only 3.9:1 at this size) */
+.site-nav a{display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border-radius:999px;background:var(--color-primary-dark);color:#fff;font-size:.8rem;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+.site-nav a:hover{background:#8f4733;text-decoration:none}
+.site-nav a:focus-visible{outline:3px solid rgba(194,105,79,.4);outline-offset:2px}
 
 /* Below-the-fold sections are skipped by layout/paint until they approach the
    viewport (faster first render on phones). `auto` remembers the real height
@@ -33,5 +37,9 @@
    browsers simply render them normally. */
 .lazy-section{content-visibility:auto;contain-intrinsic-size:auto 480px}
 
-@media (max-width:360px){.site-nav .nav-cta{padding:0 12px;font-size:.78rem}}
-@media (min-width:768px){.site-header .brand-logo{width:188px}.brand-logo--footer{width:220px}}
+@media (max-width:360px){.site-nav a{padding:0 12px;font-size:.78rem}}
+
+/* Logo motion lives in brand-motion.css (shared by the site + admin bundles)
+   so the arrival/splash/top-bar animations actually ship with this sheet.
+   The leaf wheel needs no new CSS there: .dm-r already rotates each <use href="#dm-o"> about its centre,
+   and the leaf is clipped inside the ring (dm-k), so it spins without poking out. */

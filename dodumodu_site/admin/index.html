@@ -5,10 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin — Dodumodu</title>
 <meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-112 0 480 480'%3E%3Cpath fill='%23F7A21B' fill-rule='evenodd' d='M0 208H194a8 8 0 0 1 8 8V406a8 8 0 0 1-8 8H34a8 8 0 0 1-7.9-6.6L-7.9 217.4A8 8 0 0 1 0 208zM14 273.5h156a4.5 4.5 0 0 1 0 9H14a4.5 4.5 0 0 1 0-9zM30 337.5h140a4.5 4.5 0 0 1 0 9H30a4.5 4.5 0 0 1 0-9zM57.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM57.5 282.5h9v55h-9zM57.5 346.5h9V382a4.5 4.5 0 0 1-9 0zM113.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM113.5 282.5h9v55h-9zM113.5 346.5h9V382a4.5 4.5 0 0 1-9 0z'/%3E%3Cpath d='M218 382V30h22' fill='none' stroke='%23F7A21B' stroke-width='48' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath fill='%231F2A44' fill-rule='evenodd' d='M23 441a32 32 0 1 0 64 0a32 32 0 1 0-64 0M43 441a12 12 0 1 0 24 0a12 12 0 1 0-24 0zM123 441a32 32 0 1 0 64 0a32 32 0 1 0-64 0M143 441a12 12 0 1 0 24 0a12 12 0 1 0-24 0z'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/__ADMIN_CSS__">
 </head>
 <body class="admin">
+<!-- Order is load-bearing: sprite FIRST, then the splash that references it.
+     A <use href="#dm-b"> before its <defs> resolves in Chrome but breaks under
+     minification and in Safari — parts paint but .dm-b/.dm-r transform origins
+     never bind, so the logo looks stuck instead of rolling. -->
 <!-- ICONS -->
+<!-- The DODUMODU logo sprite (§0a): one drawing, pasted after ICONS on every page.
+     Zero requests, paints with the HTML, navy follows `--dm-ink` (default #1f2a44). -->
+<svg class="dm-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs><linearGradient id="dm-f" gradientUnits="userSpaceOnUse" x2="450"><stop stop-color="#F7A21B" stop-opacity=".6"/><stop offset="1" stop-color="#F7A21B" stop-opacity="0"/></linearGradient><path id="dm-w" fill="currentColor" fill-rule="evenodd" d="M-32 0a32 32 0 1 0 64 0a32 32 0 1 0-64 0M-12 0a12 12 0 1 0 24 0a12 12 0 1 0-24 0z"/><g id="dm-d"><path fill="#F7A21B" fill-rule="evenodd" d="M23.5 208H221.5a6 6 0 0 1 6 6V408a6 6 0 0 1-6 6H58.5a6 6 0 0 1-5.9-4.9L17.6 215.1A6 6 0 0 1 23.5 208zM40 273.5h155.5a4.5 4.5 0 0 1 0 9H40a4.5 4.5 0 0 1 0-9zM56 337.5h139.5a4.5 4.5 0 0 1 0 9H56a4.5 4.5 0 0 1 0-9zM83.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM83.5 282.5h9v55h-9zM83.5 346.5h9V381.5a4.5 4.5 0 0 1-9 0zM139.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM139.5 282.5h9v55h-9zM139.5 346.5h9V381.5a4.5 4.5 0 0 1-9 0z"/><path d="M244 382V30h21.5" fill="none" stroke="#F7A21B" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="81" y="441"/><use href="#dm-w" x="181" y="441"/></g><g id="dm-o"><g fill="none" stroke="currentColor"><circle r="112" stroke-width="36"/><path d="M0-98V98M-85-49L85 49M-85 49L85-49" stroke-width="9"/></g><circle r="26" fill="#F7A21B"/><circle r="10" fill="currentColor"/></g><g id="dm-b"><use href="#dm-d"/><use href="#dm-d" x="596"/><path d="M946 240v118a24 24 0 0 0 24 24h142a24 24 0 0 0 24-24V240M1220 382V305a65 65 0 0 1 130 0V382M1350 305a65 65 0 0 1 130 0V382" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="984" y="441"/><use href="#dm-w" x="1098" y="441"/><use href="#dm-w" x="1220" y="441"/><use href="#dm-w" x="1350" y="441"/><use href="#dm-w" x="1480" y="441"/></g><g id="dm-c"><use href="#dm-b"/><use href="#dm-o" x="456" y="346"/><use href="#dm-o" x="1670" y="346"/></g><g id="dm-s" fill="none" stroke="url(#dm-f)" stroke-width="14" stroke-linecap="round"><path transform="translate(1709 199)" d="M0 0h248"/><path transform="translate(1796 261)" d="M0 0h125"/><path transform="translate(1820 323)" d="M0 0h203"/><path transform="translate(1817 385)" d="M0 0h158"/><path transform="translate(1784 447)" d="M0 0h86"/></g><g id="dm-logo"><use href="#dm-c"/><use href="#dm-s"/></g></defs></svg>
 <!--
   The shell is deliberately almost empty. Every pixel of the console is drawn by
   shared/scripts/admin.js from the data the API returns, which is what lets one
@@ -18,11 +26,18 @@
   #app is the only mount point; a failure to reach the API replaces its contents
   with an explanation rather than leaving a blank page.
 -->
+<!-- The splash is OUTSIDE #app on purpose: buildShell() mounts into #app and
+     wipes its contents on boot. A splash inside it would be destroyed before
+     dm.hide() could ever dismiss it — leaving a dead overlay (the stale
+     "loading forever" state). -->
+<div class="dm-splash boot" id="dm-splash" data-boot role="status" aria-live="polite">
+  <svg class="dm dm-run dm-splash-logo" viewBox="1 -16 2030 504" width="300" height="74" aria-hidden="true" focusable="false"><g transform="translate(750 441)"><g class="dm-b"><use href="#dm-b" x="-750" y="-441"/></g></g><g transform="translate(456 346)"><use class="dm-r" href="#dm-o"/></g><g transform="translate(1670 346)"><use class="dm-r" href="#dm-o"/></g><g class="dm-s" fill="none" stroke="url(#dm-f)" stroke-width="14" stroke-linecap="round"><g transform="translate(1709 199)"><path d="M0 0h248"/></g><g transform="translate(1796 261)"><path d="M0 0h125"/></g><g transform="translate(1820 323)"><path d="M0 0h203"/></g><g transform="translate(1817 385)"><path d="M0 0h158"/></g><g transform="translate(1784 447)"><path d="M0 0h86"/></g></g></svg>
+  <span class="dm-vh">Loading…</span>
+  <p class="muted">Loading the admin console…</p>
+</div>
+<!-- #app starts empty: the shell mounts here, and the splash (above) already
+     covers first paint. No stale spinner inside. -->
 <div id="app">
-  <div class="boot">
-    <div class="spinner" aria-hidden="true"></div>
-    <p class="muted">Loading the admin console…</p>
-  </div>
 </div>
 <noscript>
   <div class="boot boot-blocked">

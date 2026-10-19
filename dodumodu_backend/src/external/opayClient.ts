@@ -32,7 +32,7 @@ export type OpayWebhookPayload = {
 };
 
 export const opayClient = {
-  async createCheckoutSession(env: Env, order: OrderRow): Promise<OpayCheckoutResult> {
+  async createCheckoutSession(env: Env, order: Pick<OrderRow, "reference" | "amount" | "currency">): Promise<OpayCheckoutResult> {
     const res = await fetch(`${baseUrl(env)}/api/v1/international/cashier/create`, {
       method: "POST",
       headers: {

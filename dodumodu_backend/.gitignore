@@ -1,5 +1,6 @@
 node_modules/
 dist/
+src/generated/
 # Local build artifacts and the media directory standing in for R2
 **/.media/
 *.log

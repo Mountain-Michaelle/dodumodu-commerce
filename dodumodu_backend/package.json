@@ -4,27 +4,32 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/node.ts",
+    "build:site": "node scripts/build-site.mjs",
+    "dev": "npm run build:site && tsx watch src/node.ts",
     "dev:worker": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build:site && wrangler deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx migrations/migrate.ts",
     "db:baseline": "tsx migrations/migrate.ts --baseline",
     "db:seed": "node scripts/seed.mjs",
+    "createsuperuser": "tsx scripts/createsuperuser.ts",
     "db:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 status",
     "db:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 start",
     "db:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 stop",
     "db:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 init",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "test:ui": "node --test src/auth-ui/*.test.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@neondatabase/serverless": "^0.10.1",
     "drizzle-orm": "^0.36.1",
+    "hash-wasm": "^4.12.0",
     "hono": "^4.6.9",
     "libphonenumber-js": "^1.11.20",
     "pg": "^8.23.0",
+    "qrcode-generator": "^2.0.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {

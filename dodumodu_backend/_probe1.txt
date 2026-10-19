@@ -1,0 +1,30 @@
+== static.ts exports ==
+41: export function mountMedia(app: App, mediaRoot: string): void {
+62: export function mountStatic(app: App, distRoot: string, homePath = "/products/glow-serum/"): void {
+== static.ts signature of mountStatic ==
+export function mountStatic(app: App, distRoot: string, homePath = "/products/glow-serum/"): void {
+== session-lookup exports ==
+24: export async function lookupSession(db: Db, sessionToken: string): Promise<Session | null> {
+60: export async function touchSession(db: Db, sessionToken: string): Promise<void> {
+69: export async function touchDevice(db: Db, deviceId: string): Promise<void> {
+== keys.ts exports ==
+20: export const pairKey = (tag: string, ip: string): string => `otp:${tag}:${ip}`;
+21: export const deviceKey = (stage: string, tag: string, deviceId: string): string =>
+23: export const strictKey = (stage: string, tag: string, deviceId: string, prefix: string): string =>
+25: export const fuseTag = (tag: string): string => `fuse:${tag}`;
+26: export const sendEmailKey = (tag: string): string => `send:${tag}`;
+27: export const sendIpKey = (tag: string, ip: string): string => `send:${tag}:${ip}`;
+== node.ts mount/route lines ==
+10: import { serve } from "@hono/node-server";
+11: import { existsSync } from "node:fs";
+12: import { join, resolve } from "node:path";
+13: import { app } from "./app";
+14: import { registerDbDriver } from "./db";
+15: import { closePools, pgDriver } from "./dbDrivers/pg";
+16: import type { Env } from "./env";
+17: import { backendRoot, loadRootEnv, repoRoot } from "./node/envFile";
+18: import { localBucket, memoryKV } from "./node/shims";
+19: import { mountMedia, mountStatic } from "./node/static";
+132: registerDbDriver(pgDriver);
+136: mountStatic(app, siteDist);
+154: const server = serve({ fetch: fetchWithLocalIdentity, port }, (info) => {

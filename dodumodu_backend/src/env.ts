@@ -16,6 +16,13 @@ export type Env = {
   ANALYTICS_IP_HMAC_VERSION: string;
   /** Only the anonymous intent event is gated by this optimization switch. */
   ANALYTICS_WARMUP_ENABLED: string;
+  /**
+   * Order Assignment Mode (fulfilment routing). "false" (the default) keeps the
+   * feature dark: the assign/unassign actions and the staff endpoint refuse,
+   * and the panel hides the toggle. Flip to "true" to enable without a deploy
+   * where the runtime allows it. Strictly additive and independently revertible.
+   */
+  ASSIGNMENT_MODE_ENABLED: string;
   RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR: string;
   /**
    * Admin console read ceiling, per operator per minute. Separate from
@@ -107,6 +114,11 @@ export type Env = {
    */
   ADMIN_OPERATORS: string;
 
+  // admin-auth v2 (feature flag "0"/"1"; additive only, existing routes untouched)
+  ADMIN_AUTH_V2: string;
+  /** Test-only: allows X-Test-IP to override the client IP. Exists only in .dev.vars. */
+  ALLOW_TEST_IP: string;
+
   // secrets (wrangler secret put / .env)
   DATABASE_URL: string;
   OPAY_PUBLIC_KEY: string;
@@ -115,6 +127,15 @@ export type Env = {
   OPAY_WEBHOOK_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
   RECONCILE_CRON_SECRET: string;
+
+  // admin-auth v2 secrets (Worker secrets only; see src/auth/config.ts)
+  OTP_KEY: string;
+  THROTTLE_KEY: string;
+  TOTP_ENC_KEY: string;
+  RESEND_API_KEY: string;
+  TURNSTILE_SECRET: string;
+  /** From address for login codes. Must be a Resend-verified sender/domain. */
+  AUTH_FROM_EMAIL: string;
 
   // bindings — real R2/KV on the Worker, local shims under Node
   MEDIA_BUCKET: R2Bucket;

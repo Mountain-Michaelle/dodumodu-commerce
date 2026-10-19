@@ -93,7 +93,7 @@ function asDate(value: unknown): Date {
  * The address is compared case-insensitively and trimmed because "12 Allen Avenue"
  * and "12 allen avenue " are the same place typed twice.
  */
-function orderMatchKey(
+export function orderMatchKey(
   phoneNorm: string,
   address: string,
   productId: number,

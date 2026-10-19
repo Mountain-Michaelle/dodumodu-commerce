@@ -810,12 +810,13 @@ export function adminPagination({ page, pageSizeOptions = [50, 100, 1000], onPag
  */
 export function bulkBar({ count, actions, onClear }) {
   return el("div", { class: "bulk-bar", role: "region", "aria-label": "Bulk actions" },
-    el("span", { class: "bulk-count", text: `${count} selected` }),
+    el("span", { class: "bulk-meta" },
+      el("span", { class: "bulk-count", text: `${count} selected` }),
+      el("button", { class: "button button-link bulk-clear", type: "button", text: "Clear", onclick: onClear })),
     actions.map((action) => el("button", {
       class: `button button-small${action.danger ? " button-danger" : ""}`,
       type: "button", text: action.label, onclick: action.onSelect,
-    })),
-    el("button", { class: "button button-link", type: "button", text: "Clear", onclick: onClear }));
+    })));
 }
 
 /* --------------------------------------------------------------- forms */
