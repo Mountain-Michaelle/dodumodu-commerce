@@ -74,7 +74,7 @@ bucket_name = "skincare-media"
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "replace-with-real-kv-namespace-id"
+id = "25410516df5e4b01a3b7799889960037"
 
 # Secrets — set with `wrangler secret put <NAME>`, never committed:
 #   DATABASE_URL

@@ -25,7 +25,7 @@ if (!existsSync(distDir)) {
 // Wire-byte ceilings, with roughly 15% headroom for the next small feature.
 const BUDGETS = {
   page: 10.5 * 1024,   // HTML document, preview script included (CSS is linked)
-  css: 4.5 * 1024,     // the whole stylesheet
+  css: 4.7 * 1024,     // the whole stylesheet (includes brand-motion.css keyframes)
   js: 7.0 * 1024,      // the whole customer bundle
   // Everything the first paint needs, excluding the hero image (which is a
   // separate, cacheable, content-negotiated request). This is the number that
@@ -207,7 +207,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // (tokens/base/layout/form/pricing/carousel/testimonials/product/brand-motion/brand)
 // changes, then re-pin the CSS hash to the new output so the storefront CSS is
 // never silently dropped by an admin change.
-const EXPECTED_CUSTOMER = { js: "site.050e8ce3.min.js", css: "site.c3ba1c9d.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.050e8ce3.min.js", css: "site.c1a08967.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

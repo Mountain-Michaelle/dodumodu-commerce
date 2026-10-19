@@ -1,4 +1,4 @@
-// ===== FILE: <your-static-dir>/auth.js =====
+// ===== FILE: <your-static-dir>/auth.js  (served at /admin/assets/auth.js) =====
 /* admin-auth v2 UI — vanilla JS, external file (CSP: script-src 'self').
  * One input per stage, rendered from the server's `next`. No tokens in
  * localStorage. Neutral errors; 429 shows a server countdown; 503 keeps the
@@ -9,7 +9,15 @@ import { makeQrElement } from "./qr-logo.mjs";
 const AUTH = "/auth";
 const ENROLL_TTL_SECS = 120; // fallback; the server sends expires_in
 const $ = (id) => document.getElementById(id);
-const setHidden = (id, hidden) => { const el = $(id); if (el) el.hidden = hidden; };
+// CHANGED: the `hidden` attribute loses to any author CSS `display:` rule
+// (e.g. `button { display:block }`), so also set inline display via CSSOM
+// (allowed under a strict CSP). Guarantees hide/show regardless of auth.css.
+const setHidden = (id, hidden) => {
+  const el = $(id);
+  if (!el) return;
+  el.hidden = hidden;
+  el.style.display = hidden ? "none" : "";
+};
 
 const state = {
   stage: "email",      // email | otp | totp | totp_enroll | backup_codes | recovery | ready | done
@@ -19,6 +27,7 @@ const state = {
   useBackup: false,
   locked: false,
   enrollStarted: false,
+  enrollSaved: false,   // user pressed "I saved it" (reveals the code input)
   enrollSeq: 0,
   enrollTimer: null,
   enrollDeadline: 0,
@@ -71,6 +80,7 @@ const STAGES = {
   ready:        { label: "Ready",         type: "text",  ac: "off",           im: "text",    btn: "Sign in",  sub: "All checks passed. Continue to sign in." },
 };
 const NEEDS_INPUT = new Set(["email", "otp", "totp", "totp_enroll", "recovery"]);
+const ENROLL_GATED_SUB = "Set up your authenticator app first.";
 
 // Strip whitespace/dashes people paste from authenticator apps ("123 456").
 function normalizeCode(raw) {
@@ -81,23 +91,49 @@ function normalizeCode(raw) {
   return v.replace(/\s+/g, "");
 }
 
+// ---- Enrolment gate: QR first, code input only after "I saved it" ----
+function enrollGated() { return state.stage === "totp_enroll" && !state.enrollSaved; }
+
+// Safety net: the HTML already places #enroll-box above #form. If someone
+// reorders the markup, this restores it (no-op when already correct).
+function placeEnrollAboveForm() {
+  const box = $("enroll-box"), form = $("form");
+  if (!box || !form || !form.parentNode || box.parentNode !== form.parentNode) return;
+  if (box.nextElementSibling !== form) form.parentNode.insertBefore(box, form);
+}
+
+function applyGate() {
+  if (state.stage === "totp_enroll") placeEnrollAboveForm();
+  if (enrollGated()) {
+    setHidden("field-label", true);
+    setHidden("input", true);
+    setHidden("submit", true);
+    return;
+  }
+  const needs = NEEDS_INPUT.has(state.stage);
+  setHidden("field-label", !needs);
+  setHidden("input", !needs);
+  setHidden("submit", false);
+}
+
 function stopQrRefresh() {
   if (state.enrollTimer) { clearInterval(state.enrollTimer); state.enrollTimer = null; }
 }
 function hideEnrollBox() {
   stopQrRefresh();
   const box = $("enroll-box");
-  if (box) { box.hidden = true; box.innerHTML = ""; }
+  if (box) { box.innerHTML = ""; setHidden("enroll-box", true); } // CHANGED
 }
 
 function render() {
   const cfg = STAGES[state.stage];
   if (!cfg) { hideEnrollBox(); setHidden("form", true); return; }
   // Leaving totp_enroll: stop the expiry timer + clear the box; returning
-  // resets the flag so the pending secret is fetched fresh again.
+  // resets the flags so a fresh secret is fetched and the gate closes again.
   if (state.stage !== "totp_enroll") {
     hideEnrollBox();
     state.enrollStarted = false;
+    state.enrollSaved = false;
     state.enrollSeq++; // invalidate any in-flight enrollStart
   }
   setHidden("form", false);
@@ -106,17 +142,17 @@ function render() {
   const needsInput = NEEDS_INPUT.has(state.stage);
   const input = $("input");
   const label = $("field-label");
-  if (label) { label.textContent = cfg.label; label.hidden = !needsInput; }
-  input.hidden = !needsInput;
+  if (label) label.textContent = cfg.label;          // CHANGED
+  setHidden("field-label", !needsInput);             // CHANGED
+  setHidden("input", !needsInput);                   // CHANGED
   input.type = cfg.type;
   input.autocomplete = cfg.ac;
   input.inputMode = cfg.im;
   input.placeholder = state.stage === "recovery" ? "XXXXX-XXXXX" : "";
   input.value = "";
-  if (needsInput) input.focus();
 
   $("submit").textContent = cfg.btn;
-  $("subtitle").textContent = cfg.sub;
+  $("subtitle").textContent = enrollGated() ? ENROLL_GATED_SUB : cfg.sub;
   if (state.strict && state.stage === "totp") {
     setHint("Extra checks are on because your network changed.");
   } else { setHint(""); }
@@ -125,6 +161,9 @@ function render() {
   const resend = $("resend-link");
   if (resend) { resend.hidden = state.stage !== "otp"; tick(); }
   setHidden("device-link", !(state.stage === "email" && state.device));
+
+  applyGate();
+  if (needsInput && !enrollGated()) input.focus();
 
   if (state.stage === "totp_enroll" && !state.enrollStarted) {
     state.enrollStarted = true;
@@ -146,14 +185,18 @@ function showEnrollRetry(message) {
   retry.type = "button"; retry.className = "ghost"; retry.textContent = "Get a new QR code";
   retry.addEventListener("click", () => { state.enrollStarted = true; enrollStart(); });
   box.appendChild(retry);
-  box.hidden = false;
+  setHidden("enroll-box", false); // CHANGED
 }
 
 // totp_enroll: POST /auth/totp/enroll/start, render QR code + setup key.
-// Calling it again re-issues a NEW secret (the old unconfirmed one dies).
+// Calling it again re-issues a NEW secret (the old unconfirmed one dies), so
+// the code input is hidden again until the user re-adds it and presses the button.
 async function enrollStart() {
   const seq = ++state.enrollSeq;
   stopQrRefresh();
+  state.enrollSaved = false;
+  $("subtitle").textContent = ENROLL_GATED_SUB;
+  applyGate();
   showNote("warn", "Loading your authenticator setup…");
   const { status, data } = await api(AUTH + "/totp/enroll/start", {});
   if (seq !== state.enrollSeq || state.stage !== "totp_enroll") return; // stale
@@ -214,18 +257,27 @@ async function enrollStart() {
 
   const hint = document.createElement("div");
   hint.className = "qr-hint";
-  hint.textContent = "Scan with your authenticator app, then enter the 6-digit code below.";
+  hint.textContent = "Add it to your authenticator app, then press the button below to enter the 6-digit code.";
   box.appendChild(hint);
 
   const expiry = document.createElement("div");
   expiry.className = "qr-hint";
   box.appendChild(expiry);
 
+  // Reveals the code input + Verify button (below this box).
   const ok = document.createElement("button");
   ok.type = "button"; ok.className = "ghost"; ok.textContent = "I saved it";
-  ok.addEventListener("click", () => { $("input").focus(); });
+  ok.addEventListener("click", () => {
+    state.enrollSaved = true;
+    ok.hidden = true;
+    ok.style.display = "none";
+    $("subtitle").textContent = STAGES.totp_enroll.sub;
+    applyGate();
+    $("input").focus();
+  });
   box.appendChild(ok);
-  box.hidden = false;
+  setHidden("enroll-box", false); // CHANGED
+  placeEnrollAboveForm();
 
   // Expiry countdown from the server's real TTL. On expiry, offer a fresh QR
   // (delete the old entry from your authenticator first).
@@ -235,6 +287,9 @@ async function enrollStart() {
     const left = Math.ceil((state.enrollDeadline - Date.now()) / 1000);
     if (left > 0) { expiry.textContent = `Setup key expires in ${formatCountdown(left)}.`; return; }
     stopQrRefresh();
+    state.enrollSaved = false;
+    $("subtitle").textContent = ENROLL_GATED_SUB;
+    applyGate();
     showEnrollRetry("This setup key has expired. Remove the old entry from your authenticator, then get a new QR code.");
   };
   update();
@@ -254,7 +309,7 @@ if ($("backup-link")) {
     $("input").placeholder = "XXXXX-XXXXX";
     $("input").value = "";
     $("input").focus();
-    $("backup-link").hidden = true;
+    setHidden("backup-link", true);
   });
 }
 
@@ -281,7 +336,7 @@ function validEmail(v) {
 
 async function onSubmit(ev) {
   ev.preventDefault();
-  if (state.inFlight || state.locked) return;
+  if (state.inFlight || state.locked || enrollGated()) return;
   const needsInput = NEEDS_INPUT.has(state.stage);
   const value = needsInput ? normalizeCode($("input").value) : "";
   if (needsInput && !value) return;
@@ -538,5 +593,3 @@ fetch(AUTH + "/device/available", { credentials: "same-origin" })
   .then((r) => (r.status === 200 ? r.json() : { available: false }))
   .then((j) => { if (j.available) { state.device = true; render(); } })
   .catch(() => {});
-
-  

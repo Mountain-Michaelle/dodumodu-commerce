@@ -1,3 +1,4 @@
+<!-- ===== FILE: <your-admin-dir>/login.html (your existing login page) ===== -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -10,6 +11,10 @@
   <main class="card" id="card">
     <h1 id="title">Sign in</h1>
     <p class="muted" id="subtitle">Enter your email to continue.</p>
+
+    <!-- QR / setup key. Sits ABOVE the form so the code field appears below it
+         after "I saved it". Hidden unless the authenticator-setup stage is active. -->
+    <div id="enroll-box" class="once" hidden></div>
 
     <form id="form" autocomplete="on" novalidate>
       <label class="field" id="field-label" for="input">Email</label>
@@ -24,8 +29,6 @@
       <a href="#" id="backup-link" hidden>Use a backup code instead</a>
     </div>
 
-    <div id="enroll-box" class="once" hidden></div>
-
     <p class="note" id="note" hidden></p>
     <p class="muted small" id="hint" hidden></p>
 
@@ -37,4 +40,3 @@
   <script type="module" src="/admin/assets/auth.js"></script>
 </body>
 </html>
-

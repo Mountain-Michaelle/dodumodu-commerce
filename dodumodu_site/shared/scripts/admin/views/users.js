@@ -19,7 +19,8 @@ export function usersView({ shell, identity }) {
   const host = el("div");
   const ui = listScaffold(host);
   const state = { q: "", role: "", active: "", page: 1, pageSize: 20 };
-  const canManage = () => (identity?.permissions || []).includes("users:write")
+  const canManage = () => (identity?.v2perms || []).includes("users.manage")
+    || (identity?.permissions || []).includes("users:write")
     || identity?.role === "admin";
 
   async function load() {
@@ -32,7 +33,7 @@ export function usersView({ shell, identity }) {
       const data = await ui.load((signal) => v2api.get(`/users?${params}`), { pending: "Loading users…" });
       if (data) render(data);
     } catch (err) {
-      mount(shell.content, el("div", { class: "list-panel" }, errorState(err, load)));
+      ui.results(errorState(err, load));
     }
   }
 
@@ -51,7 +52,7 @@ export function usersView({ shell, identity }) {
           ],
           onChange: (next) => { state.role = next.role || ""; state.active = next.active || ""; state.page = 1; load(); },
         }),
-        canManage() ? el("button", { class: "button button-primary button-small", type: "button", text: "+ Add user", onclick: () => openCreate(load) }) : null));
+        canManage() ? el("button", { class: "button button-primary button-small", type: "button", text: "+ Add user", style: "margin-left: auto", onclick: () => openCreate(load) }) : null));
     ui.results(
       el("div", { class: "list-summary" }, resultCount({ page: { total, totalPages: pages, page: state.page, pageSize: state.pageSize }, noun: "user" })),
       adminTable({

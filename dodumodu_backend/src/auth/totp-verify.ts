@@ -96,11 +96,23 @@ export async function verifyTotp(
       await clearKeys(db, [key]);
       return { next: row.stage, remaining: row.remaining, usedBackup: true };
     }
-    const urow = await q1<{ enc: string | null; active: boolean }>(db,
-      sql`SELECT totp_secret_enc AS enc, (totp_enabled_at IS NOT NULL) AS active
+    const urow = await q1<{ enc: string | null; active: boolean; enroll_open: boolean }>(db,
+      sql`SELECT totp_secret_enc AS enc, (totp_enabled_at IS NOT NULL) AS active,
+              (enroll_window_until > now()) AS enroll_open
         FROM aa_users WHERE id = ${flow.user_id}`);
     if (!urow?.enc || !urow.active) {
       await noteFuse(db, tag).catch(() => {});
+      // No TOTP enrolled but the enroll window is still open: advance the flow
+      // to totp_enroll so the operator can set up their authenticator instead of
+      // hitting a dead-end "Invalid or expired code".
+      if (urow?.enroll_open) {
+        await refund(db, reservation).catch(() => {});
+        await clearKeys(db, [key]).catch(() => {});
+        await q1(db,
+          sql`UPDATE aa_auth_flows SET stage = 'totp_enroll'
+              WHERE id = ${flow.id} AND stage = 'totp' AND expires_at > now()`);
+        return { next: "totp_enroll", remaining: null, usedBackup: false };
+      }
       throw new AuthRejectError("totp");
     }
     const secret = await decryptSecret(secrets.totpEncKey, urow.enc).catch(() => null);
