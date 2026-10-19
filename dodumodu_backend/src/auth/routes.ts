@@ -319,6 +319,8 @@ authRoute.post("/totp", async (c) => guarded(c, async () => {
 }));
 
 // POST /auth/session -> sets __Host-sid (+ __Host-did on first admin login).
+// Passes any presented __Host-did so an EMAIL-path finish can hash-match its
+// existing active device when the one-time claim window is already spent.
 authRoute.post("/session", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const token = getFlowToken(c as never);
@@ -327,7 +329,7 @@ authRoute.post("/session", async (c) => guarded(c, async () => {
   if (!flow || flow.stage !== "ready" || flow.user_id === null) throw new AuthRejectError("flow");
   const u = await q1<{ role: string }>(s.db, sql`SELECT role FROM aa_users WHERE id = ${flow.user_id}`);
   if (!u) throw new AuthRejectError("flow");
-  const args = { flowToken: token, ...s.ctx, tier: "normal" as const };
+  const args = { flowToken: token, ...s.ctx, tier: "normal" as const, deviceToken: s.deviceToken };
   const fin = u.role === "admin"
     ? await finishAdminSession(s.db, args)
     : await finishStaffSession(s.db, args);

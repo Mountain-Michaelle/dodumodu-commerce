@@ -21,6 +21,13 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
       FROM aa_users WHERE id = ${flow.user_id}`);
   const claimToken = urow?.window_open ? randomToken() : null;
   const claimHashHex = claimToken ? await tokenHashHex(claimToken) : null;
+  // Presented __Host-did at finish: hash-match ONLY a live active device owned
+  // by this flow's user (email-path flows carry no device_id and the claim
+  // window may already be spent). No token -> SQL `false` (no rows, no UPDATE).
+  const byoHashHex = a.deviceToken ? await tokenHashHex(a.deviceToken) : null;
+  const byoMatch = byoHashHex === null
+    ? sql`false`
+    : sql`d.token_hash = decode(${byoHashHex}, 'hex')`;
   const absSecs = a.tier === "strict" ? SESSION_ABSOLUTE_SECS_STRICT : SESSION_ABSOLUTE_SECS;
   const sessionToken = randomToken();
   const sessionHashHex = await tokenHashHex(sessionToken);
@@ -49,15 +56,28 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
         WHERE d.id = u.device_id AND d.user_id = u.user_id
           AND d.status = 'active' AND ${a.tier}::text = 'normal'
        RETURNING d.id),
+      byo AS (
+       UPDATE aa_admin_devices d
+          SET last_seen_at = now(),
+              last_ip = CASE WHEN ${a.tier}::text = 'normal' THEN ${a.ip} ELSE d.last_ip END,
+              last_ip_prefix = CASE WHEN ${a.tier}::text = 'normal' THEN ${a.prefix} ELSE d.last_ip_prefix END,
+              last_country = CASE WHEN ${a.tier}::text = 'normal' THEN ${a.country} ELSE d.last_country END
+         FROM u
+        WHERE u.device_id IS NULL AND d.user_id = u.user_id
+          AND d.status = 'active' AND d.expires_at > now()
+          AND ${byoMatch}
+       RETURNING d.id),
       ok_dev AS (
        SELECT d.id FROM aa_admin_devices d JOIN u ON d.id = u.device_id AND d.user_id = u.user_id
         WHERE d.status = 'active' AND d.expires_at > now()
-       UNION ALL SELECT id FROM act),
+       UNION ALL SELECT id FROM act
+       UNION ALL SELECT id FROM byo),
       claim AS (
        UPDATE aa_users SET device_window_until = NULL
         WHERE id IN (SELECT user_id FROM u
           WHERE device_id IS NULL AND ${claimHashHex}::text IS NOT NULL)
           AND device_window_until > now()
+          AND NOT EXISTS (SELECT 1 FROM byo)
        RETURNING id),
       newdev AS (
        INSERT INTO aa_admin_devices
