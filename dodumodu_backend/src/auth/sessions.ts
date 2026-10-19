@@ -29,6 +29,10 @@ export interface FinishedSession {
 export interface FinishArgs {
   flowToken: string; ip: string; ua: string;
   prefix: string; country: string | null; tier: Tier;
+  /** Browser __Host-did presented at finish (hash matched server-side). Lets an
+   * email-path flow bind its existing active device when the one-time
+   * first-device claim window is already consumed (Appendix F4 exception). */
+  deviceToken?: string | null;
 }
 
 /** POST /auth/session for staff (role <> 'admin'). Flow must be ready.
