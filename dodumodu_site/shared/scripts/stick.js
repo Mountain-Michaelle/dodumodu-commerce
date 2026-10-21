@@ -9,19 +9,20 @@
   if(p<0||p>400)p=50;
   var S=+b.getAttribute('data-stick-show')||100;
   if(S<0||S>400)S=100;
-  var a=document.getElementById('benefits'),past=false,on=false,shown=null,q=false,scrolled=false;
+  var a=document.getElementById('benefits'),shown=false,q=false;
   function read(){
-    q=false;var r;
-    past=a?a.getBoundingClientRect().top<innerHeight+S:false;
-    if(H){r=H.getBoundingClientRect();on=r.top<innerHeight-p&&r.bottom>0;}else on=false;
-    var n=past&&!on&&scrolled;
+    q=false;var r,near,hidden;
+    // .is-on only while within S px of reaching #benefits (scrolling down), and cleared
+    // again when scrolling back up past the same S-px threshold - same spot both ways.
+    near=a?a.getBoundingClientRect().top<S:false;
+    hidden=false;
+    if(H){r=H.getBoundingClientRect();hidden=r.top<innerHeight-p&&r.bottom>0;}
+    var n=near&&!hidden;
     if(n)document.documentElement.style.setProperty('--stick-h',b.offsetHeight+'px');
     if(n!==shown){shown=n;b.classList.toggle('is-on',n);document.body.classList.toggle('stick-on',n);}
   }
   function t(){if(!q){q=true;(requestAnimationFrame||setTimeout)(read);}}
-  // Scroll event: add .is-on only after user scrolls past benefits section
   function onScroll(){
-    scrolled=true;
     if(q)return;
     q=true;
     read();
