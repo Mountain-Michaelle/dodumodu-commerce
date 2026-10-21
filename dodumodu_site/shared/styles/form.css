@@ -179,7 +179,7 @@
 }
 
 .submit-button:active:not(:disabled) { transform: scale(0.99); }
-.submit-button:focus-visible { outline: 3px solid rgba(207, 127, 0, 0.4); outline-offset: 2px; }
+.submit-button:focus-visible { outline: 3px solid rgba(207, 127, 0, 0.4); }
 
 .submit-button:disabled {
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));

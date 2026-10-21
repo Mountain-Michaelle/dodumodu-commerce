@@ -45,7 +45,9 @@ function computeUnitPrice(product, packageOptions, packageId) {
 }
 
 export function initProductPage({ slug, productId }) {
+  try{
   const form = document.getElementById("order-form");
+  if (!form) return;
   // Hand-off flag read by the product page's inline progressive-enhancement
   // script: once the bundled app owns the form, that fallback stays quiet.
   form.dataset.enhanced = "true";
@@ -130,11 +132,6 @@ export function initProductPage({ slug, productId }) {
       restoreDraft();
       refreshPaymentOptions();
     } catch (err) {
-      console.error("Failed to load page data", err);
-      // The page ships a preview price build from its own JSON-LD so the form
-      // is usable before the API answers. Once the bundle owns the form that
-      // figure can't be checked against the real discount tiers, so clear it
-      // instead of showing a price the server may disagree with.
       if (quantityPriceEl) quantityPriceEl.innerHTML = "";
     }
   };
@@ -231,7 +228,7 @@ export function initProductPage({ slug, productId }) {
   form.addEventListener("input", (event) => {
     if (event.target?.name === "turnstileToken") return;
     clearTimeout(draftTimer);
-    draftTimer = setTimeout(() => saveDraft(form, slug), DRAFT_SAVE_MS);
+    draftTimer = setTimeout(() => saveDraft(form, slug), 800);
   });
 
   function restoreDraft() {
@@ -243,7 +240,7 @@ export function initProductPage({ slug, productId }) {
     if (deliverySelect.value && !offeredDeliveryChoices().some((o) => o.value === deliverySelect.value)) {
       deliverySelect.value = "";
     }
-    statusEl.textContent = "We kept the details you entered last time.";
+    statusEl.textContent = "Draft restored.";
     form.addEventListener("input", () => { statusEl.textContent = ""; }, { once: true });
   }
 
@@ -330,7 +327,7 @@ export function initProductPage({ slug, productId }) {
     } catch (err) {
       submitButton.disabled = false;
       submitButton.dataset.loading = "false";
-      statusEl.textContent = "Our security check didn't load. Please tap Place order again.";
+      statusEl.textContent = "Security check failed. Tap Place order again.";
       return;
     }
 
@@ -388,13 +385,13 @@ export function initProductPage({ slug, productId }) {
               if (message) setFieldError(field, message);
             }
           }
-          ui.statusEl.textContent = err.message || "Something went wrong. Please check your details.";
+          ui.statusEl.textContent = err.message || "Something went wrong.";
           ui.submitButton.disabled = false;
           ui.submitButton.dataset.loading = "false";
           return;
         }
         if (attempt < 2) {
-          ui.statusEl.textContent = "Still trying, don't close this page...";
+          ui.statusEl.textContent = "Still trying...";
           await new Promise((resolve) => setTimeout(resolve, [800, 1600, 3200][attempt]));
         }
       }
@@ -405,6 +402,7 @@ export function initProductPage({ slug, productId }) {
     ui.submitButton.disabled = false;
     ui.submitButton.dataset.loading = "false";
   }
+} catch (e) {}
 }
 
 // Images live in object storage; IMAGE_DELIVERY_BASE (injected at build time)

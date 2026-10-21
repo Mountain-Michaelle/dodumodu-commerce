@@ -73,7 +73,7 @@ export function renderCarousel(container, images, options = {}) {
     dot.setAttribute("aria-label", `Go to photo ${i + 1}`);
     dot.dataset.active = i === 0 ? "true" : "false";
     dot.addEventListener("click", () => {
-      slide.scrollIntoView({ behavior: "smooth", inline: "start" });
+      slide.scrollIntoView();
     });
     dotsWrap.append(dot);
     return slide;

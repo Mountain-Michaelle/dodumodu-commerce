@@ -29,10 +29,10 @@ body.stick-on .page{padding-top:var(--stick-h,70px)}
 
 /* ---- order buttons. Solid brand green, white text = AA contrast (the form's gradient button is 3.1:1 at its orange end).
    Separate class from .submit-button, so the form's scripts never touch these. */
-.cta-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;padding:14px 18px;border-radius:var(--radius-md);background:var(--color-primary-dark);color:#fff;font-size:1rem;font-weight:700;letter-spacing:.02em;text-align:center;text-decoration:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation;box-shadow:0 6px 16px rgba(8,77,2,.22)}
+.cta-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;padding:14px 18px;border-radius:var(--radius-md);background:var(--color-primary-dark);color:#fff;font-size:1rem;font-weight:700;text-align:center;text-decoration:none;touch-action:manipulation;box-shadow:0 6px 16px rgba(8,77,2,.22)}
 .cta-btn:hover{background:#0a5f03;text-decoration:none}
 .cta-btn:active{transform:translateY(1px)}
-.cta-btn:focus-visible{outline:3px solid rgba(207,127,0,.5);outline-offset:3px}
+.cta-btn:focus-visible{outline:3px solid rgba(207,127,0,.5)}
 .cta-summary{margin:var(--space-3) 0 var(--space-4)}
 .cta-band{text-align:center}
 .cta-band h2{margin:0 0 var(--space-2)}
