@@ -1,0 +1,19 @@
+﻿===== DIST SCRIPT #1 (attrs=type="application/ld+json") =====
+
+{
+"@context": "https://schema.org",
+"@graph": [
+{
+"@type": "Product",
+"@id": "http://localhost:8787/products/glow-serum/#product",
+"name": "Radiance Glow Serum",
+"image": [
+"https://picsum.photos/seed/glow-serum-hero/640/640"
+],
+"description": "A lightweight vitamin C and niacinamide ser
+===== DIST SCRIPT #2 (attrs=) =====
+window.API_BASE="",window.IMAGE_DELIVERY_BASE="/media";
+===== DIST SCRIPT #3 (attrs=) =====
+(function(){var i=document.getElementById("order-form");if(!i)return;var d=function(){return i.dataset.enhanced==="true"},o=document.getElementById("quantity-stepper"),g=function(){return o&&o.dataset.enhanced==="true"};if(o){var l=o.querySelector('input[name="quantity"]'),L=o.querySelector('.quanti
+===== DIST SCRIPT #4 (attrs=) =====
+function onTurnstileToken(e){var n=document.querySelector('input[name="turnstileToken"]');n&&(n.value=e),window.__turnstileTokenReceived&&window.__turnstileTokenReceived(e)}

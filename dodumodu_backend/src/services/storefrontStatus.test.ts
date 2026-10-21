@@ -51,7 +51,7 @@ test("verification reads the version the public page is actually serving", async
       const result = await verifyStorefront(env("https://shop.example"), "glow-serum");
       assert.equal(result.liveVersion, "pub_42");
       assert.equal(result.reason, null);
-      assert.equal(result.url, "https://shop.example/products/glow-serum/");
+      assert.equal(result.url, "https://shop.example/glow-serum/");
     },
   );
 });

@@ -1,0 +1,49 @@
+/* sticky.css - styles only. All conditional logic is in stick.js (it just toggles .is-on).
+   Put this file in shared/styles/ so the critical-CSS bundler inlines it with the rest.
+
+   The site header IS the sticky bar: one header in the markup, no clone. By default it
+   sits in normal flow at the top of the page (NOT sticky). When stick.js adds .is-on it
+   pins to the top with position:FIXED — sticky is not an option here because
+   html/body/.page all set overflow-x:hidden, which turns body into a scroll container
+   and kills position:sticky for its children (the reason the original bar was fixed too).
+   While pinned, body.stick-on gives .page a top padding equal to the measured header
+   height (--stick-h, set by stick.js), so nothing below moves: CLS stays 0.
+   Pinned, the header spans the full width and re-centres its content on the page's
+   metrics (960 frame, 24px gutters) — the same view the old bar produced. */
+.site-header{width:100%;max-width:960px;margin:0 auto;padding:10px 24px;background:var(--color-bg)}
+.site-header.is-on{position:fixed;top:0;left:0;right:0;max-width:none;margin:0;z-index:50;padding:10px max(24px,calc((100% - 960px)/2 + 24px));box-shadow:0 4px 18px rgba(43,35,32,.10);animation:stick-drop .25s ease}
+@keyframes stick-drop{from{transform:translateY(-105%)}to{transform:none}}
+/* while the header is out of flow, .page reserves its height so nothing below moves */
+body.stick-on .page{padding-top:var(--stick-h,70px)}
+/* slightly smaller logo while pinned, as the old bar had */
+.site-header.is-on .site-logo .dm{width:clamp(112px,34vw,150px)}
+@media (max-width:640px){.site-header{padding:10px 4%}.site-header.is-on{padding:10px 4%}}
+@media (min-width:768px){.site-header.is-on .site-logo .dm{width:160px}}
+@media (prefers-reduced-motion:reduce){.site-header.is-on{animation:none}html{scroll-behavior:auto}}
+
+/* anchors (header button, sticky button, order buttons, footer link) land clear of the bar */
+#order-section,#order-form{scroll-margin-top:64px}
+
+/* sized sentinel: 0x0 targets are unreliable for IO. No margin so no shift. */
+.stick-sentinel{display:block;width:100%;height:2px;margin:0;padding:0}
+
+/* ---- order buttons. Solid brand green, white text = AA contrast (the form's gradient button is 3.1:1 at its orange end).
+   Separate class from .submit-button, so the form's scripts never touch these. */
+.cta-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;padding:14px 18px;border-radius:var(--radius-md);background:var(--color-primary-dark);color:#fff;font-size:1rem;font-weight:700;letter-spacing:.02em;text-align:center;text-decoration:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation;box-shadow:0 6px 16px rgba(8,77,2,.22)}
+.cta-btn:hover{background:#0a5f03;text-decoration:none}
+.cta-btn:active{transform:translateY(1px)}
+.cta-btn:focus-visible{outline:3px solid rgba(207,127,0,.5);outline-offset:3px}
+.cta-summary{margin:var(--space-3) 0 var(--space-4)}
+.cta-band{text-align:center}
+.cta-band h2{margin:0 0 var(--space-2)}
+.cta-line{margin:0 0 var(--space-4);color:var(--color-text-muted);font-size:.92rem}
+.cta-note{margin:var(--space-3) 0 0;font-size:.8rem;color:var(--color-text-muted)}
+.cta-stack{display:grid;gap:var(--space-3);max-width:420px;margin:0 auto}
+.submit-note{margin:0 0 var(--space-3);font-size:.82rem;color:var(--color-text-muted);text-align:center}
+@media (min-width:768px){.cta-summary{max-width:360px}}
+
+/* testimonials are filled in by the site bundle AFTER first paint. They now sit ABOVE the form, so without reserved
+   space the form would jump down when they arrive (Safari has no scroll anchoring). Sized to the two static testimonials at each width (measured: 192px desktop, 217px at 390 wide, 238px at 360 and below); grows if there are more. */
+#testimonials{min-height:200px}
+@media (max-width:767px){#testimonials{min-height:220px}}
+@media (max-width:380px){#testimonials{min-height:240px}}

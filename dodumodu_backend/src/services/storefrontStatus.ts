@@ -36,6 +36,8 @@ export function publishVersion(publishId: number): string {
 
 const META_TAG = /<meta\s+name=["']storefront-publish-id["']\s+content=["']([^"']+)["']\s*\/?>/i;
 const META_TAG_REVERSED = /<meta\s+content=["']([^"']+)["']\s+name=["']storefront-publish-id["']\s*\/?>/i;
+const BUILD_TAG = /<meta\s+name=["']storefront-build-id["']\s+content=["']([^"']*)["']\s*\/?>/i;
+const BUILD_TAG_REVERSED = /<meta\s+content=["']([^"']*)["']\s+name=["']storefront-build-id["']\s*\/?>/i;
 
 /**
  * Reads the publish version out of rendered HTML.
@@ -45,6 +47,18 @@ const META_TAG_REVERSED = /<meta\s+content=["']([^"']+)["']\s+name=["']storefron
  */
 export function readPublishVersion(html: string): string | null {
   return META_TAG.exec(html)?.[1] ?? META_TAG_REVERSED.exec(html)?.[1] ?? null;
+}
+
+/**
+ * Reads the build id out of rendered HTML.
+ *
+ * The verifier needs BOTH markers: the publish id says WHICH snapshot is
+ * served, the build id says WHICH build rendered it. A page can only count as
+ * verified for a build when both agree with that build's intent.
+ */
+export function readBuildId(html: string): string | null {
+  const found = BUILD_TAG.exec(html)?.[1] ?? BUILD_TAG_REVERSED.exec(html)?.[1];
+  return found ? found : null;
 }
 
 export type StorefrontVerification = {
@@ -67,7 +81,9 @@ const VERIFY_TIMEOUT_MS = 8_000;
  */
 export async function verifyStorefront(env: Env, slug: string): Promise<StorefrontVerification> {
   const base = (env.SITE_URL ?? "").trim().replace(/\/+$/, "");
-  const url = base ? `${base}/products/${slug}/` : "";
+  // Root-level slug route: /:slug serves the prerendered snapshot. The publish
+  // version marker is read from <meta name="storefront-publish-id"> in that page.
+  const url = base ? `${base}/${slug}/` : "";
 
   if (!base) {
     return { liveVersion: null, url: "", reason: "unconfigured" };

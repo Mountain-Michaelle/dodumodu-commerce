@@ -9,12 +9,11 @@ import { deliveryChoices } from "./deliveryOptions.js";
 import { saveDraft, loadDraft, applyDraft, clearDraft } from "./draftStore.js";
 import { armTurnstile, ensureToken, resetTurnstile } from "./turnstile.js";
 
+import "./stick.js";
+
 const IDEMPOTENCY_KEY_STORAGE = "skincare_order_idempotency_key";
-const MAX_RETRIES = 3;
-const RETRY_BACKOFF_MS = [800, 1600, 3200];
 // Draft writes are debounced: localStorage is synchronous and the customer
 // types one character at a time.
-const DRAFT_SAVE_MS = 400;
 
 // sessionStorage, not localStorage: must not survive the tab closing, and
 // must not get reused on a genuinely new visit days later. Not a plain JS
@@ -34,10 +33,6 @@ function getOrCreateIdempotencyKey() {
 
 function clearIdempotencyKey() {
   sessionStorage.removeItem(IDEMPOTENCY_KEY_STORAGE);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Mirrors orderService.ts's computeUnitPrice — a display convenience only,
@@ -116,7 +111,7 @@ export function initProductPage({ slug, productId }) {
   // plain <input type="number"> until this resolves. Fetch page data (one
   // request covers product/packages/discount tiers/images/testimonials) and
   // render everything that depends on it right after.
-  requestIdleCallbackShim(async () => {
+  const __r = async () => {
     try {
       const data = await getPageData(slug);
       pricing.product = data.product;
@@ -142,7 +137,8 @@ export function initProductPage({ slug, productId }) {
       // instead of showing a price the server may disagree with.
       if (quantityPriceEl) quantityPriceEl.innerHTML = "";
     }
-  });
+  };
+  if ("requestIdleCallback" in window) window.requestIdleCallback(__r); else setTimeout(__r, 1);
 
   packageSelect.addEventListener("change", () => {
     pricing.packageId = packageSelect.value;
@@ -357,7 +353,7 @@ export function initProductPage({ slug, productId }) {
   });
 
   async function submitWithRetry(payload, idempotencyKey, ui) {
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await createOrder(payload, idempotencyKey);
         clearIdempotencyKey();
@@ -397,9 +393,9 @@ export function initProductPage({ slug, productId }) {
           ui.submitButton.dataset.loading = "false";
           return;
         }
-        if (attempt < MAX_RETRIES - 1) {
+        if (attempt < 2) {
           ui.statusEl.textContent = "Still trying, don't close this page...";
-          await sleep(RETRY_BACKOFF_MS[attempt]);
+          await new Promise((resolve) => setTimeout(resolve, [800, 1600, 3200][attempt]));
         }
       }
     }
@@ -419,11 +415,6 @@ function mediaUrl(r2Key) {
   if (/^https?:\/\//i.test(r2Key)) return r2Key;
   const base = window.IMAGE_DELIVERY_BASE || "/media";
   return `${base}/${r2Key}`;
-}
-
-function requestIdleCallbackShim(fn) {
-  if ("requestIdleCallback" in window) window.requestIdleCallback(fn);
-  else setTimeout(fn, 1);
 }
 
 // Auto-run: product pages set data-slug/data-product-id on <body>. Bundled as

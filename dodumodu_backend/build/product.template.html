@@ -1,0 +1,226 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{PAGE_TITLE}}</title>
+<meta name="description" content="{{META_DESCRIPTION}}">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="storefront-publish-id" content="{{STOREFRONT_PUBLISH_ID}}">
+<meta name="storefront-build-id" content="{{STOREFRONT_BUILD_ID}}">
+<meta name="theme-color" content="#fff8f5">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-112 0 480 480'%3E%3Cpath fill='%23F7A21B' fill-rule='evenodd' d='M0 208H194a8 8 0 0 1 8 8V406a8 8 0 0 1-8 8H34a8 8 0 0 1-7.9-6.6L-7.9 217.4A8 8 0 0 1 0 208zM14 273.5h156a4.5 4.5 0 0 1 0 9H14a4.5 4.5 0 0 1 0-9zM30 337.5h140a4.5 4.5 0 0 1 0 9H30a4.5 4.5 0 0 1 0-9zM57.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM57.5 282.5h9v55h-9zM57.5 346.5h9V382a4.5 4.5 0 0 1-9 0zM113.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM113.5 282.5h9v55h-9zM113.5 346.5h9V382a4.5 4.5 0 0 1-9 0z'/%3E%3Cpath d='M218 382V30h22' fill='none' stroke='%23F7A21B' stroke-width='48' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath fill='%231F2A44' fill-rule='evenodd' d='M23 441a32 32 0 1 0 64 0a32 32 0 1 0-64 0M43 441a12 12 0 1 0 24 0a12 12 0 1 0-24 0zM123 441a32 32 0 1 0 64 0a32 32 0 1 0-64 0M143 441a12 12 0 1 0 24 0a12 12 0 1 0-24 0z'/%3E%3C/svg%3E">
+<link rel="canonical" href="{{CANONICAL_URL}}">
+<meta property="og:type" content="product">
+<meta property="og:site_name" content="DODUMODU Skincare">
+<meta property="og:title" content="{{OG_TITLE}}">
+<meta property="og:description" content="{{OG_DESCRIPTION}}">
+<meta property="og:url" content="{{OG_URL}}">
+<meta property="og:image" content="{{OG_IMAGE}}">
+<meta property="og:image:alt" content="{{OG_IMAGE_ALT}}">
+<meta property="product:price:amount" content="{{PRODUCT_PRICE_AMOUNT}}">
+<meta property="product:price:currency" content="NGN">
+<meta property="product:availability" content="in stock">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{TWITTER_TITLE}}">
+<meta name="twitter:description" content="{{TWITTER_DESCRIPTION}}">
+<meta name="twitter:image" content="{{TWITTER_IMAGE}}">
+<link rel="preconnect" href="https://picsum.photos">
+<link rel="dns-prefetch" href="https://picsum.photos">
+<link rel="preload" as="image"
+href="{{HERO_PRELOAD_SRC}}"
+imagesrcset="{{HERO_PRELOAD_SRCSET}}"
+imagesizes="(max-width: 480px) 92vw, 480px"
+fetchpriority="high" type="image/webp">
+{{CSP_META}}
+<style>{{CSS_INLINE}}</style>
+</head>
+<body data-slug="{{BODY_DATA_SLUG}}" data-product-id="{{BODY_DATA_PRODUCT_ID}}">
+{{JSON_LD}}
+{{SVG_SPRITE}}
+<a href="#order-form" class="skip-link">Skip to order form</a>
+<div class="page">
+<header class="site-header" role="banner">
+<a href="/" class="site-logo"><svg class="dm" viewBox="1 -16 2142 504" width="136" height="32" aria-hidden="true" focusable="false"><use href="#dm-logo"/></svg><span class="visually-hidden">DODUMODU</span></a>
+<nav class="site-nav" aria-label="Main Navigation">
+<a class="nav-cta" href="#order-form">Order Now &darr;</a>
+</nav>
+</header>
+<nav aria-label="Breadcrumb">
+<ol class="breadcrumbs" itemscope itemtype="https://schema.org/BreadcrumbList">
+<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+<a itemprop="item" href="/"><span itemprop="name">Home</span></a>
+<meta itemprop="position" content="1">
+</li>
+<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+<a itemprop="item" href="/#products"><span itemprop="name">Serums</span></a>
+<meta itemprop="position" content="2">
+</li>
+<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem" aria-current="page">
+<span itemprop="name">{{BREADCRUMB_NAME}}</span>
+<meta itemprop="position" content="3">
+</li>
+</ol>
+</nav>
+<main id="main-content">
+<div class="product-layout">
+<section class="hero" aria-label="Product Images">
+<div id="carousel">
+<picture>
+<source type="image/webp"
+srcset="{{HERO_SRCSET}}"
+sizes="(max-width: 480px) 92vw, 480px">
+<img class="hero-fallback"
+src="{{HERO_SRC}}"
+srcset="{{HERO_SRCSET}}"
+sizes="(max-width: 480px) 92vw, 480px"
+alt="{{HERO_ALT}}"
+width="640"
+height="640"
+fetchpriority="high"
+decoding="async">
+</picture>
+</div>
+</section>
+<section class="section product-summary section--summary" aria-labelledby="product-title">
+<div class="rating-badge" aria-label="Rated {{RATING_VALUE}} out of 5 stars from {{RATING_COUNT}} reviews">
+<span class="rating-stars" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+<strong>{{RATING_VALUE}}/5</strong> ({{RATING_COUNT}}+ verified reviews)
+</div>
+<h1 id="product-title">{{PRODUCT_NAME}}</h1>
+<div class="price-row">
+<span class="price">{{PRICE_DISPLAY}}</span>
+<span class="badge"><svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg> Free delivery in Lagos &amp; Ogun</span>
+</div>
+<p>{{SUMMARY_HTML}}</p>
+<div class="trust-row" role="list">
+<div class="trust-item" role="listitem"><svg class="icon" aria-hidden="true"><use href="#icon-shield"></use></svg> Dermatologist tested</div>
+<div class="trust-item" role="listitem"><svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg> Pay on delivery available</div>
+<div class="trust-item" role="listitem"><svg class="icon" aria-hidden="true"><use href="#icon-check"></use></svg> 10,000+ happy customers</div>
+</div>
+</section>
+<section class="section lazy-section" aria-labelledby="benefits-title">
+<h2 id="benefits-title">{{WHY_LOVE_TITLE}}</h2>
+<ul class="benefits-grid">
+{{BENEFITS_HTML}}
+</ul>
+</section>
+<section class="section lazy-section" aria-labelledby="how-to-use-title">
+<h2 id="how-to-use-title">{{HOW_TO_USE_TITLE}}</h2>
+<ol class="steps-list">
+{{HOW_TO_USE_HTML}}
+</ol>
+</section>
+<section class="section" id="order-section" aria-labelledby="order-title">
+<div class="order-head">
+<h2 id="order-title">{{CTA_TEXT}}</h2>
+<p>{{ORDER_INTRO}}</p>
+</div>
+<form id="order-form" class="order-form" novalidate aria-label="Checkout Form">
+<div class="field field--hidden" id="package-field" data-field="packageId">
+<label for="packageId">Package</label>
+<select id="packageId" name="packageId"></select>
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="quantity">
+<label for="quantity-input">Quantity</label>
+<div class="quantity-row">
+<div class="quantity-stepper" id="quantity-stepper">
+<button type="button" class="quantity-stepper-btn" data-action="decrement" aria-label="Decrease quantity">&minus;</button>
+<input id="quantity-input" name="quantity" type="number" min="1" max="{{MAX_ORDER_QUANTITY}}" value="1">
+<button type="button" class="quantity-stepper-btn" data-action="increment" aria-label="Increase quantity">&plus;</button>
+</div>
+</div>
+<div id="quantity-price"></div>
+</div>
+<div class="field" data-field="state">
+<label for="state">State</label>
+<select id="state" name="state">
+<option value="">Select your state</option>
+<option value="Lagos">Lagos</option>
+<option value="Ogun">Ogun</option>
+<option value="Enugu">Enugu</option>
+<option value="Abuja">Abuja</option>
+<option value="Other">Other</option>
+</select>
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="deliveryDate">
+<label for="delivery-date">Preferred delivery date</label>
+<input id="delivery-date" name="deliveryDate" type="date">
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="paymentMethod">
+<fieldset>
+<legend>Payment method</legend>
+<div class="radio-option">
+<input id="payment-cod" name="paymentMethod" type="radio" value="cod">
+<label for="payment-cod">Pay on delivery</label>
+</div>
+<div class="radio-option">
+<input id="payment-pay_now" name="paymentMethod" type="radio" value="pay_now">
+<label for="payment-pay_now">Pay now (card / transfer)</label>
+</div>
+</fieldset>
+<div id="cod-hint" class="hint"></div>
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="customerName">
+<label for="customer-name">Full name</label>
+<input id="customer-name" name="customerName" type="text">
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="phone">
+<label for="phone">Phone number</label>
+<input id="phone" name="phone" type="tel">
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="whatsapp">
+<label for="whatsapp">WhatsApp number</label>
+<input id="whatsapp" name="whatsapp" type="tel">
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="address">
+<label for="address">Delivery address</label>
+<textarea id="address" name="address" rows="3"></textarea>
+<div class="field-error"></div>
+</div>
+<div class="field field--hidden" data-field="turnstileToken">
+<input name="turnstileToken" type="hidden">
+</div>
+<div class="field field--hidden">
+<input name="idempotencyKey" type="hidden">
+</div>
+<div class="field field--actions">
+<button type="submit" class="submit-button">Place order</button>
+</div>
+<p class="form-status"></p>
+</form>
+<div id="retry-banner" class="retry-banner" data-visible="false">
+<p>We are still processing your order. Please do not refresh.</p>
+<button id="manual-retry-button" class="retry-button">Retry</button>
+</div>
+<div id="late-warning" class="late-warning" data-visible="false">
+<p><strong>Heads up:</strong> this order is taking longer than usual to confirm. Your package is still on its way — pay on delivery when it arrives.</p>
+</div>
+</section>
+{{FAQ_HTML}}
+</div>
+</main>
+<footer class="site-footer" role="contentinfo">
+<div class="footer-brand-row">
+<a href="/" class="footer-brand"><svg class="dm dm-foot" viewBox="1 -16 2142 504" width="120" height="28" aria-hidden="true" focusable="false"><use href="#dm-logo"/></svg><span class="visually-hidden">DODUMODU</span></a>
+</div>
+<ul class="footer-links">
+<li><a href="/">Home</a></li>
+<li><a href="#order-form">Order</a></li>
+<li><a href="tel:+2348000000000">Customer Support</a></li>
+</ul>
+<p>&copy; 2026 DODUMODU Skincare. All rights reserved. Pay on delivery in Lagos, Ogun, Enugu &amp; Abuja.</p>
+</footer>
+</div>
+<script>(function(){var i=document.getElementById("order-form");if(!i)return;var d=function(){return i.dataset.enhanced==="true"},o=document.getElementById("quantity-stepper"),g=function(){return o&&o.dataset.enhanced==="true"};if(o){var l=o.querySelector('input[name="quantity"]'),L=o.querySelector('.quantity-stepper-btn[data-action="decrement"]'),x=o.querySelector('.quantity-stepper-btn[data-action="increment"]'),v=function(){var e=parseInt(l.max,10)||20,t=parseInt(l.value,10);t=isNaN(t)?1:Math.min(e,Math.max(1,t)),l.value=t,L&&(L.disabled=t<=1),x&&(x.disabled=t>=e)};o.addEventListener("click",function(e){if(!g()){var t=e.target.closest&&e.target.closest(".quantity-stepper-btn");!t||t.disabled||(l.value=(parseInt(l.value,10)||1)+(t.dataset.action==="increment"?1:-1),v())}}),l.addEventListener("input",function(){g()||v(),p()}),l.addEventListener("blur",function(){g()||v(),p()}),v()}var _=["Lagos","Ogun","Enugu","Abuja"],b=5,E=document.getElementById("cod-hint"),m=i.elements.state,C=i.elements.quantity;function A(e){var t=String(e||"").trim().toLowerCase().replace(/[.,]/g," ").replace(/\\s+/g," ").trim();return a={abuja:"fct","abuja state":"fct","fct abuja":"fct","f c t":"fct","federal capital territory":"fct","lagos state":"lagos","ogun state":"ogun","enugu state":"enugu"}[t]||t}function B(e,t){var a=_.some(function(r){return A(r)===A(e)});return a?t>=b?{reason:"bulk",message:"Pay on delivery covers up to "+(b-1)+" items \u2014 choose \"Pay now\" for bulk orders."}:null:{reason:"state",message:"Pay on delivery isn\u2019t available in "+(e||"your area")+" yet \u2014 choose \"Pay now\" and we\u2019ll dispatch today."}}function p(){if(!(d()||!E)){var e=parseInt(C&&C.value,10)||1,t=m&&m.value,a=B(t,e),r=i.querySelector?i.querySelector('input[name="paymentMethod"][value="cod"]'):null,n=r&&r.closest?r.closest(".radio-option"):null;if(a){if(r&&r.checked){var u=i.querySelector('input[name="paymentMethod"][value="pay_now"]');u&&(u.checked=!0)}r&&(r.disabled=!0)}else{r&&(r.disabled=!1)}}var D=function(e){e.style.height="auto",e.style.height=Math.max(96,e.scrollHeight)+"px"};i.querySelectorAll("textarea").forEach(function(e){e.addEventListener("input",function(){D(e)}),e.value&&D(e)});var h={customerName:function(e){return e.trim().length<2?"Enter your full name.":""},phone:function(e){return/^[0-9+\\-\\s()]{7,16}$/.test(e.trim())?"":"Enter a valid phone number."},whatsapp:function(e){return/^[0-9+\\-\\s()]{7,16}$/.test(e.trim())?"":"Enter a valid WhatsApp number."},address:function(e){return e.trim().length<8?"Add street, area and a landmark.":""},quantity:function(e){return parseInt(e,10)>=1?"":"Quantity must be at least 1."},state:function(e){return e?"":"Select your state."},deliveryDate:function(e){return e?"":"Choose a delivery date."}},N=function(e,t){e.dataset.invalid=t?"true":"false";var a=e.querySelector(".field-error");a&&(a.textContent=t)};i.querySelectorAll(".field").forEach(function(e){var t=e.dataset.field,a=i.elements[t];if(!(!a||!h[t])){var r=function(){d()||N(e,h[t](a.value||""))};a.addEventListener("blur",r),a.addEventListener("input",function(){(e.dataset.invalid==="true"||a.value)&&r()})}}),i.addEventListener("submit",function(e){if(!d()){e.preventDefault();var t=null;i.querySelectorAll(".field").forEach(function(n){var u=n.dataset.field,c=i.elements[u];if(!(!c||!h[u])){var s=h[u](c.value||"");N(n,s),s&&!t&&(t=c)}});var a=i.querySelector(".form-status"),r=i.querySelector(".submit-button");if(t){a&&(a.textContent="Please correct the highlighted fields."),t.focus(),t.scrollIntoView({behavior:"smooth",block:"center"});return}r&&(r.dataset.loading="true",r.disabled=!0),a&&(a.textContent="Placing your order..."),setTimeout(function(){r&&(r.dataset.loading="false",r.disabled=!1),a&&(a.textContent="Preview mode: run `npm run build`, or connect the order API, to complete checkout."),900)}})})();</script>
+<script>function onTurnstileToken(e){var n=document.querySelector('input[name="turnstileToken"]');n&&(n.value=e),window.__turnstileTokenReceived&&window.__turnstileTokenReceived(e)}</script>
+<script src="/{{APP_JS_PATH}}" defer></script>
+</body>
+</html>

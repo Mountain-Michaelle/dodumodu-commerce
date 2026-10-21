@@ -114,3 +114,30 @@ app.route(ADMIN_BASE, adminAuthAdminRoute);
 // API and admin route above wins its own path first; anything else falls
 // through to mountStatic (local dev) or 404 (Worker).
 app.get("/", (c) => c.html(site.INDEX_HTML));
+
+// Root-level product pages: /:slug serves the prerendered snapshot captured at
+// build time. No database read happens here — every page is pre-rendered into
+// site.PRODUCTS by scripts/build-site.mjs and served from memory with ETag
+// revalidation. Registered last so all API, admin, auth, health and media
+// routes are matched first; anything not in PRODUCTS is a 404.
+//
+// Reserved routes (/health, /admin/*, /auth/*, /page-data/*, /published/*,
+// /create-order, etc.) are mounted above and therefore never reach this handler.
+app.get("/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  const products = (site as { PRODUCTS?: Record<string, { html: string; etag: string; publishId: number }> }).PRODUCTS ?? {};
+  const entry = products[slug ?? ""];
+  if (!entry) {
+    return c.body(null, 404);
+  }
+  // ETag revalidation: snapshot is immutable, so the ETag changes iff content
+  // changed. A matching If-None-Match means the client already has the page.
+  const inm = c.req.header("if-none-match");
+  if (inm === entry.etag) {
+    return c.body(null, 304);
+  }
+  return c.html(entry.html, 200, {
+    ETag: entry.etag,
+    "Cache-Control": "public, max-age=60, stale-while-revalidate=3600",
+  });
+});

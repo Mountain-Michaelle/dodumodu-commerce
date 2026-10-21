@@ -26,10 +26,10 @@
 .dm-foot{width:120px;opacity:.92}
 @media (min-width:768px){.site-logo .dm{width:184px}.dm-foot{width:132px}}
 
-/* "Order Now" as a real button. #a5533c on white is 5.4:1 contrast (the lighter primary is only 3.9:1 at this size) */
+/* "Order Now" as a real button. #084d02 on white is 9.4:1 contrast */
 .site-nav a{display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border-radius:999px;background:var(--color-primary-dark);color:#fff;font-size:.8rem;font-weight:700;letter-spacing:.02em;white-space:nowrap}
-.site-nav a:hover{background:#8f4733;text-decoration:none}
-.site-nav a:focus-visible{outline:3px solid rgba(194,105,79,.4);outline-offset:2px}
+.site-nav a:hover{background:#0a5f03;text-decoration:none}
+.site-nav a:focus-visible{outline:3px solid rgba(207,127,0,.4);outline-offset:2px}
 
 /* Below-the-fold sections are skipped by layout/paint until they approach the
    viewport (faster first render on phones). `auto` remembers the real height
