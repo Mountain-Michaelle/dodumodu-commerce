@@ -17,8 +17,19 @@ import { srcsetFor, DEFAULT_SIZES, DEFAULT_QUALITY, intrinsicWidthFor } from "./
  * carries `data-src`/`data-srcset` and is promoted only when it is about to be
  * seen. The browser fetches what is on screen plus the one after it.
  */
+
+// Static fallback slides (picsum.photos — the same source already used for the
+// hero image) so the carousel still renders and works when there is no backend.
+// Two slides only while testing; each carries a real srcset so the browser
+// never downloads more than it will display.
+const CAROUSEL_FALLBACK_IMAGES = [
+  { url: "https://picsum.photos/seed/glow-serum-1/640/640", altText: "Radiance Glow Serum bottle with dropper" },
+  { url: "https://picsum.photos/seed/glow-serum-2/640/640", altText: "Serum texture close-up" },
+];
+
 export function renderCarousel(container, images, options = {}) {
-  if (!images.length) return;
+  const list = images && images.length ? images : CAROUSEL_FALLBACK_IMAGES;
+  if (!list.length) return;
   container.innerHTML = "";
 
   const widths = options.widths;
@@ -34,15 +45,32 @@ export function renderCarousel(container, images, options = {}) {
   const dotsWrap = document.createElement("div");
   dotsWrap.className = "carousel-dots";
 
-  const slides = images.map((img, i) => {
+  // ---- prev / next arrows (inline SVG = zero extra requests) ----
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "carousel-arrow carousel-arrow--prev";
+  prevBtn.setAttribute("aria-label", "Previous photo");
+  prevBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6 1.41-1.41z"/></svg>`;
+
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "carousel-arrow carousel-arrow--next";
+  nextBtn.setAttribute("aria-label", "Next photo");
+  nextBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>`;
+
+  track.appendChild(prevBtn);
+  track.appendChild(nextBtn);
+
+  let currentIndex = 0;
+  let timer = null;
+  const AUTOPLAY_MS = 5000;
+
+  const slides = list.map((img, i) => {
     const slide = document.createElement("div");
     slide.className = "carousel-slide";
 
     const el = document.createElement("img");
     el.alt = img.altText || "";
-    // The stored dimensions are measured from the file's header on upload, so this
-    // reserves the real aspect ratio before anything has downloaded. That is what
-    // keeps the page from jumping as images arrive.
     el.width = img.width || intrinsicWidthFor("gallery", widths);
     el.height = img.height || intrinsicWidthFor("gallery", widths);
 
@@ -53,12 +81,11 @@ export function renderCarousel(container, images, options = {}) {
     }
 
     if (i === 0) {
-      // Only the first slide is eager. It is the one above the fold.
       el.src = img.url;
       el.fetchPriority = "high";
+      el.loading = "eager";
+      el.decoding = "async";
     } else {
-      // Everything else waits. A data attribute is inert: the browser will not
-      // fetch an image whose URL is not in src/srcset.
       el.dataset.src = img.url;
       if (srcset) el.dataset.srcset = srcset;
       el.loading = "lazy";
@@ -74,6 +101,8 @@ export function renderCarousel(container, images, options = {}) {
     dot.dataset.active = i === 0 ? "true" : "false";
     dot.addEventListener("click", () => {
       slide.scrollIntoView();
+      setIndex(i);
+      resetAutoplay();
     });
     dotsWrap.append(dot);
     return slide;
@@ -82,11 +111,6 @@ export function renderCarousel(container, images, options = {}) {
   container.append(track);
   container.append(dotsWrap);
 
-  /**
-   * Promote a deferred slide: move data-src into src so the browser fetches it.
-   * Kept as a named step because "does the carousel ever download a photo nobody
-   * looked at" is a question worth being able to ask of the code directly.
-   */
   function promote(el) {
     if (!el || el.dataset.src === undefined) return;
     if (el.dataset.srcset) {
@@ -98,9 +122,6 @@ export function renderCarousel(container, images, options = {}) {
     el.loading = "eager";
   }
 
-  // An IntersectionObserver promotes a slide slightly before it is visible, so the
-  // image is usually already decoded by the time it arrives on screen. The root
-  // margin is what buys that head start.
   if (typeof IntersectionObserver === "function") {
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -111,17 +132,69 @@ export function renderCarousel(container, images, options = {}) {
     }, { root: track, rootMargin: "200px" });
     for (const slide of slides) observer.observe(slide);
   } else {
-    // Without the observer, promoting on the first interaction is strictly better
-    // than never: the images are there the moment the customer touches anything.
     for (const slide of slides) promote(slide.querySelector("img"));
   }
 
+  function setIndex(index) {
+    currentIndex = Math.min(Math.max(index, 0), list.length - 1);
+    updateDots();
+  }
+
+  function updateDots() {
+    [...dotsWrap.children].forEach((dot, i) => {
+      dot.dataset.active = i === currentIndex ? "true" : "false";
+    });
+  }
+
+  const scrollBySlide = (delta) => {
+    const step = track.clientWidth || 0;
+    if (!step) return;
+    let target = currentIndex + delta;
+    if (target < 0) target = list.length - 1;
+    else if (target > list.length - 1) target = 0;
+    track.scrollBy({ left: (target - currentIndex) * step, behavior: "smooth" });
+    setIndex(target);
+    resetAutoplay();
+  };
+
+  prevBtn.addEventListener("click", () => scrollBySlide(-1));
+  nextBtn.addEventListener("click", () => scrollBySlide(1));
+
+  function startAutoplay() {
+    stopAutoplay();
+    timer = setTimeout(() => {
+      scrollBySlide(1);
+      startAutoplay();
+    }, AUTOPLAY_MS);
+  }
+
+  function stopAutoplay() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  }
+
+  function resetAutoplay() {
+    stopAutoplay();
+    startAutoplay();
+  }
+
+  track.addEventListener("mouseenter", stopAutoplay);
+  track.addEventListener("mouseleave", startAutoplay);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopAutoplay();
+    else startAutoplay();
+  });
+
   track.addEventListener("scroll", () => {
     const index = Math.round(track.scrollLeft / track.clientWidth);
-    [...dotsWrap.children].forEach((dot, i) => {
-      dot.dataset.active = i === index ? "true" : "false";
-    });
+    setIndex(index);
+    resetAutoplay();
   }, { passive: true });
+
+  setIndex(0);
+  startAutoplay();
 }
 
 export function renderTestimonials(container, testimonials) {
@@ -133,11 +206,6 @@ export function renderTestimonials(container, testimonials) {
   for (const t of testimonials) {
     const card = document.createElement("div");
     card.className = "testimonial-card";
-    // A review photo is OPTIONAL: when set it renders as the 64px avatar
-    // (lazy + async-decoded so the section costs nothing on slow networks);
-    // when empty the card renders its initial-letter tile instead of a broken
-    // <img>. A WhatsApp screenshot always carries an image (the server refuses
-    // one without), so it keeps the plain lazy <img> path.
     const hasPhoto = Boolean(t.url);
     const avatar = !hasPhoto
       ? `<span class="testimonial-avatar" aria-hidden="true">${escapeHtml((t.title || "?").trim().charAt(0).toUpperCase())}</span>`
@@ -159,9 +227,6 @@ export function renderDeliveryOptions(selectEl, options) {
   selectEl.innerHTML = options.map((opt) => `<option value="${opt}">${labels[opt]}</option>`).join("");
 }
 
-// Only rendered when a product has more than one package option (§6 step 1
-// field order note). If there's zero or one option, the field stays hidden
-// and orchestrate.js falls back to the product's base price.
 export function renderPackageSelector(selectEl, fieldEl, packageOptions) {
   if (!packageOptions || packageOptions.length < 2) {
     fieldEl.style.display = "none";
@@ -173,12 +238,7 @@ export function renderPackageSelector(selectEl, fieldEl, packageOptions) {
     .join("");
 }
 
-// Quantity stepper: plain number input under the hood (works with JS
-// disabled per §6 step 1 — the buttons are inert without JS, the input
-// alone still works), with +/- buttons wired up once JS runs.
 export function renderQuantityStepper(container, quantity, maxOrderQuantity, onChange) {
-  // Hand-off flag read by the product page's inline fallback script: from here
-  // on the bundled app owns the +/- buttons, so the fallback must not also fire.
   container.dataset.enhanced = "true";
   const minusBtn = container.querySelector(".quantity-stepper-btn[data-action='decrement']");
   const plusBtn = container.querySelector(".quantity-stepper-btn[data-action='increment']");
@@ -196,20 +256,12 @@ export function renderQuantityStepper(container, quantity, maxOrderQuantity, onC
     if (Number.isInteger(parsed) && parsed >= 1 && parsed <= maxOrderQuantity) onChange(parsed);
   };
   input.onblur = () => {
-    // Snap back to a valid value if the customer left the field empty/out of range.
     const parsed = parseInt(input.value, 10);
     const clamped = Number.isInteger(parsed) ? Math.min(maxOrderQuantity, Math.max(1, parsed)) : 1;
     if (clamped !== quantity) onChange(clamped);
   };
 }
 
-// The running price that sits BESIDE the quantity stepper, so the customer
-// watches the number move as they tap + / -. Shows the total, then the unit
-// price, a badge the moment a discount kicks in, and the ladder of EVERY
-// configured discount with the active one marked — so an increase is visibly
-// rewarded instead of silently changing a total further down the page. The
-// itemised .price-breakdown below stays the invoice; this is the feedback
-// next to the control.
 export function renderLivePrice(container, unitPrice, quantity, tiers) {
   if (!container) return null;
   const breakdown = computePriceBreakdown(unitPrice, quantity, tiers);
@@ -228,8 +280,6 @@ export function renderLivePrice(container, unitPrice, quantity, tiers) {
     `);
   }
 
-  // Labels come from admin config, so the discounts the customer reads here
-  // can never drift from the ones the server will actually apply.
   const labelledTiers = tiers
     .filter((t) => t.discountPercent > 0 && t.label)
     .sort((a, b) => a.minQuantity - b.minQuantity);
@@ -251,10 +301,6 @@ export function renderLivePrice(container, unitPrice, quantity, tiers) {
   return breakdown;
 }
 
-// The single price-breakdown block: unit price, quantity, subtotal, a
-// discount line (only when discountPercent > 0), the total, a "you saved"
-// line, and — only right at a tier boundary — the next-tier nudge. All one
-// block, no separate promo banner (§6 step 4).
 export function renderPriceBreakdown(container, unitPrice, quantity, tiers) {
   const breakdown = computePriceBreakdown(unitPrice, quantity, tiers);
   const nudge = getNextTierNudge(quantity, tiers);

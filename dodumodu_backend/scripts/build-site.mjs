@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { Pool } from 'pg'
 import { drizzle } from 'drizzle-orm/node-postgres'
+import { eq } from 'drizzle-orm'
 import * as schema from '../src/schema'
 import { renderProduct } from '../build/render-product.mjs'
 
@@ -51,7 +52,7 @@ const jsPath = jsMatch[1]
 const js = read(jsMatch[1])
 
 // 1c) strict CSP validation + hashes
-const bad = baseHtml.match(/\sstyle="|on[a-z]+="/)
+const bad = baseHtml.match(/\sstyle="|\son[a-z]+="/)
 if (bad) throw new Error(`index.html still has an inline style/handler attribute: ${bad[0]}`)
 const inline = (tag) =>
   [...baseHtml.matchAll(new RegExp(`<${tag}(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)</${tag}>`, 'g'))]
@@ -95,7 +96,7 @@ try {
       publishProductId: productPublishes.productId,
     })
     .from(productsTable)
-    .leftJoin(productPublishes, productPublishes.productId.equals(productsTable.id))
+    .leftJoin(productPublishes, eq(productPublishes.productId, productsTable.id))
 
   // Reduce to the newest publish per product (highest id wins)
   const latestByProduct = new Map()

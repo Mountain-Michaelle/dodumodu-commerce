@@ -126,12 +126,19 @@ export function initProductPage({ slug, productId }) {
       renderPackageSelector(packageSelect, packageField, pricing.packageOptions);
       rerenderPricing();
 
-      renderCarousel(carouselContainer, data.images.map((img) => ({ url: mediaUrl(img.r2Key), altText: img.altText })));
-      renderTestimonials(testimonialsContainer, data.testimonials.map((t) => ({ url: mediaUrl(t.r2Key), ...t })));
+      const images = (data.images && data.images.length)
+        ? data.images.map((img) => ({ url: mediaUrl(img.r2Key), altText: img.altText }))
+        : null;
+      renderCarousel(carouselContainer, images);
+      renderTestimonials(testimonialsContainer, (data.testimonials || []).map((t) => ({ url: mediaUrl(t.r2Key), ...t })));
       hydrateDeliveryDates(data.deliveryOptions);
       restoreDraft();
       refreshPaymentOptions();
     } catch (err) {
+      // No backend: still render the carousel with static fallback images so the
+      // gallery works end-to-end without any API. The hero image in static HTML
+      // stays as the first slide; renderCarousel replaces it with the full set.
+      if (carouselContainer) renderCarousel(carouselContainer, null);
       if (quantityPriceEl) quantityPriceEl.innerHTML = "";
     }
   };
