@@ -8,8 +8,8 @@
 //
 // No database read happens at request time: every product page is pre-rendered
 // at build time and served from memory.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { Pool } from 'pg'
@@ -19,6 +19,11 @@ import * as schema from '../src/schema'
 import { renderProduct } from '../build/render-product.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const backendRoot = resolve(__dirname, '..')
+const repoRoot = resolve(backendRoot, '..')
+const rootEnvPath = join(repoRoot, '.env')
+if (existsSync(rootEnvPath)) process.loadEnvFile(rootEnvPath)
+
 const IN = process.env.WEB_DIR ?? join(__dirname, '..', '..', 'dodumodu_site', 'dist')
 const OUT = process.env.OUT ?? join(__dirname, '..', 'src', 'generated', 'site.ts')
 const read = (f) => readFileSync(join(IN, f), 'utf8')
