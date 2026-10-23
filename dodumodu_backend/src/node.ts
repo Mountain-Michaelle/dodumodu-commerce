@@ -24,7 +24,7 @@ const envFileLoaded = loadRootEnv();
 
 const port = Number(process.env.PORT ?? 8787);
 const mediaRoot = resolve(backendRoot, process.env.MEDIA_DIR ?? ".media");
-const siteDist = join(backendRoot, "dodumodu_site", "dist");
+const siteDist = join(repoRoot, "dodumodu_site", "dist");
 
 // The one thing that cannot have a sensible default: a database URL is either
 // right or wrong, and guessing would fail later and further away.

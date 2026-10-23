@@ -123,12 +123,15 @@ app.get("/", (c) => c.html(site.INDEX_HTML));
 //
 // Reserved routes (/health, /admin/*, /auth/*, /page-data/*, /published/*,
 // /create-order, etc.) are mounted above and therefore never reach this handler.
-app.get("/:slug", async (c) => {
+app.get("/:slug", async (c, next) => {
   const slug = c.req.param("slug");
   const products = (site as { PRODUCTS?: Record<string, { html: string; etag: string; publishId: number }> }).PRODUCTS ?? {};
   const entry = products[slug ?? ""];
   if (!entry) {
-    return c.body(null, 404);
+    // Not a prerendered product page. Let the static-file middleware (mounted
+    // after the app routes in src/node.ts) serve any real file under siteDist
+    // (hashed JS/CSS, robots.txt, sitemap.xml, ...) before giving up with 404.
+    return await next();
   }
   // ETag revalidation: snapshot is immutable, so the ETag changes iff content
   // changed. A matching If-None-Match means the client already has the page.
