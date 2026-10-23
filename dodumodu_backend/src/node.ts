@@ -155,7 +155,8 @@ if (existsSync(siteDist)) {
     if (
       requested === "/health" ||
       requested.startsWith("/media/") ||
-      requested.startsWith("/admin") ||
+      requested === "/admin" ||
+      requested.startsWith("/admin/") ||
       requested.startsWith("/auth")
     ) {
       return await next();

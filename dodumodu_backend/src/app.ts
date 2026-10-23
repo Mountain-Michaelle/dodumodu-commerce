@@ -125,7 +125,12 @@ app.get("/", (c) => c.html(site.INDEX_HTML));
 // /create-order, etc.) are mounted above and therefore never reach this handler.
 app.get("/:slug", async (c, next) => {
   const slug = c.req.param("slug");
-  const products = (site as { PRODUCTS?: Record<string, { html: string; etag: string; publishId: number }> }).PRODUCTS ?? {};
+  // PRODUCTS is emitted by scripts/build-site.mjs as a JSON string (see the
+  // `lit` helper), so parse it here rather than casting the module type.
+  const products = JSON.parse(site.PRODUCTS ?? "{}") as Record<
+    string,
+    { html: string; etag: string; publishId: number }
+  >;
   const entry = products[slug ?? ""];
   if (!entry) {
     // Not a prerendered product page. Let the static-file middleware (mounted
