@@ -21,7 +21,7 @@ import type { Env } from "../env";
    SEPARATION of their outcomes, not the SQL. What is asserted is what ended up
    recorded in product_publishes, because that is the durable artefact. */
 
-const env = (hook: string) => ({ MAX_ORDER_QUANTITY: "20", PAGES_DEPLOY_HOOK: hook } as unknown as Env);
+const env = (token: string) => ({ MAX_ORDER_QUANTITY: "20", GITHUB_DEPLOY_TOKEN: token } as unknown as Env);
 
 const PRODUCT = {
   id: 1, slug: "glow-serum", name: "Radiance Glow Serum", description: "A bright serum.",
@@ -164,7 +164,7 @@ test("with no hook configured the publish succeeds and the status stays pending"
     const result = await publishService.publish(db, env(""), "glow-serum", "owner@test");
     assert.ok(result.record, "a local publish still publishes");
     assert.equal(result.deployment.status, "pending");
-    assert.equal(result.deployment.retryable, false, "there is nothing to retry when nothing was configured");
+    assert.equal(result.deployment.retryable, true, "retryable after the token is configured");
     assert.equal(ctx.rows[0].buildStatus, "pending", "an absent hook must never be recorded as a failure");
   });
 });

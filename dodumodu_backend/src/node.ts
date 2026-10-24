@@ -74,6 +74,11 @@ const env: Env = {
   // custom domain - never a Worker route.
   IMAGE_DELIVERY_BASE: process.env.IMAGE_DELIVERY_BASE ?? "/media",
   PAGES_DEPLOY_HOOK: process.env.PAGES_DEPLOY_HOOK ?? "",
+  // Public origin of the deployed Worker; CI reaches build-status endpoints here.
+  WORKER_URL: process.env.WORKER_URL ?? "",
+  // Build-deploy secrets. Empty locally; publish degrades gracefully until set.
+  DEPLOY_TRIGGER_SECRET: process.env.DEPLOY_TRIGGER_SECRET ?? "",
+  GITHUB_DEPLOY_TOKEN: process.env.GITHUB_DEPLOY_TOKEN ?? "",
   // The PUBLIC storefront origin. Empty locally, which makes verification report
   // "unconfigured" and the state fall back to what was actually requested - rather
   // than checking a URL that does not exist and reporting a confident answer.
