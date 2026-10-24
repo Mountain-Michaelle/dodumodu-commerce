@@ -17,6 +17,7 @@ import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
 import * as site from "./generated/site";
+import { robotsTxt, sitemapXml, THANK_YOU_HTML } from "./staticAssets";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -122,7 +123,62 @@ app.get("/", (c) => c.html(site.INDEX_HTML));
 // routes are matched first; anything not in PRODUCTS is a 404.
 //
 // Reserved routes (/health, /admin/*, /auth/*, /page-data/*, /published/*,
-// /create-order, etc.) are mounted above and therefore never reach this handler.
+// /create-order, etc.) are mounted above and therefore never reach these
+// handlers or the /:slug catch-all below.
+
+// Customer JavaScript bundle — content-hashed, immutable cache.
+app.get(site.APP_JS_PATH, (c) => {
+  const immutable = /\.[a-f0-9]{8}\.min\.js$/.test(site.APP_JS_PATH);
+  return c.body(site.APP_JS, 200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    ...(immutable ? { "Cache-Control": "public, max-age=31536000, immutable" } : { "Cache-Control": "no-cache" }),
+  });
+});
+
+// Order confirmation page — served by the Worker in production (no Pages).
+app.get("/thank-you.html", (c) => c.html(THANK_YOU_HTML, 200, { "Cache-Control": "no-cache" }));
+
+// robots.txt — cacheable, sitemap URL filled from SITE_URL.
+app.get("/robots.txt", (c) => c.text(robotsTxt(c.env.SITE_URL), 200, {
+  "Content-Type": "text/plain; charset=utf-8",
+  "Cache-Control": "public, max-age=3600",
+}));
+
+// sitemap.xml — lists flagship and every published product route.
+app.get("/sitemap.xml", (c) => {
+  const products = JSON.parse(site.PRODUCTS ?? "{}") as Record<string, unknown>;
+  return c.text(sitemapXml(c.env.SITE_URL, products), 200, {
+    "Content-Type": "application/xml; charset=utf-8",
+    "Cache-Control": "public, max-age=3600",
+  });
+});
+
+// Public media from R2 — safe key derivation, 404 on traversal/missing objects.
+function mediaKeyFromPath(pathname: string): string | null {
+  if (!pathname.startsWith("/media/")) return null;
+  let key = pathname.slice("/media/".length);
+  try {
+    key = decodeURIComponent(key);
+  } catch {
+    return null;
+  }
+  if (!key || key.includes("\0") || key.includes("\\") || key.startsWith("/") || /^[a-zA-Z]:/.test(key)) return null;
+  if (key.includes("..")) return null;
+  return key;
+}
+
+app.get("/media/*", async (c) => {
+  const key = mediaKeyFromPath(c.req.path);
+  if (!key) return c.text("Not found", 404);
+  const object = await c.env.MEDIA_BUCKET.get(key);
+  if (!object) return c.text("Not found", 404);
+  const headers: Record<string, string> = {};
+  if (object.httpMetadata?.contentType) headers["Content-Type"] = object.httpMetadata.contentType;
+  if (object.httpMetadata?.cacheControl) headers["Cache-Control"] = object.httpMetadata.cacheControl;
+  else headers["Cache-Control"] = "no-cache";
+  return c.body(object.body, 200, headers);
+});
+
 app.get("/:slug", async (c, next) => {
   const slug = c.req.param("slug");
   // PRODUCTS is emitted by scripts/build-site.mjs as a JSON string (see the
