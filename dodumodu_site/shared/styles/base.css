@@ -35,5 +35,4 @@ button { font-family: inherit; }
   height: 20px;
   stroke: currentColor;
   fill: none;
-  flex-shrink: 0;
 }

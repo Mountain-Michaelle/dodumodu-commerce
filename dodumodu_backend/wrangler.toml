@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 R2_BUCKET_NAME = "skincare-media"
-ENVIRONMENT = "sandbox" # 'sandbox' | 'production'
+ENVIRONMENT = "production" # 'sandbox' | 'production' — set to production for the live Worker
 RATE_LIMIT_API_PER_MINUTE = "20"
 ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "false"
@@ -14,10 +14,12 @@ ANALYTICS_WARMUP_ENABLED = "false"
 # Independently revertible without a code change.
 ASSIGNMENT_MODE_ENABLED = "false"
 
-# Admin Auth v2. "0" (default) keeps /auth/* and /admin-v2/* at 404.
-# Flip to "1" to enable email OTP + TOTP admin login (requires OTP_KEY,
-# THROTTLE_KEY, TOTP_ENC_KEY secrets set via `wrangler secret put`).
-ADMIN_AUTH_V2 = "0"
+# Admin Auth v2. "1" enables email OTP + TOTP admin login and serves the
+# admin UI from the Worker (/admin/sign-in/, /admin/, /admin/assets/*).
+# Flip to "0" to keep /auth/* and /admin-v2/* at 404 and rely on Cloudflare
+# Access in front of /admin/* (legacy behaviour). Requires OTP_KEY,
+# THROTTLE_KEY, TOTP_ENC_KEY secrets when "1".
+ADMIN_AUTH_V2 = "1"
 
 # ---- image pipeline ----
 # Every one of these has the same default in src/config/imageConfig.ts, so a missing
@@ -62,7 +64,7 @@ MAX_ORDER_QUANTITY = "20"
 # Comma-separated CORS allowlist (see isOriginAllowed in src/app.ts). Never '*'.
 # Production: your domain plus the Pages domain, e.g.
 #   "https://yourdomain.com,https://yourproject.pages.dev"
-ALLOWED_ORIGINS = "https://yoursite.com"
+ALLOWED_ORIGINS = "https://yoursite.com"  # REPLACE-with-your-production-domain
 # OPay API root. Sandbox locally, then production for the live merchant:
 #   sandbox:     https://sandboxapi.opaycheckout.com
 #   production:  https://api.opaycheckout.com
@@ -85,3 +87,9 @@ id = "25410516df5e4b01a3b7799889960037"
 #   TURNSTILE_SECRET_KEY
 #   RECONCILE_CRON_SECRET   (cron-job.org sends to reconcile and monthly KPI close routes)
 #   ANALYTICS_IP_HMAC_SECRET (dedicated key for visitor IP HMACs)
+#   OTP_KEY                 (admin-auth v2: 32-byte base64 OTP signing key)
+#   THROTTLE_KEY            (admin-auth v2: 32-byte base64 throttle HMAC key)
+#   TOTP_ENC_KEY            (admin-auth v2: 32-byte base64 TOTP secret encryption key)
+#   RESEND_API_KEY          (admin-auth v2: login-code email delivery)
+#   AUTH_FROM_EMAIL         (admin-auth v2: verified Resend sender domain)
+#   TURNSTILE_SECRET        (admin-auth v2: Turnstile secret for login widget)

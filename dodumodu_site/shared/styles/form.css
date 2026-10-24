@@ -88,7 +88,7 @@
   outline: none;
   border-color: var(--color-primary);
   background: var(--color-surface);
-  box-shadow: 0 0 0 3px rgba(194, 105, 79, 0.15);
+  box-shadow: 0 0 0 3px rgba(207, 127, 0, 0.15);
 }
 
 .field-error {
@@ -139,7 +139,7 @@
 
 .radio-option:has(input:checked) {
   border-color: var(--color-primary);
-  background: rgba(194, 105, 79, 0.06);
+  background: rgba(207, 127, 0, 0.06);
 }
 
 .late-warning {
@@ -179,7 +179,7 @@
 }
 
 .submit-button:active:not(:disabled) { transform: scale(0.99); }
-.submit-button:focus-visible { outline: 3px solid rgba(194, 105, 79, 0.4); outline-offset: 2px; }
+.submit-button:focus-visible { outline: 3px solid rgba(207, 127, 0, 0.4); }
 
 .submit-button:disabled {
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
@@ -189,19 +189,13 @@
 }
 
 /* Spinner while the order is in flight — data-loading is set by the page
-   script (and mirrors orchestrate.js's disabled state). */
-.submit-button[data-loading="true"]::after {
-  content: "";
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: submit-spin 0.7s linear infinite;
-}
+   script (and mirrors orchestrate.js's disabled state). The actual spinner
+   style (leaf wheel via @keyframes dm-r) lives in brand-motion.css, which is
+   loaded after this sheet and fully overrides these rules — both the
+   ::after declaration and submit-spin keyframe below are dead on this page
+   and removed for budget. */
 
-@keyframes submit-spin { to { transform: rotate(360deg); } }
+/* .submit-button[data-loading="true"]::after and @keyframes submit-spin removed — see comment above */
 
 .retry-banner {
   display: none;

@@ -23,6 +23,7 @@ export const SITE_STYLES = [
   "product.css",
   "brand-motion.css",
   "brand.css",
+  "sticky.css",  
 ];
 
 // The admin console ships its own sheet and never the customer bundle's.

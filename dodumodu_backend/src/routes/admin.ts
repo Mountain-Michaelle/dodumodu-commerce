@@ -7,6 +7,7 @@ import { productsRepo } from "../data/productsRepo";
 import { testimonialsRepo } from "../data/testimonialsRepo";
 import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
+import { siteBuildsRepo } from "../data/siteBuildsRepo";
 import { publishService } from "../services/publishService";
 import {
   verifyStorefront, resolvePublishState, publishVersion,
@@ -466,4 +467,53 @@ adminRoute.get("/products/:id/publishes", async (c) => {
   const product = await productsRepo.findById(db, Number(c.req.param("id")));
   if (!product) return c.json({ error: "Product not found" }, 404);
   return c.json({ publishes: await publishesRepo.listForProduct(db, product.id) });
+});
+
+// Deploy-trigger endpoint: called by the verified deployment pipeline after
+// `wrangler deploy` completes. It records the build's intended publication set
+// so the publication-consistency safeguard can revalidate before anything is
+// marked LIVE. Never public, never unauthenticated: it runs behind the same
+// Cloudflare Access principal middleware as every other admin route, and the
+// build secret is never logged.
+const deployTriggerSchema = z.object({
+  buildId: z.string().min(1).max(120),
+  intendedPublications: z.array(
+    z.object({ slug: z.string().min(1).max(120), publishId: z.number().int().positive() }),
+  ).max(500),
+});
+
+adminRoute.post("/deploy-trigger", async (c) => {
+  const actor = c.get("principal").email;
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = deployTriggerSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Invalid request", fields: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const db = createDb(c.env.DATABASE_URL);
+  const record = await siteBuildsRepo.record(db, {
+    buildId: parsed.data.buildId,
+    intendedPublications: parsed.data.intendedPublications,
+    triggeredBy: actor,
+  });
+
+  // Never echo back the deploy secret or any other secret in logs or responses.
+  console.log(JSON.stringify({
+    event: "deploy_triggered",
+    buildId: record.buildId,
+    publicationCount: parsed.data.intendedPublications.length,
+    by: actor,
+  }));
+
+  return c.json({
+    buildId: record.buildId,
+    status: record.status,
+    intendedPublications: record.intendedPublications,
+    triggeredAt: record.triggeredAt,
+  }, 201);
 });

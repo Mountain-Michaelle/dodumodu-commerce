@@ -7,17 +7,12 @@
 // test/form-ux.check.mjs asserts the two still match.
 const STATE_ALIASES = {
   abuja: "fct",
-  "abuja state": "fct",
   "fct abuja": "fct",
   "f c t": "fct",
   "federal capital territory": "fct",
-  "lagos state": "lagos",
-  "ogun state": "ogun",
-  "enugu state": "enugu",
-  "rivers state": "rivers",
-  "kano state": "kano",
-  "oyo state": "oyo",
 };
+// "abuja state" dropped: normalizeState() strips " state" via /\s*state\b$/,
+// so it collapses to "abuja" and maps through the entry above.
 
 /** Same normalisation the backend applies: lowercase, punctuation dropped, aliases folded. */
 export function normalizeState(value) {
@@ -26,6 +21,7 @@ export function normalizeState(value) {
     .toLowerCase()
     .replace(/[.,]/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\s*state\b$/, "")
     .trim();
   return STATE_ALIASES[collapsed] ?? collapsed;
 }

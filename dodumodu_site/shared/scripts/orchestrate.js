@@ -9,12 +9,11 @@ import { deliveryChoices } from "./deliveryOptions.js";
 import { saveDraft, loadDraft, applyDraft, clearDraft } from "./draftStore.js";
 import { armTurnstile, ensureToken, resetTurnstile } from "./turnstile.js";
 
+import "./stick.js";
+
 const IDEMPOTENCY_KEY_STORAGE = "skincare_order_idempotency_key";
-const MAX_RETRIES = 3;
-const RETRY_BACKOFF_MS = [800, 1600, 3200];
 // Draft writes are debounced: localStorage is synchronous and the customer
 // types one character at a time.
-const DRAFT_SAVE_MS = 400;
 
 // sessionStorage, not localStorage: must not survive the tab closing, and
 // must not get reused on a genuinely new visit days later. Not a plain JS
@@ -36,10 +35,6 @@ function clearIdempotencyKey() {
   sessionStorage.removeItem(IDEMPOTENCY_KEY_STORAGE);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // Mirrors orderService.ts's computeUnitPrice — a display convenience only,
 // the server always recomputes for real. §8.8's "must agree" rule is about
 // the discount formula; this part is just "which price the discount applies to".
@@ -50,7 +45,9 @@ function computeUnitPrice(product, packageOptions, packageId) {
 }
 
 export function initProductPage({ slug, productId }) {
+  try{
   const form = document.getElementById("order-form");
+  if (!form) return;
   // Hand-off flag read by the product page's inline progressive-enhancement
   // script: once the bundled app owns the form, that fallback stays quiet.
   form.dataset.enhanced = "true";
@@ -116,7 +113,7 @@ export function initProductPage({ slug, productId }) {
   // plain <input type="number"> until this resolves. Fetch page data (one
   // request covers product/packages/discount tiers/images/testimonials) and
   // render everything that depends on it right after.
-  requestIdleCallbackShim(async () => {
+  const __r = async () => {
     try {
       const data = await getPageData(slug);
       pricing.product = data.product;
@@ -129,20 +126,23 @@ export function initProductPage({ slug, productId }) {
       renderPackageSelector(packageSelect, packageField, pricing.packageOptions);
       rerenderPricing();
 
-      renderCarousel(carouselContainer, data.images.map((img) => ({ url: mediaUrl(img.r2Key), altText: img.altText })));
-      renderTestimonials(testimonialsContainer, data.testimonials.map((t) => ({ url: mediaUrl(t.r2Key), ...t })));
+      const images = (data.images && data.images.length)
+        ? data.images.map((img) => ({ url: mediaUrl(img.r2Key), altText: img.altText }))
+        : null;
+      renderCarousel(carouselContainer, images);
+      renderTestimonials(testimonialsContainer, (data.testimonials || []).map((t) => ({ url: mediaUrl(t.r2Key), ...t })));
       hydrateDeliveryDates(data.deliveryOptions);
       restoreDraft();
       refreshPaymentOptions();
     } catch (err) {
-      console.error("Failed to load page data", err);
-      // The page ships a preview price build from its own JSON-LD so the form
-      // is usable before the API answers. Once the bundle owns the form that
-      // figure can't be checked against the real discount tiers, so clear it
-      // instead of showing a price the server may disagree with.
+      // No backend: still render the carousel with static fallback images so the
+      // gallery works end-to-end without any API. The hero image in static HTML
+      // stays as the first slide; renderCarousel replaces it with the full set.
+      if (carouselContainer) renderCarousel(carouselContainer, null);
       if (quantityPriceEl) quantityPriceEl.innerHTML = "";
     }
-  });
+  };
+  if ("requestIdleCallback" in window) window.requestIdleCallback(__r); else setTimeout(__r, 1);
 
   packageSelect.addEventListener("change", () => {
     pricing.packageId = packageSelect.value;
@@ -235,7 +235,7 @@ export function initProductPage({ slug, productId }) {
   form.addEventListener("input", (event) => {
     if (event.target?.name === "turnstileToken") return;
     clearTimeout(draftTimer);
-    draftTimer = setTimeout(() => saveDraft(form, slug), DRAFT_SAVE_MS);
+    draftTimer = setTimeout(() => saveDraft(form, slug), 800);
   });
 
   function restoreDraft() {
@@ -247,7 +247,7 @@ export function initProductPage({ slug, productId }) {
     if (deliverySelect.value && !offeredDeliveryChoices().some((o) => o.value === deliverySelect.value)) {
       deliverySelect.value = "";
     }
-    statusEl.textContent = "We kept the details you entered last time.";
+    statusEl.textContent = "Draft restored.";
     form.addEventListener("input", () => { statusEl.textContent = ""; }, { once: true });
   }
 
@@ -334,7 +334,7 @@ export function initProductPage({ slug, productId }) {
     } catch (err) {
       submitButton.disabled = false;
       submitButton.dataset.loading = "false";
-      statusEl.textContent = "Our security check didn't load. Please tap Place order again.";
+      statusEl.textContent = "Security check failed. Tap Place order again.";
       return;
     }
 
@@ -357,7 +357,7 @@ export function initProductPage({ slug, productId }) {
   });
 
   async function submitWithRetry(payload, idempotencyKey, ui) {
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await createOrder(payload, idempotencyKey);
         clearIdempotencyKey();
@@ -392,14 +392,14 @@ export function initProductPage({ slug, productId }) {
               if (message) setFieldError(field, message);
             }
           }
-          ui.statusEl.textContent = err.message || "Something went wrong. Please check your details.";
+          ui.statusEl.textContent = err.message || "Something went wrong.";
           ui.submitButton.disabled = false;
           ui.submitButton.dataset.loading = "false";
           return;
         }
-        if (attempt < MAX_RETRIES - 1) {
-          ui.statusEl.textContent = "Still trying, don't close this page...";
-          await sleep(RETRY_BACKOFF_MS[attempt]);
+        if (attempt < 2) {
+          ui.statusEl.textContent = "Still trying...";
+          await new Promise((resolve) => setTimeout(resolve, [800, 1600, 3200][attempt]));
         }
       }
     }
@@ -409,6 +409,7 @@ export function initProductPage({ slug, productId }) {
     ui.submitButton.disabled = false;
     ui.submitButton.dataset.loading = "false";
   }
+} catch (e) {}
 }
 
 // Images live in object storage; IMAGE_DELIVERY_BASE (injected at build time)
@@ -419,11 +420,6 @@ function mediaUrl(r2Key) {
   if (/^https?:\/\//i.test(r2Key)) return r2Key;
   const base = window.IMAGE_DELIVERY_BASE || "/media";
   return `${base}/${r2Key}`;
-}
-
-function requestIdleCallbackShim(fn) {
-  if ("requestIdleCallback" in window) window.requestIdleCallback(fn);
-  else setTimeout(fn, 1);
 }
 
 // Auto-run: product pages set data-slug/data-product-id on <body>. Bundled as

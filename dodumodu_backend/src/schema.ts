@@ -437,6 +437,24 @@ export const monthlyKpiSnapshots = pgTable("monthly_kpi_snapshots", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Storefront builds: one row per `npm run build:site && wrangler deploy` run.
+// Safeguard 1 (publication consistency): `intendedPublications` captures the
+// exact publication set the build was rendered from, so a stale build can be
+// detected and refused before it overwrites a newer release.
+// Safeguard 3 (verification failure): `status` only reaches "verified" after
+// the public markers are actually observed; a failed check leaves the build
+// "failed" with `verificationError`, never falsely "verified".
+export const siteBuilds = pgTable("site_builds", {
+  id: serial("id").primaryKey(),
+  buildId: text("build_id").notNull().unique(),
+  intendedPublications: jsonb("intended_publications").notNull().default([]),
+  status: text("status").notNull().default("triggered"),
+  triggeredBy: text("triggered_by").notNull().default(""),
+  triggeredAt: timestamp("triggered_at").notNull().defaultNow(),
+  verifiedAt: timestamp("verified_at"),
+  verificationError: text("verification_error"),
+});
+
 export const visitorAnalyticsMeta = pgTable("visitor_analytics_meta", {
   id: smallint("id").primaryKey(),
   startedOn: date("started_on", { mode: "string" }).notNull(),

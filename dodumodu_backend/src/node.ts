@@ -8,7 +8,7 @@
 // file exists — that is the point. Production runs src/index.ts instead, with
 // the real bindings, and needs no change here.
 import { serve } from "@hono/node-server";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { app } from "./app";
 import { registerDbDriver } from "./db";
@@ -16,8 +16,9 @@ import { closePools, pgDriver } from "./dbDrivers/pg";
 import type { Env } from "./env";
 import { backendRoot, loadRootEnv, repoRoot } from "./node/envFile";
 import { localBucket, memoryKV } from "./node/shims";
-import { mountMedia, mountStatic } from "./node/static";
+import { mountMedia } from "./node/static";
 import { mountAdminPages } from "./node/adminPages";
+import { resolveMediaPath, contentTypeFor } from "./node/mediaPath";
 
 const envFileLoaded = loadRootEnv();
 
@@ -139,8 +140,47 @@ registerDbDriver(pgDriver);
 mountAdminPages(app, backendRoot);
 
 mountMedia(app, mediaRoot);
+
+// --- Static-file middleware served BEFORE app routes -----------------------
+// app.ts registers `app.get("/:slug", ...)` which matches every single-segment
+// path (robots.txt, sitemap.xml, *.css, *.js). That route runs before
+// mountStatic's catch-all `*`, so static assets would 404. Serve them here
+// first so anything that resolves to a real file under siteDist is handled
+// before the app's own routes are consulted. If no static file matches,
+// `await next()` lets the request fall through to the app's routes.
 if (existsSync(siteDist)) {
-  mountStatic(app, siteDist);
+  app.use("*", async (c, next) => {
+    const requested = c.req.path;
+    // Paths owned by other mounts are never served as static files.
+    if (
+      requested === "/health" ||
+      requested.startsWith("/media/") ||
+      requested === "/admin" ||
+      requested.startsWith("/admin/") ||
+      requested.startsWith("/auth")
+    ) {
+      return await next();
+    }
+    const relative = requested.replace(/^\/+/, "");
+    const candidates = relative === "" || relative.endsWith("/")
+      ? [`${relative}index.html`]
+      : [relative, `${relative}/index.html`];
+    for (const candidate of candidates) {
+      const file = resolveMediaPath(siteDist, candidate);
+      if (!file) continue;
+      const buffer = readFileSync(file);
+      const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      const cacheControl = /\.[a-f0-9]{8}\.min\.(css|js)$/.test(requested)
+        ? "public, max-age=31536000, immutable"
+        : "no-cache";
+      return c.body(bytes, 200, {
+        "Content-Type": contentTypeFor(file),
+        "Cache-Control": cacheControl,
+        "X-Content-Type-Options": "nosniff",
+      });
+    }
+    await next();
+  });
 }
 
 // Locally there is no Cloudflare Access in front of /admin/*, so every admin

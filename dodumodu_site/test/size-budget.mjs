@@ -207,7 +207,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // (tokens/base/layout/form/pricing/carousel/testimonials/product/brand-motion/brand)
 // changes, then re-pin the CSS hash to the new output so the storefront CSS is
 // never silently dropped by an admin change.
-const EXPECTED_CUSTOMER = { js: "site.050e8ce3.min.js", css: "site.c1a08967.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.5e56fc15.min.js", css: "site.d9a793ed.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

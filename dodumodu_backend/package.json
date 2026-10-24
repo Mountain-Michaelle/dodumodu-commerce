@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:site": "node scripts/build-site.mjs",
+    "build:site": "tsx scripts/build-site.mjs && tsx scripts/build-admin-pages.mjs",
     "dev": "npm run build:site && tsx watch src/node.ts",
     "dev:worker": "wrangler dev",
     "deploy": "npm run build:site && wrangler deploy",

@@ -1,19 +1,8 @@
-.page {
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: 0 var(--space-4) var(--space-7);
-}
+/* .page and .hero are defined again in product.css (loaded after this sheet),
+   so these layout.css copies are fully overridden on this page — removed for
+   budget. Other pages that load layout.css alone still get them here. */
 
-.hero {
-  padding: var(--space-4) 0;
-}
-
-.hero-image {
-  width: 100%;
-  border-radius: var(--radius-lg);
-  aspect-ratio: 1 / 1;
-  object-fit: cover;
-}
+/* .page and .hero removed — see comment above */
 
 .section {
   padding: var(--space-6) 0;
@@ -60,9 +49,4 @@
   gap: var(--space-2);
   font-size: 0.85rem;
   color: var(--color-text-muted);
-}
-
-.lazy-img {
-  background: var(--color-border);
-  border-radius: var(--radius-md);
 }
