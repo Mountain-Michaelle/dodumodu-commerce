@@ -4,71 +4,59 @@ compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
+# =============================================================================
+# REQUIRED PRODUCTION VARIABLES — replace every FILL-IN placeholder below
+# =============================================================================
 R2_BUCKET_NAME = "skincare-media"
-ENVIRONMENT = "production" # 'sandbox' | 'production' — set to production for the live Worker
+ENVIRONMENT = "production"
 RATE_LIMIT_API_PER_MINUTE = "20"
 ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "false"
-# Assignment Mode (fulfilment routing). "true" reveals the Assignment Mode
-# toolbar switch, the "Assigned to" filter and the assign/unassign actions.
-# Independently revertible without a code change.
 ASSIGNMENT_MODE_ENABLED = "false"
-
-# Admin Auth v2. "1" enables email OTP + TOTP admin login and serves the
-# admin UI from the Worker (/admin/sign-in/, /admin/, /admin/assets/*).
-# Flip to "0" to keep /auth/* and /admin-v2/* at 404 and rely on Cloudflare
-# Access in front of /admin/* (legacy behaviour). Requires OTP_KEY,
-# THROTTLE_KEY, TOTP_ENC_KEY secrets when "1".
 ADMIN_AUTH_V2 = "1"
 
 # ---- image pipeline ----
-# Every one of these has the same default in src/config/imageConfig.ts, so a missing
-# value degrades to a working configuration rather than a broken deployment.
-#
-# IMAGE_MODE:
-#   "transform"  - customer URLs carry /cdn-cgi/image/<options>/ and Cloudflare
-#                  resizes + negotiates format at the edge. REQUIRES a custom domain
-#                  on a Cloudflare zone; it does not work on *.pages.dev.
-#   "derivative" - the admin's browser renders the widths and uploads them; the R2
-#                  custom domain serves them directly. Zero transformations.
-# Default is "derivative" because it is the only mode that works with no custom
-# domain, and it costs no transformation budget at all.
 IMAGE_MODE = "derivative"
-MAX_UPLOAD_BYTES = "10485760"   # 10MB
-MAX_IMAGE_DIMENSION = "12000"   # Cloudflare's transformation ceiling, per side
-IMAGE_KEY_PREFIX = "uploads"    # existing rows keep this shape; do not change
-# Three widths per slot. Never add a width no layout renders.
+MAX_UPLOAD_BYTES = "10485760"
+MAX_IMAGE_DIMENSION = "12000"
+IMAGE_KEY_PREFIX = "uploads"
 IMAGE_WIDTHS_HERO = "480,768,1200"
 IMAGE_WIDTHS_GALLERY = "320,640,960"
 IMAGE_WIDTHS_TESTIMONIAL = "320,640"
 IMAGE_WIDTHS_THUMBNAIL = "160,320"
-# Quality is a VISUAL decision, not a size decision. Tune by looking at a real
-# product at 100% on a real phone - label text is the tell.
 IMAGE_QUALITY_HERO = "80"
 IMAGE_QUALITY_GALLERY = "75"
 IMAGE_QUALITY_TESTIMONIAL = "70"
 IMAGE_QUALITY_THUMBNAIL = "70"
-CATALOG_EDGE_TTL = "300"        # s-maxage for public catalog JSON
-CATALOG_EDGE_SWR = "3600"       # stale-while-revalidate
+CATALOG_EDGE_TTL = "300"
+CATALOG_EDGE_SWR = "3600"
 
-# ---- REQUIRED before deploying images (see the deploy checklist) ----
-# R2 custom domain. NOT r2.dev (rate limited, not for production) and NOT a Worker
-# route - no Worker sits in the image path in either delivery mode.
-#   wrangler r2 bucket domain create skincare-media
-IMAGE_DELIVERY_BASE = "REPLACE-with-your-r2-custom-domain"
-# Cloudflare Pages deploy hook, fired by the admin's Publish action:
-#   Pages project -> Settings -> Builds & deployments -> Deploy hooks
-PAGES_DEPLOY_HOOK = ""          # set as a SECRET: wrangler secret put PAGES_DEPLOY_HOOK
+# ---- REQUIRED before deploying images ----
+IMAGE_DELIVERY_BASE = "FILL-IN-your-r2-custom-domain"
+PAGES_DEPLOY_HOOK = "FILL-IN-your-pages-deploy-hook"
 RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR = "5"
 MAX_ORDER_QUANTITY = "20"
-# Comma-separated CORS allowlist (see isOriginAllowed in src/app.ts). Never '*'.
-# Production: your domain plus the Pages domain, e.g.
-#   "https://yourdomain.com,https://yourproject.pages.dev"
-ALLOWED_ORIGINS = "https://yoursite.com"  # REPLACE-with-your-production-domain
-# OPay API root. Sandbox locally, then production for the live merchant:
-#   sandbox:     https://sandboxapi.opaycheckout.com
-#   production:  https://api.opaycheckout.com
+ALLOWED_ORIGINS = "FILL-IN-your-comma-separated-origins"
 OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"
+
+# =============================================================================
+# SECRETS — set each one with: wrangler secret put <NAME>
+# These are listed here explicitly so none are missed. Do NOT commit real values.
+# =============================================================================
+DATABASE_URL = "FILL-IN-via-wrangler-secret-put"
+OPAY_PUBLIC_KEY = "FILL-IN-via-wrangler-secret-put"
+OPAY_SECRET_KEY = "FILL-IN-via-wrangler-secret-put"
+OPAY_MERCHANT_ID = "FILL-IN-via-wrangler-secret-put"
+OPAY_WEBHOOK_SECRET = "FILL-IN-via-wrangler-secret-put"
+TURNSTILE_SECRET_KEY = "FILL-IN-via-wrangler-secret-put"
+RECONCILE_CRON_SECRET = "FILL-IN-via-wrangler-secret-put"
+ANALYTICS_IP_HMAC_SECRET = "FILL-IN-via-wrangler-secret-put"
+OTP_KEY = "FILL-IN-via-wrangler-secret-put"
+THROTTLE_KEY = "FILL-IN-via-wrangler-secret-put"
+TOTP_ENC_KEY = "FILL-IN-via-wrangler-secret-put"
+RESEND_API_KEY = "FILL-IN-via-wrangler-secret-put"
+AUTH_FROM_EMAIL = "FILL-IN-via-wrangler-secret-put"
+TURNSTILE_SECRET = "FILL-IN-via-wrangler-secret-put"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
@@ -77,19 +65,3 @@ bucket_name = "skincare-media"
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "25410516df5e4b01a3b7799889960037"
-
-# Secrets — set with `wrangler secret put <NAME>`, never committed:
-#   DATABASE_URL
-#   OPAY_PUBLIC_KEY
-#   OPAY_SECRET_KEY
-#   OPAY_MERCHANT_ID
-#   OPAY_WEBHOOK_SECRET
-#   TURNSTILE_SECRET_KEY
-#   RECONCILE_CRON_SECRET   (cron-job.org sends to reconcile and monthly KPI close routes)
-#   ANALYTICS_IP_HMAC_SECRET (dedicated key for visitor IP HMACs)
-#   OTP_KEY                 (admin-auth v2: 32-byte base64 OTP signing key)
-#   THROTTLE_KEY            (admin-auth v2: 32-byte base64 throttle HMAC key)
-#   TOTP_ENC_KEY            (admin-auth v2: 32-byte base64 TOTP secret encryption key)
-#   RESEND_API_KEY          (admin-auth v2: login-code email delivery)
-#   AUTH_FROM_EMAIL         (admin-auth v2: verified Resend sender domain)
-#   TURNSTILE_SECRET        (admin-auth v2: Turnstile secret for login widget)
