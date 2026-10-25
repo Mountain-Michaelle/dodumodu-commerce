@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { Pool } from 'pg'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { eq } from 'drizzle-orm'
@@ -31,9 +31,10 @@ const sha = (s, enc) => createHash('sha256').update(s).digest(enc)
 const etag = (s) => `"${sha(s, 'hex').slice(0, 16)}"`
 const lit = (k, v) => `export const ${k} = ${JSON.stringify(v)}\n`
 
-// A build id derived from the current time so each deploy is distinguishable.
+// A build id derived from the current time plus random bytes so each deploy
+// is distinguishable even when two builds start in the same millisecond.
 // Stored in site_builds and revalidated before deploy (safeguard 1).
-const BUILD_ID = `build_${Date.now()}`
+const BUILD_ID = `build_${Date.now()}_${randomBytes(4).toString('hex')}`
 
 // ---------------------------------------------------------------------------
 // 1) Read the base storefront page (glow-serum) for CSS + JS extraction.
@@ -125,6 +126,49 @@ try {
 } finally {
   await pool.end()
 }
+
+// ---------------------------------------------------------------------------
+// 2a) Record the build as triggered in site_builds before rendering.
+//    This must happen before any render/deploy step so that a failure
+//    can be associated with a build record. Uses the Worker's own
+//    authenticated /admin/deploy-trigger endpoint.
+// ---------------------------------------------------------------------------
+async function recordBuildTriggered(buildId, intendedPublications) {
+  const workerUrl = (process.env.WORKER_URL ?? "").replace(/\/+$/, "")
+  const secret = (process.env.DEPLOY_TRIGGER_SECRET ?? "").trim()
+  if (!workerUrl || !secret) {
+    console.log("build-site: WORKER_URL or DEPLOY_TRIGGER_SECRET not set — skipping build record (first deploy or local build)")
+    return
+  }
+  const body = JSON.stringify({ buildId, intendedPublications })
+  try {
+    const res = await fetch(`${workerUrl}/admin/deploy-trigger`, {
+      method: "POST",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      console.warn(`build-site: deploy-trigger returned HTTP ${res.status}: ${text}`)
+      return
+    }
+    const result = await res.json().catch(() => null)
+    console.log(`build-site: build recorded as triggered — buildId=${buildId} publications=${intendedPublications.length}`, result ?? "")
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    console.warn(`build-site: deploy-trigger call failed: ${reason}`)
+  }
+}
+
+const intendedPublications = products
+  .filter((p) => p.publishId != null)
+  .map((p) => ({ slug: p.slug, publishId: p.publishId }))
+
+await recordBuildTriggered(BUILD_ID, intendedPublications)
 
 // ---------------------------------------------------------------------------
 // 3) Render every product page from its snapshot.

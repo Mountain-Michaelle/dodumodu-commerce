@@ -14,6 +14,8 @@ import { Pool } from 'pg'
 
 const SITE_URL = (process.env.SITE_URL ?? '').replace(/\/+$/, '')
 const EXPECTED_BUILD_ID = (process.env.EXPECTED_BUILD_ID ?? '').trim()
+const WORKER_URL = (process.env.WORKER_URL ?? '').replace(/\/+$/, '')
+const DEPLOY_TRIGGER_SECRET = (process.env.DEPLOY_TRIGGER_SECRET ?? '').trim()
 let EXPECTED = {}
 try {
   EXPECTED = JSON.parse(process.env.EXPECTED ?? '{}')
@@ -49,6 +51,45 @@ async function fetchPage(slug) {
   })
   if (!res.ok) return { ok: false, status: res.status, html: null, url }
   return { ok: true, status: res.status, html: await res.text(), url }
+}
+
+// Bounded callback to the Worker's build-status endpoints. A callback failure
+// is logged and returned as false — it never overrides the verification result
+// that the caller is acting on.
+async function postLifecycle(endpoint, buildId, body = {}) {
+  if (!WORKER_URL || !DEPLOY_TRIGGER_SECRET || !buildId) {
+    console.log(`verify-deploy: skipping ${endpoint} callback — WORKER_URL, DEPLOY_TRIGGER_SECRET, or buildId not configured`)
+    return false
+  }
+  const url = `${WORKER_URL}/admin/builds/${encodeURIComponent(buildId)}/${endpoint}`
+  let attempts = 0
+  const maxAttempts = 3
+  while (attempts < maxAttempts) {
+    attempts += 1
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          Authorization: `Bearer ${DEPLOY_TRIGGER_SECRET}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        console.log(`verify-deploy: ${endpoint} callback accepted for build ${buildId}`)
+        return true
+      }
+      const text = await res.text().catch(() => '')
+      console.warn(`verify-deploy: ${endpoint} callback returned HTTP ${res.status}: ${text}`)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      console.warn(`verify-deploy: ${endpoint} callback attempt ${attempts}/${maxAttempts} failed: ${reason}`)
+    }
+    if (attempts < maxAttempts) await new Promise((r) => setTimeout(r, 1000 * attempts))
+  }
+  console.error(`verify-deploy: ${endpoint} callback failed after ${maxAttempts} attempts — build status may be stale`)
+  return false
 }
 
 // Re-read the newest publishes and refuse if anything changed while the build
@@ -87,11 +128,16 @@ async function revalidateIntent() {
   }
 }
 
+// The build ID reported back to the Worker. ExpectEXPECTED_BUILD_ID is set by
+// CI from the rendered output; if absent we cannot report a build ID.
+const BUILD_ID = EXPECTED_BUILD_ID || null
+
 const failures = []
 
 const intent = await revalidateIntent()
 if (intent.stale) {
   console.error(`verify-deploy: STALE — ${intent.detail}. Refusing to mark this build verified.`)
+  if (BUILD_ID) await postLifecycle('mark-failed', BUILD_ID, { error: `stale: ${intent.detail}` })
   process.exit(1)
 }
 
@@ -123,7 +169,12 @@ if (failures.length > 0) {
   console.error('verify-deploy: FAILED')
   for (const f of failures) console.error(`  - ${f}`)
   console.error('Leaving publications PUBLISHED/pending — retry with `gh workflow run deploy-storefront.yml`.')
+  if (BUILD_ID) await postLifecycle('mark-failed', BUILD_ID, { error: failures.join('; ') })
   process.exit(1)
 }
 
 console.log(`verify-deploy: OK — ${slugs.length} product page(s) verified against their intended publishes.`)
+
+if (BUILD_ID) {
+  await postLifecycle('mark-verified', BUILD_ID)
+}

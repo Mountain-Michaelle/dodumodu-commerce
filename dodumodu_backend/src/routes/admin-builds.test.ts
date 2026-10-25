@@ -327,3 +327,267 @@ test("mark-verified rejects marker mismatch and marks the build failed", async (
   assert.ok(row, "expected the build row to exist");
   assert.equal(row.status, "failed");
 });
+
+test("pre-deploy returns eligible when build is the latest and not terminal", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  db.table("site_builds", [
+    {
+      id: 1,
+      buildId: "build_test_1",
+      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      status: "triggered",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+      verifiedAt: null,
+      verificationError: null,
+    },
+  ]);
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/builds/build_test_1/pre-deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+  const body = (await res.json()) as { eligible: boolean; status: string };
+  assert.equal(body.eligible, true);
+  assert.equal(body.status, "triggered");
+});
+
+test("pre-deploy returns 409 when a newer build exists (stale build blocked)", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  db.table("site_builds", [
+    {
+      id: 1,
+      buildId: "build_newer",
+      intendedPublications: [{ slug: "newer-slug", publishId: 5 }],
+      status: "triggered",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T11:00:00Z").toISOString(),
+      verifiedAt: null,
+      verificationError: null,
+    },
+    {
+      id: 2,
+      buildId: "build_older",
+      intendedPublications: [{ slug: "older-slug", publishId: 3 }],
+      status: "triggered",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+      verifiedAt: null,
+      verificationError: null,
+    },
+  ]);
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/builds/build_older/pre-deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 409, `Expected 409 stale-build, got ${res.status}`);
+  const body = (await res.json()) as { error: string };
+  assert.equal(body.error, "Stale build");
+});
+
+test("pre-deploy returns 409 when build is already verified (terminal)", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  db.table("site_builds", [
+    {
+      id: 1,
+      buildId: "build_test_1",
+      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      status: "verified",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+      verifiedAt: new Date("2024-01-15T10:30:00Z").toISOString(),
+      verificationError: null,
+    },
+  ]);
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/builds/build_test_1/pre-deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 409, `Expected 409, got ${res.status}`);
+});
+
+test("pre-deploy returns 404 when build does not exist", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/builds/nonexistent/pre-deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+});
+
+test("pre-deploy rejects missing build secret", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  db.table("site_builds", [
+    {
+      id: 1,
+      buildId: "build_test_1",
+      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      status: "triggered",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+      verifiedAt: null,
+      verificationError: null,
+    },
+  ]);
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/builds/build_test_1/pre-deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer wrong-token" },
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 401, `Expected 401 for wrong secret, got ${res.status}`);
+});
+
+test("mark-failed transitions triggered -> failed", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  db.table("site_builds", [
+    {
+      id: 1,
+      buildId: "build_test_1",
+      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      status: "triggered",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+      verifiedAt: null,
+      verificationError: null,
+    },
+  ]);
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/builds/build_test_1/mark-failed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
+      body: JSON.stringify({ error: "render failure" }),
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+  const body = (await res.json()) as { status: string };
+  assert.equal(body.status, "failed");
+
+  const row = db.rows("site_builds").find((r) => r.buildId === "build_test_1");
+  if (row) {
+    assert.equal(row.status, "failed");
+    assert.equal(row.verificationError, "render failure");
+  }
+});
+
+test("duplicate mark-failed on an already-failed build is idempotent", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  db.table("site_builds", [
+    {
+      id: 1,
+      buildId: "build_test_1",
+      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      status: "failed",
+      triggeredBy: "ci@deploy",
+      triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+      verifiedAt: null,
+      verificationError: "first failure",
+    },
+  ]);
+  const app = makeApp(db);
+
+  const res1 = await app.fetch(
+    new Request("https://localhost/admin/builds/build_test_1/mark-failed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
+      body: JSON.stringify({ error: "second failure" }),
+    }),
+    env as never,
+  );
+  assert.equal(res1.status, 200);
+
+  const row = db.rows("site_builds").find((r) => r.buildId === "build_test_1");
+  if (row) {
+    assert.equal(row.verificationError, "first failure");
+  }
+});
+
+test("deploy-trigger records a build with its intended publication set", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/deploy-trigger", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer ci-secret-token",
+      },
+      body: JSON.stringify({
+        buildId: "build_trigger_1",
+        intendedPublications: [
+          { slug: "glow-serum", publishId: 7 },
+          { slug: "vitamin-c", publishId: 3 },
+        ],
+      }),
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 201, `Expected 201, got ${res.status}`);
+  const body = (await res.json()) as { buildId: string; status: string; intendedPublications: Array<{slug: string; publishId: number}> };
+  assert.equal(body.buildId, "build_trigger_1");
+  assert.equal(body.status, "triggered");
+  assert.equal(body.intendedPublications.length, 2);
+
+  const row = db.rows("site_builds").find((r) => r.buildId === "build_trigger_1");
+  assert.ok(row, "expected the build row to be recorded");
+  assert.deepEqual(row.intendedPublications, [
+    { slug: "glow-serum", publishId: 7 },
+    { slug: "vitamin-c", publishId: 3 },
+  ]);
+});
+
+test("deploy-trigger rejects invalid body", async () => {
+  const db = new FakeDatabase();
+  clearDb();
+  const app = makeApp(db);
+
+  const res = await app.fetch(
+    new Request("https://localhost/admin/deploy-trigger", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer ci-secret-token",
+      },
+      body: JSON.stringify({ buildId: "", intendedPublications: "not-an-array" }),
+    }),
+    env as never,
+  );
+  const body = (await res.json()) as { error: string; fields?: Record<string, string[]> };
+  assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
+  assert.equal(body.error, "Invalid request");
+});

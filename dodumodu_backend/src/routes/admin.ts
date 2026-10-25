@@ -696,3 +696,39 @@ adminRoute.post("/builds/:buildId/mark-failed", async (c) => {
   await siteBuildsRepo.markFailed(db, buildId, body?.error ?? null);
   return c.json({ buildId, status: "failed" }, 200);
 });
+
+// Pre-deploy validation: CI calls this before `wrangler deploy` to confirm
+// this build is still the most recent one and may safely overwrite the edge.
+// Returns 409 when a newer build has since been triggered, so the stale build
+// aborts before deployment instead of racing a newer publication.
+adminRoute.post("/builds/:buildId/pre-deploy", async (c) => {
+  requireBuildSecret(c);
+  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
+
+  const db = createDb(c.env.DATABASE_URL);
+  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
+  if (!existing) return c.json({ error: "Build not found" }, 404);
+
+  // A build that already reached a terminal state must not deploy again.
+  if (existing.status === "verified" || existing.status === "failed") {
+    return c.json(
+      { error: `Cannot deploy build in terminal status ${existing.status}` },
+      409,
+    );
+  }
+
+  // Stale-build guard: if a newer build has been triggered since this one,
+  // this build must not deploy. getLatest is ordered by triggeredAt desc.
+  const latest = await siteBuildsRepo.getLatest(db, 1);
+  if (latest.length > 0 && latest[0].buildId !== buildId) {
+    return c.json(
+      {
+        error: "Stale build",
+        message: `A newer build (${latest[0].buildId}) has been triggered; refusing to pre-deploy ${buildId}`,
+      },
+      409,
+    );
+  }
+
+  return c.json({ buildId, status: existing.status, eligible: true }, 200);
+});
