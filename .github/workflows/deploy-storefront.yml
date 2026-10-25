@@ -24,6 +24,12 @@ on:
         description: "Why this deploy is being run (shown in the build record)"
         required: false
         default: "manual"
+  # Triggered by the production Worker when an admin publishes/republishes a
+  # product (src/external/githubDeployTrigger.ts emits event_type "storefront-deploy").
+  # The dispatch carries client_payload { source: "admin-publish" } only — no URLs,
+  # no secrets, no build parameters.
+  repository_dispatch:
+    types: [storefront-deploy]
 
 concurrency:
   group: storefront-deploy
@@ -37,6 +43,10 @@ env:
   # connection string in CI; the Worker runtime uses its own secret.
   DATABASE_URL: ${{ secrets.NEON_READONLY_URL }}
   MAX_ORDER_QUANTITY: "20"
+  # Worker origin and CI auth secret for build-status lifecycle callbacks.
+  # These are GitHub Secrets; they are never logged.
+  WORKER_URL: ${{ secrets.WORKER_URL }}
+  DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
 
 jobs:
   build-and-deploy:
@@ -84,6 +94,23 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      - name: Pre-deploy staleness check
+        id: pre-deploy
+        working-directory: dodumodu_backend
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/pre-deploy" \
+            -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
+            -H "Content-Type: application/json")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Pre-deploy check returned HTTP $HTTP_CODE — build is stale or ineligible, aborting before deployment."
+            exit 1
+          fi
+          echo "Pre-deploy check passed — build is eligible to deploy."
+        env:
+          BUILD_ID: ${{ steps.render.outputs.build_id }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+
       - name: Deploy via Wrangler
         id: deploy
         working-directory: dodumodu_backend
@@ -94,7 +121,21 @@ jobs:
           # Least-privilege token: Workers Scripts Edit only. Never a global
           # API key, and the value lives in GitHub Secrets, never in logs.
 
+      - name: Mark build deployed
+        if: success()
+        working-directory: dodumodu_backend
+        run: |
+          curl -s -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/mark-deployed" \
+            -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}' || echo "mark-deployed callback failed (build was deployed but status not recorded)"
+        env:
+          BUILD_ID: ${{ steps.render.outputs.build_id }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+
       - name: Verify public markers before marking LIVE
+        id: verify
         working-directory: dodumodu_backend
         run: node scripts/verify-deploy.mjs
         env:
@@ -102,9 +143,38 @@ jobs:
           DATABASE_URL: ${{ secrets.NEON_READONLY_URL }}
           EXPECTED: ${{ steps.render.outputs.expected }}
           EXPECTED_BUILD_ID: ${{ steps.render.outputs.build_id }}
-          # The verifier fetches /:slug for every intended publication and reads
-          # the storefront-publish-id / storefront-build-id markers, then
-          # re-reads the newest publishes to refuse a stale build. Mismatch,
-          # stale response, or timeout => build stays PUBLISHED/pending with a
-          # verification-failure record; retry is
-          # `gh workflow run deploy-storefront.yml`.
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+
+      - name: Mark build verified
+        if: success()
+        working-directory: dodumodu_backend
+        run: |
+          curl -s -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/mark-verified" \
+            -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}' || echo "mark-verified callback failed (verification passed but status not recorded)"
+        env:
+          BUILD_ID: ${{ steps.render.outputs.build_id }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+
+      - name: Record build failure
+        if: failure()
+        working-directory: dodumodu_backend
+        run: |
+          BUILD_ID="${{ steps.render.outputs.build_id }}"
+          if [ -n "$BUILD_ID" ]; then
+            curl -s -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/mark-failed" \
+              -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
+              -H "Content-Type: application/json" \
+              -d '{"error":"workflow step failed before verification completed"}' \
+              || echo "mark-failed callback failed (check Worker logs)"
+          else
+            echo "No build ID available — build was not recorded as triggered"
+          fi
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+
+

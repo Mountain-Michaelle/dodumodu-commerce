@@ -104,6 +104,7 @@ export type Env = {
   MAX_ORDER_QUANTITY: string;
   /** Comma-separated CORS allowlist. See isOriginAllowed in app.ts. */
   ALLOWED_ORIGINS: string;
+  /** Public origin of the deployed Worker, e.g. https://<your-worker>.workers.dev. */ WORKER_URL: string;
   /** OPay API root, e.g. the sandbox or production host. */
   OPAY_BASE_URL: string;
   /**
@@ -136,6 +137,12 @@ export type Env = {
   TURNSTILE_SECRET: string;
   /** From address for login codes. Must be a Resend-verified sender/domain. */
   AUTH_FROM_EMAIL: string;
+
+  // Build-deploy secrets — set via wrangler secret put; never committed.
+  /** CI authenticates build-status mutations (mark-deployed/verified/failed) with this secret. */
+  DEPLOY_TRIGGER_SECRET: string;
+  /** The Worker authenticates GitHub repository_dispatch calls with this secret. */
+  GITHUB_DEPLOY_TOKEN: string;
 
   // bindings — real R2/KV on the Worker, local shims under Node
   MEDIA_BUCKET: R2Bucket;

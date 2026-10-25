@@ -62,6 +62,7 @@ export class FakeDatabase {
 class FakeQuery {
   private limitCount?: number;
   private offsetCount?: number;
+  orderBy?: unknown;
 
   constructor(
     private readonly db: FakeDatabase,
@@ -93,6 +94,19 @@ class FakeQuery {
       return store.map((row) => Object.assign(row, this.payload as Row));
     }
     let result = [...store];
+    const order = parseOrderBy(this.orderBy);
+    if (order) {
+      const descending = order.direction === "desc";
+      result.sort((a, b) => {
+        const av = a[order.column];
+        const bv = b[order.column];
+        const aStr = av === undefined ? "" : String(av);
+        const bStr = bv === undefined ? "" : String(bv);
+        if (aStr < bStr) return descending ? 1 : -1;
+        if (aStr > bStr) return descending ? -1 : 1;
+        return 0;
+      });
+    }
     if (this.offsetCount !== undefined) result = result.slice(this.offsetCount);
     if (this.limitCount !== undefined) result = result.slice(0, this.limitCount);
     return result;
@@ -118,6 +132,34 @@ function tableNameOf(table: unknown): string {
 }
 
 /**
+ * Extracts { column, direction } from a drizzle orderBy descriptor, e.g.
+ * desc(siteBuilds.triggeredAt) / asc(...). The runtime value is a SQL object
+ * whose queryChunks interleave the column object (with .name) and a " desc"/" asc"
+ * string. Returns null when the descriptor cannot be parsed, in which case the
+ * store order is left unchanged (a safe, conservative fallback).
+ */
+function parseOrderBy(
+  orderBy: unknown,
+): { column: string; direction: "asc" | "desc" } | null {
+  if (!orderBy || typeof orderBy !== "object") return null;
+  const chunks = (orderBy as { queryChunks?: unknown[] }).queryChunks;
+  if (!Array.isArray(chunks)) return null;
+  let column = "";
+  let direction: "asc" | "desc" = "asc";
+  for (const chunk of chunks) {
+    if (chunk && typeof chunk === "object" && typeof (chunk as { name?: unknown }).name === "string") {
+      column = (chunk as { name: string }).name;
+    }
+    if (typeof chunk === "string") {
+      const trimmed = chunk.trim();
+      if (trimmed === "desc" || trimmed.endsWith(" desc")) direction = "desc";
+      else if (trimmed === "asc" || trimmed.endsWith(" asc")) direction = "asc";
+    }
+  }
+  return column ? { column, direction } : null;
+}
+
+/**
  * The driver handed to registerDbDriver.
  *
  * Predicates are RECORDED, not evaluated - a real SQL engine is not what these
@@ -135,7 +177,13 @@ export function fakeDriver(db: FakeDatabase): (url: string) => Db {
         return chain;
       },
       where: () => chain,
-      orderBy: () => chain,
+      orderBy: (order: Function) => {
+        // Store the order descriptor so returning() can apply it (desc/asc by column).
+        if (query) {
+          query.orderBy = order;
+        }
+        return chain;
+      },
       groupBy: () => chain,
       leftJoin: () => chain,
       innerJoin: () => chain,

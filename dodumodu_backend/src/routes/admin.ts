@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Context, Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
 import { createDb } from "../db";
@@ -10,7 +10,7 @@ import { publishesRepo } from "../data/publishesRepo";
 import { siteBuildsRepo } from "../data/siteBuildsRepo";
 import { publishService } from "../services/publishService";
 import {
-  verifyStorefront, resolvePublishState, publishVersion,
+  verifyStorefront, resolvePublishState, publishVersion, readPublishVersion, readBuildId,
 } from "../services/storefrontStatus";
 import { ProductNotFoundError } from "../services/catalogService";
 import {
@@ -24,6 +24,7 @@ import { codPolicyService } from "../services/codPolicyService";
 import { orderCrmService } from "../services/orderCrmService";
 import {
   resolvePrincipal, ACCESS_EMAIL_HEADER, PERMISSIONS, type Principal,
+  UnauthorizedError,
 } from "../auth/adminAuth";
 import { errorShape } from "../shared/httpError";
 import { parseListQuery, pageMeta } from "../shared/listQuery";
@@ -57,14 +58,21 @@ import { reportRoutes } from "./admin/reports";
 // body shape - so no route can invent its own error format, and no stack trace
 // can reach a browser.
 
-export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Principal } }>();
+export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Principal; authType?: string } }>();
 
 adminRoute.use("*", async (c, next) => {
   try {
-    // Read the identity Access vouched for, and turn it into a Principal - or
-    // refuse. Never "assume it is behind Access so a hidden button is enough":
-    // Access is a real boundary and this is where it is enforced.
+    // CI build-status mutations authenticate with DEPLOY_TRIGGER_SECRET instead of
+    // Cloudflare Access. This keeps CI out of the Access identity model.
+    const secret = c.env.DEPLOY_TRIGGER_SECRET;
+    const auth = c.req.header("authorization");
+    if (secret && auth === `Bearer ${secret}`) {
+      c.set("authType", "build-secret");
+      c.set("principal", { email: "ci@deploy", permissions: [] } as Principal);
+      return next();
+    }
     const principal = resolvePrincipal(c.req.header(ACCESS_EMAIL_HEADER), c.env.ADMIN_OPERATORS);
+    c.set("authType", "access");
     c.set("principal", principal);
     await next();
   } catch (err) {
@@ -516,4 +524,211 @@ adminRoute.post("/deploy-trigger", async (c) => {
     intendedPublications: record.intendedPublications,
     triggeredAt: record.triggeredAt,
   }, 201);
+});
+
+// ---------------------------------------------------------------------------
+// Build-status mutation endpoints (CI-authenticated via DEPLOY_TRIGGER_SECRET).
+//
+// These are the only ways a build's status changes after it is recorded. Every
+// mutation is idempotent, keyed by buildId, and can never overwrite a newer
+// build's status. Verification is backed by public-marker checks, not by the
+// mere fact that CI called the endpoint.
+// ---------------------------------------------------------------------------
+
+/** Requires the CI deploy secret. Access-principal callers are refused here. */
+function requireBuildSecret(c: Context): void {
+  if (c.get("authType") !== "build-secret") {
+    throw new UnauthorizedError("build_secret_required");
+  }
+}
+
+/** Fetch each intended publication page and verify both markers match the build. */
+async function verifyPublicMarkers(
+  env: Env,
+  intendedPublications: { slug: string; publishId: number }[],
+  buildId: string,
+): Promise<{ ok: boolean; failures: string[] }> {
+  const base = (env.SITE_URL ?? "").trim().replace(/\/+$/, "");
+  const failures: string[] = [];
+
+  if (!base) {
+    return { ok: false, failures: ["SITE_URL is not configured"] };
+  }
+
+  for (const { slug, publishId } of intendedPublications) {
+    const url = `${base}/${slug}/`;
+    let html: string;
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { "User-Agent": "dodumodu-deploy-verifier" },
+      });
+      if (!res.ok) {
+        failures.push(`/${slug}/: HTTP ${res.status}`);
+        continue;
+      }
+      html = await res.text();
+    } catch {
+      failures.push(`/${slug}/: fetch failed`);
+      continue;
+    }
+
+    const liveVersion = readPublishVersion(html);
+    const liveBuild = readBuildId(html);
+    const expectedVersion = `pub_${publishId}`;
+    if (liveVersion !== expectedVersion) {
+      failures.push(`/${slug}/: live ${liveVersion ?? "(no marker)"} != expected ${expectedVersion}`);
+    }
+    if (liveBuild !== buildId) {
+      failures.push(`/${slug}/: build ${liveBuild ?? "(no marker)"} != expected ${buildId}`);
+    }
+  }
+
+  return { ok: failures.length === 0, failures };
+}
+
+const buildIdParamSchema = z.object({
+  buildId: z.string().min(1).max(120),
+});
+
+// Mark a build as deployed (wrangler deploy completed).
+adminRoute.post("/builds/:buildId/mark-deployed", async (c) => {
+  requireBuildSecret(c);
+  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
+
+  const db = createDb(c.env.DATABASE_URL);
+  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
+  if (!existing) return c.json({ error: "Build not found" }, 404);
+
+  // Idempotent: terminal or already-deployed builds return their current state.
+  if (existing.status === "verified" || existing.status === "failed") {
+    return c.json({ buildId, status: existing.status }, 200);
+  }
+  if (existing.status === "deployed") {
+    return c.json({ buildId, status: "deployed" }, 200);
+  }
+  if (existing.status !== "triggered") {
+    return c.json({ error: `Cannot deploy build in status ${existing.status}` }, 409);
+  }
+
+  await siteBuildsRepo.markDeployed(db, buildId);
+  return c.json({ buildId, status: "deployed" }, 200);
+});
+
+// Mark a build as verified only after public-marker checks succeed.
+adminRoute.post("/builds/:buildId/mark-verified", async (c) => {
+  requireBuildSecret(c);
+  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
+
+  const db = createDb(c.env.DATABASE_URL);
+  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
+  if (!existing) return c.json({ error: "Build not found" }, 404);
+
+  // Idempotent: verified or failed builds return their current state.
+  if (existing.status === "verified") {
+    return c.json({ buildId, status: "verified" }, 200);
+  }
+  if (existing.status === "failed") {
+    return c.json({ buildId, status: "failed" }, 200);
+  }
+  if (existing.status !== "triggered" && existing.status !== "deployed") {
+    return c.json({ error: `Cannot verify build in status ${existing.status}` }, 409);
+  }
+
+  // Stale-build guard: a newer build in progress means this one must not verify.
+  const latest = await siteBuildsRepo.getLatest(db, 1);
+  if (latest.length > 0 && latest[0].buildId !== buildId) {
+    return c.json(
+      {
+        error: "Stale build",
+        message: `A newer build (${latest[0].buildId}) is in progress; refusing to verify ${buildId}`,
+      },
+      409,
+    );
+  }
+
+  // Real public-marker verification: CI calling this endpoint is not evidence.
+  const verification = await verifyPublicMarkers(
+    c.env,
+    existing.intendedPublications as { slug: string; publishId: number }[],
+    existing.buildId,
+  );
+
+  if (!verification.ok) {
+    await siteBuildsRepo.markFailed(db, buildId, verification.failures.join("; "));
+    return c.json(
+      { buildId, status: "failed", failures: verification.failures },
+      200,
+    );
+  }
+
+  await siteBuildsRepo.markVerified(db, buildId);
+  return c.json({ buildId, status: "verified" }, 200);
+});
+
+// Mark a build as failed (render, pre-deploy, deploy, or verification failure).
+adminRoute.post("/builds/:buildId/mark-failed", async (c) => {
+  requireBuildSecret(c);
+  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
+
+  const db = createDb(c.env.DATABASE_URL);
+  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
+  if (!existing) return c.json({ error: "Build not found" }, 404);
+
+  // Idempotent: verified builds cannot be failed (terminal state).
+  if (existing.status === "verified") {
+    return c.json({ buildId, status: "verified" }, 200);
+  }
+  if (existing.status === "failed") {
+    return c.json({ buildId, status: "failed" }, 200);
+  }
+  if (existing.status !== "triggered" && existing.status !== "deployed") {
+    return c.json({ error: `Cannot fail build in status ${existing.status}` }, 409);
+  }
+
+  let body: { error?: string; message?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+
+  await siteBuildsRepo.markFailed(db, buildId, body?.error ?? null);
+  return c.json({ buildId, status: "failed" }, 200);
+});
+
+// Pre-deploy validation: CI calls this before `wrangler deploy` to confirm
+// this build is still the most recent one and may safely overwrite the edge.
+// Returns 409 when a newer build has since been triggered, so the stale build
+// aborts before deployment instead of racing a newer publication.
+adminRoute.post("/builds/:buildId/pre-deploy", async (c) => {
+  requireBuildSecret(c);
+  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
+
+  const db = createDb(c.env.DATABASE_URL);
+  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
+  if (!existing) return c.json({ error: "Build not found" }, 404);
+
+  // A build that already reached a terminal state must not deploy again.
+  if (existing.status === "verified" || existing.status === "failed") {
+    return c.json(
+      { error: `Cannot deploy build in terminal status ${existing.status}` },
+      409,
+    );
+  }
+
+  // Stale-build guard: if a newer build has been triggered since this one,
+  // this build must not deploy. getLatest is ordered by triggeredAt desc.
+  const latest = await siteBuildsRepo.getLatest(db, 1);
+  if (latest.length > 0 && latest[0].buildId !== buildId) {
+    return c.json(
+      {
+        error: "Stale build",
+        message: `A newer build (${latest[0].buildId}) has been triggered; refusing to pre-deploy ${buildId}`,
+      },
+      409,
+    );
+  }
+
+  return c.json({ buildId, status: existing.status, eligible: true }, 200);
 });
