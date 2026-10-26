@@ -32,13 +32,17 @@ CATALOG_EDGE_TTL = "300"
 CATALOG_EDGE_SWR = "3600"
 
 # ---- REQUIRED before deploying images ----
-IMAGE_DELIVERY_BASE = "FILL-IN-your-r2-custom-domain"
-PAGES_DEPLOY_HOOK = "FILL-IN-your-pages-deploy-hook"
+IMAGE_DELIVERY_BASE = "https://media.example.com"
+
+# =============================================================================
+# NEWLY CONFIGURED VARIABLES - for easy visibility during setup review
+# =============================================================================
+PAGES_DEPLOY_HOOK = "https://api.example.com/v1/pages/deploy"
 RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR = "5"
 MAX_ORDER_QUANTITY = "20"
-ALLOWED_ORIGINS = "FILL-IN-your-comma-separated-origins"
+ALLOWED_ORIGINS = "https://https://your-worker.workers.dev,https://your-custom-domain.com"
 # Public origin of the deployed Worker, e.g. https://<your-worker>.workers.dev
-WORKER_URL = "FILL-IN-your-worker-origin"
+WORKER_URL = "https://your-worker.workers.dev"
 OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"
 
 # =============================================================================

@@ -1,4 +1,4 @@
-﻿-- site_builds: tracks each storefront build and its intended publication set.
+-- site_builds: tracks each storefront build and its intended publication set.
 -- Safeguard 1 (publication consistency): the intended set is captured before
 -- the build runs and revalidated before anything is marked LIVE, so a stale
 -- build can never overwrite a newer release.
