@@ -146,3 +146,28 @@ test("a storefront serving a NEWER publish than we hold is not our LIVE", () => 
     latestPublishId: 7, buildStatus: "triggered", liveVersion: "pub_9",
   }), "DEPLOYING");
 });
+
+/* ---- empty-catalog and never-published edge cases ---- */
+
+test("a product with no publish record at all is 'Not published', never LIVE", () => {
+  // Scenario 2: created but never published. The admin must not show a View link.
+  assert.equal(resolvePublishState({
+    latestPublishId: null, buildStatus: "pending", liveVersion: null,
+  }), "PUBLISHED");
+});
+
+test("a publish with pending status and no verification is PUBLISHED, not DEPLOYING", () => {
+  // The snapshot exists but no rebuild has been requested. Not DEPLOYING because
+  // nothing has been triggered yet.
+  assert.equal(resolvePublishState({
+    latestPublishId: 3, buildStatus: "pending", liveVersion: null,
+  }), "PUBLISHED");
+});
+
+test("a publish that was requested but the storefront cannot be reached is DEPLOYING, not FAILED", () => {
+  // The hook was accepted but verifyStorefront could not reach the edge.
+  // LIVE is unknown, so the honest state is DEPLOYING, not a definitive failure.
+  assert.equal(resolvePublishState({
+    latestPublishId: 5, buildStatus: "triggered", liveVersion: null,
+  }), "DEPLOYING");
+});

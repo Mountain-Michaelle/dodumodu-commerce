@@ -1,6 +1,6 @@
-import { eq, and, asc, desc, sql, type SQL } from "drizzle-orm";
+import { eq, and, asc, desc, sql, inArray, type SQL } from "drizzle-orm";
 import type { Db } from "../db";
-import { products, productImages, categories, orders } from "../schema";
+import { products, productImages, categories, orders, productPublishes } from "../schema";
 
 export const productsRepo = {
   async findBySlug(db: Db, slug: string) {
@@ -95,7 +95,32 @@ export const productsRepo = {
       .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(where);
 
-    return { rows, total };
+    // Attach the latest publish (if any) to each row so the admin panel can
+    // show per-product publication state without a second round trip per row.
+    const productIds = rows.map((r) => r.id);
+    const latestByProduct = new Map<number, { id: number; buildStatus: string }>();
+    if (productIds.length > 0) {
+      const allPublishes = await db
+        .select({
+          productId: productPublishes.productId,
+          id: productPublishes.id,
+          buildStatus: productPublishes.buildStatus,
+        })
+        .from(productPublishes)
+        .where(inArray(productPublishes.productId, productIds))
+        .orderBy(desc(productPublishes.id));
+      for (const p of allPublishes) {
+        if (!latestByProduct.has(p.productId)) {
+          latestByProduct.set(p.productId, { id: p.id, buildStatus: p.buildStatus });
+        }
+      }
+    }
+    const rowsWithPublish = rows.map((r) => ({
+      ...r,
+      latestPublish: latestByProduct.get(r.id) ?? null,
+    }));
+
+    return { rows: rowsWithPublish, total };
   },
 
   /** How many orders reference this product: the check behind archive-not-delete. */

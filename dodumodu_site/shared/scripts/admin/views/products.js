@@ -85,6 +85,7 @@ export function productsView({ shell, identity, onNavigate }) {
   }
 
   function render({ products, page }) {
+    const showView = can("products:read"); // view storefront is a read-level action
     ui.results(
       el("div", { class: "list-summary" }, resultCount({ page, noun: "product" })),
       adminTable({
@@ -92,6 +93,20 @@ export function productsView({ shell, identity, onNavigate }) {
         rows: products,
         rowKey: (row) => row.id,
         onRowClick: (row) => openDetail(row.id),
+        empty: products.length === 0
+          ? {
+              title: "No products yet",
+              body: "Create your first product to add it to the storefront.",
+              action: can("products:write")
+                ? el("button", {
+                    class: "button button-primary",
+                    type: "button",
+                    text: "+ Add product",
+                    onclick: () => openForm(null),
+                  })
+                : null,
+            }
+          : undefined,
         columns: [
           { label: "Name", render: ({ row }) => el("div", { class: "stack" },
             el("span", { class: "strong", text: row.name }),
@@ -101,13 +116,29 @@ export function productsView({ shell, identity, onNavigate }) {
             : el("span", { class: "muted", text: "Uncategorised" })) },
           { label: "Price", className: "col-num", render: ({ row }) => formatNaira(row.price) },
           { label: "State", render: ({ row }) => statusBadge(row.active ? "active" : "inactive", row.active ? "Active" : "Archived") },
+          { label: "Publish", className: "col-num", render: ({ row }) => {
+            if (!row.latestPublish) {
+              return el("span", { class: "badge badge-neutral", text: "Not published" });
+            }
+            const status = row.latestPublish.buildStatus ?? "pending";
+            const label = status === "pending" ? "Awaiting deploy"
+              : status === "triggered" ? "Deploying"
+              : status === "failed" ? "Deploy failed"
+              : "Published";
+            return statusBadge(
+              status === "failed" ? "failed" : status === "triggered" ? "triggered" : "active",
+              label);
+          }},
           { label: "Updated", className: "col-when", render: ({ row }) => el("span", { class: "nowrap", text: formatDateTime(row.updatedAt) }) },
           { label: "Actions", className: "col-actions", render: ({ row }) => actionButtons([
             { label: "Edit", onSelect: () => openForm(row) },
+            row.latestPublish && showView
+              ? { label: "View storefront", onSelect: () => { window.open(`/${row.slug}/`, "_blank"); } }
+              : null,
             ...(can("products:write") && row.active
               ? [{ label: "Archive", danger: true, onSelect: () => archive(row) }]
               : []),
-          ]) },
+          ].filter(Boolean)) },
         ],
       }),
       adminPagination({
