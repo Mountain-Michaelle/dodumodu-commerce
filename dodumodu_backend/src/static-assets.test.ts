@@ -87,6 +87,18 @@ test("sitemapXml helper produces correct content", () => {
   assert.ok(body.includes(`<loc>https://yoursite.com/glow-serum/</loc>`));
 });
 
+test("sitemapXml with empty products lists only the root URL", () => {
+  const body = sitemapXml("https://yoursite.com", {});
+  assert.ok(body.includes("<urlset"));
+  assert.ok(body.includes(`<loc>https://yoursite.com/</loc>`));
+  assert.ok(!body.includes("/glow-serum/"));
+  assert.equal(
+    (body.match(/<loc>/g) ?? []).length,
+    1,
+    "only the root URL is listed"
+  );
+});
+
 test("media serves known object with content type and cache headers", async () => {
   const res = await fetchApp("/media/uploads/hero.jpg");
   assert.equal(res.status, 200);

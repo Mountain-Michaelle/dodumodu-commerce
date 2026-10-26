@@ -37,10 +37,43 @@ const lit = (k, v) => `export const ${k} = ${JSON.stringify(v)}\n`
 const BUILD_ID = `build_${Date.now()}_${randomBytes(4).toString('hex')}`
 
 // ---------------------------------------------------------------------------
+// Empty-catalog storefront root page.
+// Used when no published products exist: the build must still emit a valid
+// INDEX_HTML so the Worker can serve /, without fabricating any product data.
+// No snapshot is rendered here — PRODUCTS stays {} and the page simply states
+// that no products are published yet.
+// ---------------------------------------------------------------------------
+export function renderEmptyCatalog({ css, jsPath, csp, buildId }) {
+  const jsFile = jsPath.replace(/^\//, '')
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storefront — DODUMODU</title>
+<meta name="description" content="No products published yet.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#fff8f5">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3C/svg%3E">
+<meta http-equiv="Content-Security-Policy" content="${csp}">
+<style>${css}</style>
+</head>
+<body>
+<main>
+<h1>Storefront</h1>
+<p>No products are published yet.</p>
+</main>
+<script src="${jsFile}" defer></script>
+</body>
+</html>`
+}
+
+// ---------------------------------------------------------------------------
 // 1) Read the base storefront page (glow-serum) for CSS + JS extraction.
 //    Every product page shares the same CSS and JS bundle.
 // ---------------------------------------------------------------------------
-let baseHtml = read('products/glow-serum/index.html')
+async function main() {
+  let baseHtml = read('products/glow-serum/index.html')
 
 // 1a) inline the CSS
 const LINK = /<link[^>]*rel="stylesheet"[^>]*href="([^"]+\.css)">/
@@ -199,11 +232,13 @@ for (const row of products) {
   if (slug === flagshipSlug) flagshipHtml = html
 }
 
-if (!flagshipHtml && products.length > 0) {
-  flagshipHtml = PRODUCTS[products[0].slug]?.html ?? null
-}
 if (!flagshipHtml) {
-  throw new Error('no products could be rendered — flagship page is missing')
+  if (products.length > 0) {
+    throw new Error('no products could be rendered — flagship page is missing')
+  }
+  // Empty catalog: render a valid root page instead of failing the build.
+  // No product data is fabricated; PRODUCTS stays {}.
+  flagshipHtml = renderEmptyCatalog({ css, jsPath, csp: CSP, buildId: BUILD_ID })
 }
 
 // ---------------------------------------------------------------------------
@@ -230,4 +265,14 @@ console.log(
     `  products rendered: ${Object.keys(PRODUCTS).length} (${Object.keys(PRODUCTS).join(', ')})\n` +
     `  index.html ${kb(flagshipHtml)}  ${jsPath} ${kb(js)}\n` +
     `  CSP hashes: ${inline('script').length} script, ${inline('style').length} style`
-)
+  )
+}
+
+// Run the build only when this file is executed directly (e.g.
+// `tsx scripts/build-site.mjs`), not when imported (e.g. in tests that only
+// need renderEmptyCatalog). When imported, main() is intentionally skipped so
+// that DATABASE_URL is not required just to import a pure function.
+const _entryFile = process.argv[1]?.replace(/\\/g, "/") ?? ""
+if (_entryFile && import.meta.url.endsWith(_entryFile)) {
+  main()
+}
