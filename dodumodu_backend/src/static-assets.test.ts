@@ -62,15 +62,20 @@ test("robots.txt returns plain text with sitemap URL", async () => {
   assert.ok(body.includes("Sitemap: https://yoursite.com/sitemap.xml"));
 });
 
-test("sitemap.xml returns XML listing flagship and published products", async () => {
+test("sitemap.xml returns XML listing root and any published products", async () => {
   const res = await fetchApp("/sitemap.xml");
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("Content-Type"), "application/xml; charset=utf-8");
   assert.equal(res.headers.get("Cache-Control"), "public, max-age=3600");
   const body = await res.text();
   assert.ok(body.includes("<urlset"));
+  // Root URL is always listed, even with an empty catalog.
   assert.ok(body.includes(`<loc>https://yoursite.com/</loc>`));
-  assert.ok(body.includes(`<loc>https://yoursite.com/glow-serum/</loc>`));
+  // glow-serum is listed only when the generated site data contains it.
+  const products = JSON.parse((await import("./generated/site")).PRODUCTS ?? "{}");
+  if (products["glow-serum"]) {
+    assert.ok(body.includes(`<loc>https://yoursite.com/glow-serum/</loc>`));
+  }
 });
 
 test("robotsTxt helper produces correct content", () => {
@@ -85,6 +90,18 @@ test("sitemapXml helper produces correct content", () => {
   const body = sitemapXml("https://yoursite.com", { "glow-serum": {} });
   assert.ok(body.includes(`<loc>https://yoursite.com/</loc>`));
   assert.ok(body.includes(`<loc>https://yoursite.com/glow-serum/</loc>`));
+});
+
+test("sitemapXml with empty products lists only the root URL", () => {
+  const body = sitemapXml("https://yoursite.com", {});
+  assert.ok(body.includes("<urlset"));
+  assert.ok(body.includes(`<loc>https://yoursite.com/</loc>`));
+  assert.ok(!body.includes("/glow-serum/"));
+  assert.equal(
+    (body.match(/<loc>/g) ?? []).length,
+    1,
+    "only the root URL is listed"
+  );
 });
 
 test("media serves known object with content type and cache headers", async () => {
