@@ -36,6 +36,18 @@ import { mediaRoutes } from "./admin/media";
 import { spamRoutes } from "./admin/spam";
 import { blockRoutes } from "./admin/blocks";
 import { reportRoutes } from "./admin/reports";
+import {
+  ADMIN_LOGIN_HTML,
+  ADMIN_AUTH_CSS,
+  ADMIN_AUTH_JS,
+  ADMIN_CONSOLE_HTML,
+  ADMIN_SESSIONS_HTML,
+  ADMIN_DEVICES_HTML,
+  ADMIN_SESSIONS_JS,
+  ADMIN_DEVICES_JS,
+  ADMIN_QR_JS,
+  ADMIN_QR_LOGO_MJS,
+} from "../generated/adminPages";
 
 // The admin surface. Three kinds of route live here and the distinction is the
 // point of the file:
@@ -60,27 +72,104 @@ import { reportRoutes } from "./admin/reports";
 
 export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Principal; authType?: string } }>();
 
+// Public paths exempt from the auth seam: the sign-in page and the assets it
+// requires must load without a Cloudflare Access identity. Everything else under
+// /admin remains protected.
+const PUBLIC_PATHS = [
+  "/admin/sign-in/",
+  "/admin/assets/auth.css",
+  "/admin/assets/auth.js",
+  "/admin/assets/sessions.js",
+  "/admin/assets/devices.js",
+  "/admin/assets/qr.js",
+  "/admin/assets/qr-logo.mjs",
+];
+
+// Auth middleware runs for every /admin/* path. Public paths are exempted
+// inside the handler so the sign-in page and its assets load without an Access
+// identity. All other routes require Cloudflare Access (or DEPLOY_TRIGGER_SECRET
+// for CI build-status mutations).
 adminRoute.use("*", async (c, next) => {
+  // Public paths below bypass auth entirely: no identity is required, and none
+  // is established. Loading the sign-in page is not authentication.
+  if (PUBLIC_PATHS.includes(c.req.path)) {
+    return next();
+  }
   try {
     // CI build-status mutations authenticate with DEPLOY_TRIGGER_SECRET instead of
     // Cloudflare Access. This keeps CI out of the Access identity model.
     const secret = c.env.DEPLOY_TRIGGER_SECRET;
     const auth = c.req.header("authorization");
+    let principal: Principal;
     if (secret && auth === `Bearer ${secret}`) {
       c.set("authType", "build-secret");
-      c.set("principal", { email: "ci@deploy", permissions: [] } as Principal);
-      return next();
+      principal = { email: "ci@deploy", permissions: [] } as Principal;
+    } else {
+      principal = resolvePrincipal(c.req.header(ACCESS_EMAIL_HEADER), c.env.ADMIN_OPERATORS);
+      c.set("authType", "access");
     }
-    const principal = resolvePrincipal(c.req.header(ACCESS_EMAIL_HEADER), c.env.ADMIN_OPERATORS);
-    c.set("authType", "access");
     c.set("principal", principal);
+
+    // Hono mounted-router quirk: get("/") does not match path "/" inside a
+    // router mounted at "/admin", so /admin/ (trailing slash) falls through to
+    // 404 even though adminRoute.get("/", ...) is registered. Serve the console
+    // page directly for that path after successful auth resolution.
+    if (c.req.path === "/admin/") {
+      return c.html(ADMIN_CONSOLE_HTML, 200);
+    }
+
     await next();
   } catch (err) {
     return adminError(err);
   }
 });
 
-adminRoute.onError((err) => adminError(err));
+// Public routes — serve only static HTML/CSS/JS, expose no privileged data.
+// These are registered AFTER the middleware so the middleware runs first, but
+// the PUBLIC_PATHS check above lets them through without auth.
+// Explicit Content-Type headers ensure test assertions pass consistently.
+adminRoute.get("/sign-in/", (c) => c.html(ADMIN_LOGIN_HTML, 200));
+adminRoute.get("/assets/auth.css", (c) => {
+  c.header("Content-Type", "text/css; charset=utf-8");
+  return c.body(ADMIN_AUTH_CSS, 200);
+});
+adminRoute.get("/assets/auth.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_AUTH_JS, 200);
+});
+adminRoute.get("/assets/sessions.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_SESSIONS_JS, 200);
+});
+adminRoute.get("/assets/devices.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_DEVICES_JS, 200);
+});
+adminRoute.get("/assets/qr.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_QR_JS, 200);
+});
+adminRoute.get("/assets/qr-logo.mjs", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_QR_LOGO_MJS, 200);
+});
+
+// Guarded console pages — require an Access identity (set by the middleware
+// above). Mounted here on adminRoute so they are reachable under /admin in
+// production, where this router owns every /admin/* path.
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+
+adminRoute.get("", (c) => c.html(ADMIN_CONSOLE_HTML, 200));
+adminRoute.get("/", (c) => c.html(ADMIN_CONSOLE_HTML, 200));
+adminRoute.get("/sessions", (c) => c.html(ADMIN_SESSIONS_HTML, 200));
+adminRoute.get("/sessions/", (c) => c.html(ADMIN_SESSIONS_HTML, 200));
+adminRoute.get("/devices", (c) => c.html(ADMIN_DEVICES_HTML, 200));
+adminRoute.get("/devices/", (c) => c.html(ADMIN_DEVICES_HTML, 200));
 
 /**
  * The one place a thrown error becomes an HTTP response.
