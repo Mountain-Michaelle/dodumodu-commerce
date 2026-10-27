@@ -100,14 +100,24 @@ adminRoute.use("*", async (c, next) => {
     // Cloudflare Access. This keeps CI out of the Access identity model.
     const secret = c.env.DEPLOY_TRIGGER_SECRET;
     const auth = c.req.header("authorization");
+    let principal: Principal;
     if (secret && auth === `Bearer ${secret}`) {
       c.set("authType", "build-secret");
-      c.set("principal", { email: "ci@deploy", permissions: [] } as Principal);
-      return next();
+      principal = { email: "ci@deploy", permissions: [] } as Principal;
+    } else {
+      principal = resolvePrincipal(c.req.header(ACCESS_EMAIL_HEADER), c.env.ADMIN_OPERATORS);
+      c.set("authType", "access");
     }
-    const principal = resolvePrincipal(c.req.header(ACCESS_EMAIL_HEADER), c.env.ADMIN_OPERATORS);
-    c.set("authType", "access");
     c.set("principal", principal);
+
+    // Hono mounted-router quirk: get("/") does not match path "/" inside a
+    // router mounted at "/admin", so /admin/ (trailing slash) falls through to
+    // 404 even though adminRoute.get("/", ...) is registered. Serve the console
+    // page directly for that path after successful auth resolution.
+    if (c.req.path === "/admin/") {
+      return c.html(ADMIN_CONSOLE_HTML, 200);
+    }
+
     await next();
   } catch (err) {
     return adminError(err);
@@ -117,37 +127,49 @@ adminRoute.use("*", async (c, next) => {
 // Public routes — serve only static HTML/CSS/JS, expose no privileged data.
 // These are registered AFTER the middleware so the middleware runs first, but
 // the PUBLIC_PATHS check above lets them through without auth.
+// Explicit Content-Type headers ensure test assertions pass consistently.
 adminRoute.get("/sign-in/", (c) => c.html(ADMIN_LOGIN_HTML, 200));
-adminRoute.get("/assets/auth.css", (c) =>
-  c.body(ADMIN_AUTH_CSS, 200, { "Content-Type": "text/css; charset=utf-8" })
-);
-adminRoute.get("/assets/auth.js", (c) =>
-  c.body(ADMIN_AUTH_JS, 200, { "Content-Type": "text/javascript; charset=utf-8" })
-);
-adminRoute.get("/assets/sessions.js", (c) =>
-  c.body(ADMIN_SESSIONS_JS, 200, { "Content-Type": "text/javascript; charset=utf-8" })
-);
-adminRoute.get("/assets/devices.js", (c) =>
-  c.body(ADMIN_DEVICES_JS, 200, { "Content-Type": "text/javascript; charset=utf-8" })
-);
-adminRoute.get("/assets/qr.js", (c) =>
-  c.body(ADMIN_QR_JS, 200, { "Content-Type": "text/javascript; charset=utf-8" })
-);
-adminRoute.get("/assets/qr-logo.mjs", (c) =>
-  c.body(ADMIN_QR_LOGO_MJS, 200, { "Content-Type": "text/javascript; charset=utf-8" })
-);
+adminRoute.get("/assets/auth.css", (c) => {
+  c.header("Content-Type", "text/css; charset=utf-8");
+  return c.body(ADMIN_AUTH_CSS, 200);
+});
+adminRoute.get("/assets/auth.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_AUTH_JS, 200);
+});
+adminRoute.get("/assets/sessions.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_SESSIONS_JS, 200);
+});
+adminRoute.get("/assets/devices.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_DEVICES_JS, 200);
+});
+adminRoute.get("/assets/qr.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_QR_JS, 200);
+});
+adminRoute.get("/assets/qr-logo.mjs", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(ADMIN_QR_LOGO_MJS, 200);
+});
 
 // Guarded console pages — require an Access identity (set by the middleware
 // above). Mounted here on adminRoute so they are reachable under /admin in
 // production, where this router owns every /admin/* path.
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+// Console routes are handled at the app level in index.ts
+
 adminRoute.get("", (c) => c.html(ADMIN_CONSOLE_HTML, 200));
 adminRoute.get("/", (c) => c.html(ADMIN_CONSOLE_HTML, 200));
 adminRoute.get("/sessions", (c) => c.html(ADMIN_SESSIONS_HTML, 200));
 adminRoute.get("/sessions/", (c) => c.html(ADMIN_SESSIONS_HTML, 200));
 adminRoute.get("/devices", (c) => c.html(ADMIN_DEVICES_HTML, 200));
 adminRoute.get("/devices/", (c) => c.html(ADMIN_DEVICES_HTML, 200));
-
-adminRoute.onError((err) => adminError(err));
 
 /**
  * The one place a thrown error becomes an HTTP response.

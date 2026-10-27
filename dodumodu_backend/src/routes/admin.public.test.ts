@@ -113,7 +113,11 @@ test("unauthenticated GET /admin/assets/auth.js returns JavaScript", async () =>
   assert.ok(res.headers.get("Content-Type")?.includes("javascript"));
   const body = await res.text();
   assert.ok(body.length > 0);
-  assert.ok(!body.includes('"error"'));
+  // Meaningful asset content: the auth.js module defines the AUTH endpoint,
+  // imports the QR element, and declares showNote — not an error response.
+  assert.ok(body.includes("const AUTH = \"/auth\";"));
+  assert.ok(body.includes("import { makeQrElement }"));
+  assert.ok(body.includes("function showNote"));
 });
 
 test("unauthenticated GET /admin/assets/sessions.js returns JavaScript", async () => {
