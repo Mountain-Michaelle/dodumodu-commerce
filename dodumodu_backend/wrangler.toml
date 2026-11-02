@@ -14,6 +14,12 @@ ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "false"
 ASSIGNMENT_MODE_ENABLED = "false"
 ADMIN_AUTH_V2 = "1"
+# Opaque admin URL namespace — required in production. Exactly one path
+# segment beginning with "/", e.g. "/e5he78f823523". Missing, empty, or
+# invalid disables all admin routes (generic 404). Never fall back to /admin.
+# Change requires a rebuild/redeploy. Set to "/admin" only if you intentionally
+# want the legacy admin URL.
+ADMIN_BASE_PATH = "FILL-IN-replace-with-opaque-admin-namespace"
 
 # ---- image pipeline ----
 IMAGE_MODE = "derivative"
