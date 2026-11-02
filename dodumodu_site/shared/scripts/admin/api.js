@@ -9,6 +9,7 @@ import { track } from "./dm.js";
 // nothing here matches on English text.
 
 const API_BASE = (typeof window !== "undefined" && window.API_BASE) || "";
+const ADMIN_BASE = (typeof window !== "undefined" && window.ADMIN_BASE_PATH) || "/admin";
 
 export class ApiError extends Error {
   constructor(status, code, message, extra = {}) {
@@ -55,7 +56,7 @@ async function request(path, { method = "GET", body, formData, signal } = {}) {
   }
 
   // Every admin request moves the top-bar logo while it is pending (§4d).
-  const fetchNow = () => fetch(`${API_BASE}/admin${path}`, init);
+  const fetchNow = () => fetch(`${API_BASE}${ADMIN_BASE}${path}`, init);
 
   let res;
   try {
@@ -113,7 +114,7 @@ async function v2request(path, { method = "GET", body } = {}) {
   if (body !== undefined) init.body = JSON.stringify(body);
   let res;
   try {
-    res = await fetch(`${API_BASE}/admin-v2${path}`, init);
+    res = await fetch(`${API_BASE}${ADMIN_BASE}/admin-v2${path}`, init);
   } catch {
     throw new ApiError(0, "NETWORK", "Could not reach the server. Check your connection and try again.");
   }
@@ -153,7 +154,7 @@ export async function loadIdentity() {
  */
 export async function loadV2Identity() {
   try {
-    const res = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
+    const res = await fetch(`${API_BASE}${ADMIN_BASE}/auth/me`, { credentials: "same-origin" });
     if (!res.ok) return null;
     return res.json();
   } catch {

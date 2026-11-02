@@ -92,14 +92,22 @@ export function isLegacyAdminPath(path: string): boolean {
 
 /** Rewrite root-relative /admin/... URLs in served admin HTML to the active namespace. */
 export function rewriteAdminHtml(html: string, base: string): string {
-  return html
+  const rewritten = html
     .replaceAll("/admin/assets/", `${base}/assets/`)
     .replaceAll("/admin/sign-in/", `${base}/sign-in/`)
     .replaceAll("/admin/sessions/", `${base}/sessions/`)
-    .replaceAll("/admin/devices/", `${base}/devices/`);
+    .replaceAll("/admin/devices/", `${base}/devices/`)
+    .replaceAll("/admin/", `${base}/`)
+    .replace(/href="\/(admin\.[^."]+\.min\.css)"/g, `href="${base}/assets/$1"`)
+    .replace(/src="\/(admin\.[^."]+\.min\.js)"/g, `src="${base}/assets/$1"`);
+  if (rewritten.includes("window.ADMIN_BASE_PATH")) return rewritten;
+  const runtime = `<script>window.ADMIN_BASE_PATH=${JSON.stringify(base)};</script>`;
+  return rewritten.includes("</head>")
+    ? rewritten.replace("</head>", `${runtime}</head>`)
+    : rewritten.replace("</body>", `${runtime}</body>`);
 }
 
 /** Rewrite root-relative /auth and /admin-v2 API URLs in served admin JS to the active namespace. */
-export function rewriteAdminJs(js: string, base: string): string {
-  return js.replaceAll("/admin-v2", `${base}/admin-v2`).replaceAll("/auth", `${base}/auth`);
+export function rewriteAdminJs(js: string, _base: string): string {
+  return js;
 }

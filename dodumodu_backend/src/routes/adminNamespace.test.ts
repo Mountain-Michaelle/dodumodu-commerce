@@ -119,6 +119,28 @@ test("admin assets work under active namespace", async () => {
   assert.ok((await res.text()).includes("AUTH"), "auth.js content served");
 });
 
+test("console assets are served under the active namespace", async () => {
+  const namespace = "/e5he78f823523";
+  const env = makeEnv({ ADMIN_BASE_PATH: namespace });
+  const app = dispatchApp(env);
+  const page = await app.fetch(new Request(`http://localhost${namespace}/`, {
+    headers: { "Cf-Access-Authenticated-User-Email": "admin@example.com" },
+  }), env);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.ok(html.includes(`window.ADMIN_BASE_PATH="${namespace}"`) || html.includes(`window.ADMIN_BASE_PATH=${JSON.stringify(namespace)}`));
+  const cssMatch = html.match(/href="[^"]*\/(admin\.[^.]+\.min\.css)"/);
+  const jsMatch = html.match(/src="[^"]*\/(admin\.[^.]+\.min\.js)"/);
+  assert.ok(cssMatch, "console CSS reference");
+  assert.ok(jsMatch, "console JS reference");
+  const css = await app.fetch(new Request(`http://localhost${namespace}/assets/${cssMatch![1]}`), env);
+  assert.equal(css.status, 200);
+  assert.match(css.headers.get("Content-Type") ?? "", /^text\/css/);
+  const js = await app.fetch(new Request(`http://localhost${namespace}/assets/${jsMatch![1]}`), env);
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get("Content-Type") ?? "", /^text\/javascript/);
+});
+
 /* ---- Legacy paths return 404 when not active ---- */
 
 test("legacy /admin returns 404 when namespace is custom", async () => {
@@ -170,4 +192,3 @@ test("default namespace is /admin in development", async () => {
   const active = adminBasePath({ ENVIRONMENT: env.ENVIRONMENT, ADMIN_BASE_PATH: env.ADMIN_BASE_PATH });
   assert.equal(active, "/admin");
 });
-

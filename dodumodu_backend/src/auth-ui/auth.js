@@ -6,7 +6,7 @@
  */
 import { makeQrElement } from "./qr-logo.mjs";
 
-const AUTH = "/auth";
+const AUTH = `${window.ADMIN_BASE_PATH || "/admin"}/auth`;
 const ENROLL_TTL_SECS = 120; // fallback; the server sends expires_in
 const $ = (id) => document.getElementById(id);
 // CHANGED: the `hidden` attribute loses to any author CSS `display:` rule
@@ -498,7 +498,7 @@ async function finishLogin() {
     showNote("ok", "Signed in. Taking you to the admin console…");
     if (me && me.role === "admin") setHidden("devices-link", false);
     setHidden("sessions-link", false);
-    const target = safeNext() || "/admin/";
+    const target = safeNext() || `${window.ADMIN_BASE_PATH || "/admin"}/`;
     window.setTimeout(() => { window.location.assign(target); }, 400);
   } else { await handleResult(status, data); }
 }
