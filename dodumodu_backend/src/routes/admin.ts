@@ -209,6 +209,8 @@ function adminError(err: unknown) {
   );
 }
 
+adminRoute.onError((err) => adminError(err));
+
 // ---------------------------------------------------------------------------
 // Resource routers. Mounted before the singleton routes below so that a path
 // like /orders/bulk-action is matched by the resource router rather than being
