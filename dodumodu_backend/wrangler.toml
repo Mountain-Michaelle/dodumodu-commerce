@@ -1,48 +1,85 @@
-# name, main, compatibility_date, etc. go at the top, BEFORE any [table]
-# name = "your-worker"
-# main = "src/index.ts"
-# compatibility_date = "2026-11-02"
+name = "skincare-backend"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
 
-# ---------- Plain config (safe to commit) ----------
 [vars]
-ADMIN_AUTH_V2 = "1"
-ALLOWED_ORIGINS = "https://your-worker.workers.dev,https://your-custom-domain.com"
+# =============================================================================
+# REQUIRED PRODUCTION VARIABLES — replace every FILL-IN placeholder below
+# =============================================================================
+R2_BUCKET_NAME = "skincare-media"
+ENVIRONMENT = "production"
+RATE_LIMIT_API_PER_MINUTE = "20"
 ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "false"
 ASSIGNMENT_MODE_ENABLED = "false"
-CATALOG_EDGE_SWR = "3600"
-CATALOG_EDGE_TTL = "300"
-ENVIRONMENT = "production"
-IMAGE_DELIVERY_BASE = "https://media.example.com"
-IMAGE_KEY_PREFIX = "uploads"
+ADMIN_AUTH_V2 = "1"
+# Opaque admin URL namespace — required in production. Exactly one path
+# segment beginning with "/", e.g. "/e5he78f823523". Missing, empty, or
+# invalid disables all admin routes (generic 404). Never fall back to /admin.
+# Change requires a rebuild/redeploy. Set to "/admin" only if you intentionally
+# want the legacy admin URL.
+ADMIN_BASE_PATH = "FILL-IN-replace-with-opaque-admin-namespace"
+
+# ---- image pipeline ----
 IMAGE_MODE = "derivative"
-IMAGE_QUALITY_GALLERY = "75"
-IMAGE_QUALITY_HERO = "80"
-IMAGE_QUALITY_TESTIMONIAL = "70"
-IMAGE_QUALITY_THUMBNAIL = "70"
-IMAGE_WIDTHS_GALLERY = "320,640,960"
+MAX_UPLOAD_BYTES = "10485760"
+MAX_IMAGE_DIMENSION = "12000"
+IMAGE_KEY_PREFIX = "uploads"
 IMAGE_WIDTHS_HERO = "480,768,1200"
+IMAGE_WIDTHS_GALLERY = "320,640,960"
 IMAGE_WIDTHS_TESTIMONIAL = "320,640"
 IMAGE_WIDTHS_THUMBNAIL = "160,320"
-MAX_IMAGE_DIMENSION = "12000"
-MAX_ORDER_QUANTITY = "20"
-MAX_UPLOAD_BYTES = "10485760"
-OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"   # switch to the live OPay URL for real payments
+IMAGE_QUALITY_HERO = "80"
+IMAGE_QUALITY_GALLERY = "75"
+IMAGE_QUALITY_TESTIMONIAL = "70"
+IMAGE_QUALITY_THUMBNAIL = "70"
+CATALOG_EDGE_TTL = "300"
+CATALOG_EDGE_SWR = "3600"
+
+# ---- REQUIRED before deploying images ----
+IMAGE_DELIVERY_BASE = "https://media.example.com"
+
+# =============================================================================
+# NEWLY CONFIGURED VARIABLES - for easy visibility during setup review
+# =============================================================================
 PAGES_DEPLOY_HOOK = "https://api.example.com/v1/pages/deploy"
-R2_BUCKET_NAME = "skincare-media"
-RATE_LIMIT_API_PER_MINUTE = "20"
 RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR = "5"
+MAX_ORDER_QUANTITY = "20"
+ALLOWED_ORIGINS = "https://https://your-worker.workers.dev,https://your-custom-domain.com"
+# Public origin of the deployed Worker, e.g. https://<your-worker>.workers.dev
 WORKER_URL = "https://your-worker.workers.dev"
+OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"
 
-# ---------- Secrets: NOT in this file ----------
-# Set each with:  npx wrangler secret put <NAME>
-#   ANALYTICS_IP_HMAC_SECRET   AUTH_FROM_EMAIL        DATABASE_URL
-#   DEPLOY_TRIGGER_SECRET      GITHUB_DEPLOY_TOKEN    OPAY_MERCHANT_ID
-#   OPAY_PUBLIC_KEY            OPAY_SECRET_KEY        OPAY_WEBHOOK_SECRET
-#   OTP_KEY                    RECONCILE_CRON_SECRET  RESEND_API_KEY
-#   THROTTLE_KEY               TOTP_ENC_KEY           TURNSTILE_SECRET_KEY
+# =============================================================================
+# SECRETS — set each one with: wrangler secret put <NAME>
+# These are listed here explicitly so none are missed. Do NOT commit real values.
+# =============================================================================
+DATABASE_URL = "FILL-IN-via-wrangler-secret-put"
+OPAY_PUBLIC_KEY = "FILL-IN-via-wrangler-secret-put"
+OPAY_SECRET_KEY = "FILL-IN-via-wrangler-secret-put"
+OPAY_MERCHANT_ID = "FILL-IN-via-wrangler-secret-put"
+OPAY_WEBHOOK_SECRET = "FILL-IN-via-wrangler-secret-put"
+TURNSTILE_SECRET_KEY = "FILL-IN-via-wrangler-secret-put"
+RECONCILE_CRON_SECRET = "FILL-IN-via-wrangler-secret-put"
+ANALYTICS_IP_HMAC_SECRET = "FILL-IN-via-wrangler-secret-put"
+OTP_KEY = "FILL-IN-via-wrangler-secret-put"
+THROTTLE_KEY = "FILL-IN-via-wrangler-secret-put"
+TOTP_ENC_KEY = "FILL-IN-via-wrangler-secret-put"
+RESEND_API_KEY = "FILL-IN-via-wrangler-secret-put"
+AUTH_FROM_EMAIL = "FILL-IN-via-wrangler-secret-put"
+TURNSTILE_SECRET = "FILL-IN-via-wrangler-secret-put"
+# Secret used by CI to authenticate build-status mutations (mark-deployed/verified/failed).
+# Set via: wrangler secret put DEPLOY_TRIGGER_SECRET
+DEPLOY_TRIGGER_SECRET = "FILL-IN-via-wrangler-secret-put"
+# Secret used by the production Worker to authenticate GitHub repository_dispatch calls.
+# Set via: wrangler secret put GITHUB_DEPLOY_TOKEN
+GITHUB_DEPLOY_TOKEN = "FILL-IN-via-wrangler-secret-put"
 
-# ---------- Bindings (if you don't already have them elsewhere) ----------
-# [[r2_buckets]]
-# binding = "MEDIA"
-# bucket_name = "skincare-media"
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "skincare-media"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "25410516df5e4b01a3b7799889960037"
