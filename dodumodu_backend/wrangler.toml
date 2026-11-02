@@ -1,50 +1,48 @@
-{
-  // ...
-  "vars": {
-    "ADMIN_AUTH_V2": "1",
-    "ALLOWED_ORIGINS": "https://your-worker.workers.dev,https://your-custom-domain.com",
-    "ANALYTICS_IP_HMAC_SECRET": "FILL-IN-via-wrangler-secret-put",
-    "ANALYTICS_IP_HMAC_VERSION": "1",
-    "ANALYTICS_WARMUP_ENABLED": "false",
-    "ASSIGNMENT_MODE_ENABLED": "false",
-    "AUTH_FROM_EMAIL": "FILL-IN-via-wrangler-secret-put",
-    "CATALOG_EDGE_SWR": "3600",
-    "CATALOG_EDGE_TTL": "300",
-    "DATABASE_URL": "FILL-IN-via-wrangler-secret-put",
-    "DEPLOY_TRIGGER_SECRET": "FILL-IN-via-wrangler-secret-put",
-    "ENVIRONMENT": "production",
-    "GITHUB_DEPLOY_TOKEN": "FILL-IN-via-wrangler-secret-put",
-    "IMAGE_DELIVERY_BASE": "https://media.example.com",
-    "IMAGE_KEY_PREFIX": "uploads",
-    "IMAGE_MODE": "derivative",
-    "IMAGE_QUALITY_GALLERY": "75",
-    "IMAGE_QUALITY_HERO": "80",
-    "IMAGE_QUALITY_TESTIMONIAL": "70",
-    "IMAGE_QUALITY_THUMBNAIL": "70",
-    "IMAGE_WIDTHS_GALLERY": "320,640,960",
-    "IMAGE_WIDTHS_HERO": "480,768,1200",
-    "IMAGE_WIDTHS_TESTIMONIAL": "320,640",
-    "IMAGE_WIDTHS_THUMBNAIL": "160,320",
-    "MAX_IMAGE_DIMENSION": "12000",
-    "MAX_ORDER_QUANTITY": "20",
-    "MAX_UPLOAD_BYTES": "10485760",
-    "OPAY_BASE_URL": "https://sandboxapi.opaycheckout.com",
-    "OPAY_MERCHANT_ID": "FILL-IN-via-wrangler-secret-put",
-    "OPAY_PUBLIC_KEY": "FILL-IN-via-wrangler-secret-put",
-    "OPAY_SECRET_KEY": "FILL-IN-via-wrangler-secret-put",
-    "OPAY_WEBHOOK_SECRET": "FILL-IN-via-wrangler-secret-put",
-    "OTP_KEY": "FILL-IN-via-wrangler-secret-put",
-    "PAGES_DEPLOY_HOOK": "https://api.example.com/v1/pages/deploy",
-    "R2_BUCKET_NAME": "skincare-media",
-    "RATE_LIMIT_API_PER_MINUTE": "20",
-    "RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR": "5",
-    "RECONCILE_CRON_SECRET": "FILL-IN-via-wrangler-secret-put",
-    "RESEND_API_KEY": "FILL-IN-via-wrangler-secret-put",
-    "THROTTLE_KEY": "FILL-IN-via-wrangler-secret-put",
-    "TOTP_ENC_KEY": "FILL-IN-via-wrangler-secret-put",
-    "TURNSTILE_SECRET": "FILL-IN-via-wrangler-secret-put",
-    "TURNSTILE_SECRET_KEY": "FILL-IN-via-wrangler-secret-put",
-    "WORKER_URL": "https://your-worker.workers.dev"
-  },
-  // ...
-}
+# name, main, compatibility_date, etc. go at the top, BEFORE any [table]
+# name = "your-worker"
+# main = "src/index.ts"
+# compatibility_date = "2026-11-02"
+
+# ---------- Plain config (safe to commit) ----------
+[vars]
+ADMIN_AUTH_V2 = "1"
+ALLOWED_ORIGINS = "https://your-worker.workers.dev,https://your-custom-domain.com"
+ANALYTICS_IP_HMAC_VERSION = "1"
+ANALYTICS_WARMUP_ENABLED = "false"
+ASSIGNMENT_MODE_ENABLED = "false"
+CATALOG_EDGE_SWR = "3600"
+CATALOG_EDGE_TTL = "300"
+ENVIRONMENT = "production"
+IMAGE_DELIVERY_BASE = "https://media.example.com"
+IMAGE_KEY_PREFIX = "uploads"
+IMAGE_MODE = "derivative"
+IMAGE_QUALITY_GALLERY = "75"
+IMAGE_QUALITY_HERO = "80"
+IMAGE_QUALITY_TESTIMONIAL = "70"
+IMAGE_QUALITY_THUMBNAIL = "70"
+IMAGE_WIDTHS_GALLERY = "320,640,960"
+IMAGE_WIDTHS_HERO = "480,768,1200"
+IMAGE_WIDTHS_TESTIMONIAL = "320,640"
+IMAGE_WIDTHS_THUMBNAIL = "160,320"
+MAX_IMAGE_DIMENSION = "12000"
+MAX_ORDER_QUANTITY = "20"
+MAX_UPLOAD_BYTES = "10485760"
+OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"   # switch to the live OPay URL for real payments
+PAGES_DEPLOY_HOOK = "https://api.example.com/v1/pages/deploy"
+R2_BUCKET_NAME = "skincare-media"
+RATE_LIMIT_API_PER_MINUTE = "20"
+RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR = "5"
+WORKER_URL = "https://your-worker.workers.dev"
+
+# ---------- Secrets: NOT in this file ----------
+# Set each with:  npx wrangler secret put <NAME>
+#   ANALYTICS_IP_HMAC_SECRET   AUTH_FROM_EMAIL        DATABASE_URL
+#   DEPLOY_TRIGGER_SECRET      GITHUB_DEPLOY_TOKEN    OPAY_MERCHANT_ID
+#   OPAY_PUBLIC_KEY            OPAY_SECRET_KEY        OPAY_WEBHOOK_SECRET
+#   OTP_KEY                    RECONCILE_CRON_SECRET  RESEND_API_KEY
+#   THROTTLE_KEY               TOTP_ENC_KEY           TURNSTILE_SECRET_KEY
+
+# ---------- Bindings (if you don't already have them elsewhere) ----------
+# [[r2_buckets]]
+# binding = "MEDIA"
+# bucket_name = "skincare-media"
