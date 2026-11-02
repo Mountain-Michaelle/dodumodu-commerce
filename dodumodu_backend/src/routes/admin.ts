@@ -27,6 +27,7 @@ import {
   UnauthorizedError,
 } from "../auth/adminAuth";
 import { errorShape } from "../shared/httpError";
+import { adminBasePath, rewriteAdminHtml } from "../config/adminBase";
 import { parseListQuery, pageMeta } from "../shared/listQuery";
 import { requirePermissionOf } from "./admin/helpers";
 import { categoryRoutes } from "./admin/categories";
@@ -76,6 +77,7 @@ export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Prin
 // requires must load without a Cloudflare Access identity. Everything else under
 // /admin remains protected.
 const PUBLIC_PATHS = [
+  "/sign-in",
   "/sign-in/",
   "/assets/auth.css",
   "/assets/auth.js",
@@ -135,7 +137,20 @@ adminRoute.use("*", async (c, next) => {
 // These are registered AFTER the middleware so the middleware runs first, but
 // the PUBLIC_PATHS check above lets them through without auth.
 // Explicit Content-Type headers ensure test assertions pass consistently.
-adminRoute.get("/sign-in/", (c) => c.html(ADMIN_LOGIN_HTML, 200));
+adminRoute.get("/sign-in", (c) => {
+  const active = adminBasePath({
+    ENVIRONMENT: c.env.ENVIRONMENT,
+    ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
+  });
+  return c.html(active ? rewriteAdminHtml(ADMIN_LOGIN_HTML, active) : ADMIN_LOGIN_HTML, 200);
+});
+adminRoute.get("/sign-in/", (c) => {
+  const active = adminBasePath({
+    ENVIRONMENT: c.env.ENVIRONMENT,
+    ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
+  });
+  return c.html(active ? rewriteAdminHtml(ADMIN_LOGIN_HTML, active) : ADMIN_LOGIN_HTML, 200);
+});
 adminRoute.get("/assets/auth.css", (c) => {
   c.header("Content-Type", "text/css; charset=utf-8");
   return c.body(ADMIN_AUTH_CSS, 200);
