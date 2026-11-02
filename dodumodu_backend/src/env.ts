@@ -117,6 +117,14 @@ export type Env = {
 
   // admin-auth v2 (feature flag "0"/"1"; additive only, existing routes untouched)
   ADMIN_AUTH_V2: string;
+
+  /**
+   * The opaque admin URL namespace, e.g. "/e5he78f823523". Exactly one path
+   * segment beginning with "/". Local development defaults to "/admin" when
+   * unset; production must set it explicitly and never falls back.
+   * Validated by resolveAdminBasePath in src/config/adminBase.ts.
+   */
+  ADMIN_BASE_PATH: string;
   /** Test-only: allows X-Test-IP to override the client IP. Exists only in .dev.vars. */
   ALLOW_TEST_IP: string;
 

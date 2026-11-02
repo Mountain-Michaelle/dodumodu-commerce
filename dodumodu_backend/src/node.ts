@@ -17,7 +17,6 @@ import type { Env } from "./env";
 import { backendRoot, loadRootEnv, repoRoot } from "./node/envFile";
 import { localBucket, memoryKV } from "./node/shims";
 import { mountMedia } from "./node/static";
-import { mountAdminPages } from "./node/adminPages";
 import { resolveMediaPath, contentTypeFor } from "./node/mediaPath";
 
 const envFileLoaded = loadRootEnv();
@@ -131,6 +130,7 @@ const env: Env = {
   RESEND_API_KEY: process.env.RESEND_API_KEY ?? "",
   TURNSTILE_SECRET: process.env.TURNSTILE_SECRET ?? "",
   AUTH_FROM_EMAIL: process.env.AUTH_FROM_EMAIL ?? "auth@example.com",
+  ADMIN_BASE_PATH: process.env.ADMIN_BASE_PATH ?? "/admin",
 
   // The only local-only values in the whole Env: real bindings on the Worker.
   MEDIA_BUCKET: localBucket(mediaRoot),
@@ -140,9 +140,8 @@ const env: Env = {
 
 registerDbDriver(pgDriver);
 
-// Guarded admin pages must be registered before mountStatic, whose catch-all
-// would otherwise serve the raw HTML from disk with no session check.
-mountAdminPages(app, backendRoot);
+// Guarded admin pages are served by src/app.ts under the configured namespace;
+// nothing to mount here for local Node.
 
 mountMedia(app, mediaRoot);
 

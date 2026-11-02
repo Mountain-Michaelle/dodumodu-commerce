@@ -76,13 +76,13 @@ export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Prin
 // requires must load without a Cloudflare Access identity. Everything else under
 // /admin remains protected.
 const PUBLIC_PATHS = [
-  "/admin/sign-in/",
-  "/admin/assets/auth.css",
-  "/admin/assets/auth.js",
-  "/admin/assets/sessions.js",
-  "/admin/assets/devices.js",
-  "/admin/assets/qr.js",
-  "/admin/assets/qr-logo.mjs",
+  "/sign-in/",
+  "/assets/auth.css",
+  "/assets/auth.js",
+  "/assets/sessions.js",
+  "/assets/devices.js",
+  "/assets/qr.js",
+  "/assets/qr-logo.mjs",
 ];
 
 // Auth middleware runs for every /admin/* path. Public paths are exempted
@@ -92,7 +92,14 @@ const PUBLIC_PATHS = [
 adminRoute.use("*", async (c, next) => {
   // Public paths below bypass auth entirely: no identity is required, and none
   // is established. Loading the sign-in page is not authentication.
-  if (PUBLIC_PATHS.includes(c.req.path)) {
+  //
+  // c.req.path may be the full path (when mounted at /admin via app.route) or
+  // the namespace-relative rest (when dispatched by src/app.ts). Match either
+  // form.
+  const isPublic = PUBLIC_PATHS.some(
+    (p) => c.req.path === p || c.req.path.endsWith(p),
+  );
+  if (isPublic) {
     return next();
   }
   try {
@@ -114,7 +121,7 @@ adminRoute.use("*", async (c, next) => {
     // router mounted at "/admin", so /admin/ (trailing slash) falls through to
     // 404 even though adminRoute.get("/", ...) is registered. Serve the console
     // page directly for that path after successful auth resolution.
-    if (c.req.path === "/admin/") {
+    if (c.req.path === "/" || c.req.path === "/admin" || c.req.path === "/admin/") {
       return c.html(ADMIN_CONSOLE_HTML, 200);
     }
 

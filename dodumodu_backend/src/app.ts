@@ -3,7 +3,7 @@
 // local Node), so there is exactly one copy of the routing, the middleware and
 // the services in the repository, and switching environments switches the
 // entry point and the config — never this file.
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env";
 import { apiRateLimit, adminRateLimit, adminWriteRateLimit } from "./middleware/rateLimit";
@@ -12,7 +12,7 @@ import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
-import { AUTH_BASE, ADMIN_BASE } from "./auth/config";
+import { adminBasePath, isLegacyAdminPath } from "./config/adminBase";
 import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
@@ -94,21 +94,62 @@ app.route("/", visitorRetentionRoute);
   // shared office would pool several operators into one budget); writes get their
   // own, much tighter bucket. Order matters: the read limiter runs first, and the
   // write limiter needs the `adminEmail` identity that adminRoute sets.
-  app.use("/admin/*", adminRateLimit);
-  app.use("/admin/*", async (c, next) => {
-    if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
-      return next();
-    }
-    return adminWriteRateLimit(c, next);
-  });
-app.route("/admin", adminRoute);
 
-// admin-auth v2 (feature-flagged). Mounted last and behind ADMIN_AUTH_V2: with
-// the flag off every route 404s (flagGate), so this is a no-op deploy. /auth has
-// no collision; the admin routes live under /admin-v2 so the existing /admin/*
-// middleware and guard above are never wrapped or reordered (spec §2.4).
-app.route(AUTH_BASE, adminAuthRoute);
-app.route(ADMIN_BASE, adminAuthAdminRoute);
+// ---------------------------------------------------------------------------
+// Admin namespace dispatch
+//
+// The active namespace is ADMIN_BASE_PATH (default /admin in development; an
+// explicit, valid value is required in production). A single dispatcher runs
+// for every request so that storefront paths such as product slugs are never
+// stolen by an admin mount, legacy admin entry points (/admin, /admin-v2,
+// /auth) return a generic 404, and only the active namespace reaches the admin
+// surface. No DB/KV work happens here for public requests.
+//
+// The admin router is invoked by the dispatcher (not mounted with app.route,
+// which would steal arbitrary single-segment paths such as product slugs).
+app.use("*", adminNamespaceDispatcher);
+
+async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Next) {
+  const path = c.req.path;
+  const active = adminBasePath({
+    ENVIRONMENT: c.env.ENVIRONMENT,
+    ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
+  });
+
+  if (active !== null && (path === active || path.startsWith(active + "/"))) {
+    const rest = path === active ? "/" : path.slice(active.length);
+    const subReq = new Request(
+      "http://localhost" + rest + new URL(c.req.url).search,
+      c.req.raw,
+    );
+
+    // Admin rate limiting (read + write) runs only for the admin namespace,
+    // never for storefront traffic.
+    const readResponse = await adminRateLimit(c, async () => {});
+    if (readResponse) return readResponse;
+
+    if (
+      c.req.method !== "GET" &&
+      c.req.method !== "HEAD" &&
+      c.req.method !== "OPTIONS"
+    ) {
+      const writeResponse = await adminWriteRateLimit(c, async () => {});
+      if (writeResponse) return writeResponse;
+    }
+
+    if (rest === "/auth" || rest.startsWith("/auth/")) {
+      return adminAuthRoute.fetch(subReq, c.env);
+    }
+    if (rest === "/admin-v2" || rest.startsWith("/admin-v2/")) {
+      return adminAuthAdminRoute.fetch(subReq, c.env);
+    }
+    return adminRoute.fetch(subReq, c.env);
+  }
+
+  if (isLegacyAdminPath(path)) return c.text("Not found", 404);
+  return next();
+}
+
 
 // The storefront: serves the generated root HTML (ETag revalidation + strict
 // CSP) and the content-hashed JS (immutable cache). Registered last so every
