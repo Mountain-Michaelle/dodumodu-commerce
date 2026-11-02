@@ -2,7 +2,7 @@
   // ...
   "vars": {
     "ADMIN_AUTH_V2": "1",
-    "ALLOWED_ORIGINS": "https://https://your-worker.workers.dev,https://your-custom-domain.com",
+    "ALLOWED_ORIGINS": "https://your-worker.workers.dev,https://your-custom-domain.com",
     "ANALYTICS_IP_HMAC_SECRET": "FILL-IN-via-wrangler-secret-put",
     "ANALYTICS_IP_HMAC_VERSION": "1",
     "ANALYTICS_WARMUP_ENABLED": "false",
