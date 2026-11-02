@@ -27,6 +27,11 @@ import {
   UnauthorizedError,
 } from "../auth/adminAuth";
 import { errorShape } from "../shared/httpError";
+import {
+  adminBasePath,
+  rewriteAdminHtml,
+  rewriteAdminJs,
+} from "../config/adminBase";
 import { parseListQuery, pageMeta } from "../shared/listQuery";
 import { requirePermissionOf } from "./admin/helpers";
 import { categoryRoutes } from "./admin/categories";
@@ -47,6 +52,7 @@ import {
   ADMIN_DEVICES_JS,
   ADMIN_QR_JS,
   ADMIN_QR_LOGO_MJS,
+  ADMIN_CONSOLE_ASSETS,
 } from "../generated/adminPages";
 
 // The admin surface. Three kinds of route live here and the distinction is the
@@ -76,6 +82,7 @@ export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Prin
 // requires must load without a Cloudflare Access identity. Everything else under
 // /admin remains protected.
 const PUBLIC_PATHS = [
+  "/sign-in",
   "/sign-in/",
   "/assets/auth.css",
   "/assets/auth.js",
@@ -84,6 +91,22 @@ const PUBLIC_PATHS = [
   "/assets/qr.js",
   "/assets/qr-logo.mjs",
 ];
+
+function namespaceHtml(html: string, env: Env): string {
+  const active = adminBasePath({
+    ENVIRONMENT: env.ENVIRONMENT,
+    ADMIN_BASE_PATH: env.ADMIN_BASE_PATH,
+  });
+  return active ? rewriteAdminHtml(html, active) : html;
+}
+
+function namespaceJs(js: string, env: Env): string {
+  const active = adminBasePath({
+    ENVIRONMENT: env.ENVIRONMENT,
+    ADMIN_BASE_PATH: env.ADMIN_BASE_PATH,
+  });
+  return active ? rewriteAdminJs(js, active) : js;
+}
 
 // Auth middleware runs for every /admin/* path. Public paths are exempted
 // inside the handler so the sign-in page and its assets load without an Access
@@ -98,7 +121,7 @@ adminRoute.use("*", async (c, next) => {
   // form.
   const isPublic = PUBLIC_PATHS.some(
     (p) => c.req.path === p || c.req.path.endsWith(p),
-  );
+  ) || /\/assets\/admin\.[^.]+\.min\.(?:css|js)$/.test(c.req.path);
   if (isPublic) {
     return next();
   }
@@ -122,7 +145,7 @@ adminRoute.use("*", async (c, next) => {
     // 404 even though adminRoute.get("/", ...) is registered. Serve the console
     // page directly for that path after successful auth resolution.
     if (c.req.path === "/" || c.req.path === "/admin" || c.req.path === "/admin/") {
-      return c.html(ADMIN_CONSOLE_HTML, 200);
+      return c.html(namespaceHtml(ADMIN_CONSOLE_HTML, c.env), 200);
     }
 
     await next();
@@ -135,22 +158,35 @@ adminRoute.use("*", async (c, next) => {
 // These are registered AFTER the middleware so the middleware runs first, but
 // the PUBLIC_PATHS check above lets them through without auth.
 // Explicit Content-Type headers ensure test assertions pass consistently.
-adminRoute.get("/sign-in/", (c) => c.html(ADMIN_LOGIN_HTML, 200));
+adminRoute.get("/sign-in", (c) => {
+  const active = adminBasePath({
+    ENVIRONMENT: c.env.ENVIRONMENT,
+    ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
+  });
+  return c.html(active ? rewriteAdminHtml(ADMIN_LOGIN_HTML, active) : ADMIN_LOGIN_HTML, 200);
+});
+adminRoute.get("/sign-in/", (c) => {
+  const active = adminBasePath({
+    ENVIRONMENT: c.env.ENVIRONMENT,
+    ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
+  });
+  return c.html(active ? rewriteAdminHtml(ADMIN_LOGIN_HTML, active) : ADMIN_LOGIN_HTML, 200);
+});
 adminRoute.get("/assets/auth.css", (c) => {
   c.header("Content-Type", "text/css; charset=utf-8");
   return c.body(ADMIN_AUTH_CSS, 200);
 });
 adminRoute.get("/assets/auth.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(ADMIN_AUTH_JS, 200);
+  return c.body(namespaceJs(ADMIN_AUTH_JS, c.env), 200);
 });
 adminRoute.get("/assets/sessions.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(ADMIN_SESSIONS_JS, 200);
+  return c.body(namespaceJs(ADMIN_SESSIONS_JS, c.env), 200);
 });
 adminRoute.get("/assets/devices.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(ADMIN_DEVICES_JS, 200);
+  return c.body(namespaceJs(ADMIN_DEVICES_JS, c.env), 200);
 });
 adminRoute.get("/assets/qr.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
@@ -159,6 +195,16 @@ adminRoute.get("/assets/qr.js", (c) => {
 adminRoute.get("/assets/qr-logo.mjs", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(ADMIN_QR_LOGO_MJS, 200);
+});
+adminRoute.get("/assets/:asset", (c) => {
+  const filename = c.req.param("asset");
+  const asset = ADMIN_CONSOLE_ASSETS[filename as keyof typeof ADMIN_CONSOLE_ASSETS];
+  if (!asset) return c.text("Not found", 404);
+  c.header("Content-Type", filename.endsWith(".css")
+    ? "text/css; charset=utf-8"
+    : "text/javascript; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=31536000, immutable");
+  return c.body(asset, 200);
 });
 
 // Guarded console pages — require an Access identity (set by the middleware
@@ -171,12 +217,12 @@ adminRoute.get("/assets/qr-logo.mjs", (c) => {
 // Console routes are handled at the app level in index.ts
 // Console routes are handled at the app level in index.ts
 
-adminRoute.get("", (c) => c.html(ADMIN_CONSOLE_HTML, 200));
-adminRoute.get("/", (c) => c.html(ADMIN_CONSOLE_HTML, 200));
-adminRoute.get("/sessions", (c) => c.html(ADMIN_SESSIONS_HTML, 200));
-adminRoute.get("/sessions/", (c) => c.html(ADMIN_SESSIONS_HTML, 200));
-adminRoute.get("/devices", (c) => c.html(ADMIN_DEVICES_HTML, 200));
-adminRoute.get("/devices/", (c) => c.html(ADMIN_DEVICES_HTML, 200));
+adminRoute.get("", (c) => c.html(namespaceHtml(ADMIN_CONSOLE_HTML, c.env), 200));
+adminRoute.get("/", (c) => c.html(namespaceHtml(ADMIN_CONSOLE_HTML, c.env), 200));
+adminRoute.get("/sessions", (c) => c.html(namespaceHtml(ADMIN_SESSIONS_HTML, c.env), 200));
+adminRoute.get("/sessions/", (c) => c.html(namespaceHtml(ADMIN_SESSIONS_HTML, c.env), 200));
+adminRoute.get("/devices", (c) => c.html(namespaceHtml(ADMIN_DEVICES_HTML, c.env), 200));
+adminRoute.get("/devices/", (c) => c.html(namespaceHtml(ADMIN_DEVICES_HTML, c.env), 200));
 
 /**
  * The one place a thrown error becomes an HTTP response.

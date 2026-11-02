@@ -6,8 +6,9 @@ const $ = (id) => document.getElementById(id);
 function note(kind, text) { const n = $("note"); n.className = "note " + kind; n.textContent = text; n.hidden = !text; }
 
 async function load() {
-  const res = await fetch("/auth/sessions", { credentials: "same-origin" });
-  if (res.status === 401) { location.href = "/admin/sign-in/"; return; }
+const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
+  const res = await fetch(`${ADMIN_BASE}/auth/sessions`, { credentials: "same-origin" });
+  if (res.status === 401) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
   const { sessions } = await res.json();
   const list = $("list");
   list.innerHTML = "";
@@ -25,7 +26,7 @@ async function load() {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "End";
       btn.addEventListener("click", async () => {
-        await fetch("/auth/sessions/" + encodeURIComponent(s.sid), { method: "DELETE", credentials: "same-origin" });
+        await fetch(`${ADMIN_BASE}/auth/sessions/` + encodeURIComponent(s.sid), { method: "DELETE", credentials: "same-origin" });
         load();
       });
       row.appendChild(btn);
@@ -38,12 +39,11 @@ async function load() {
 }
 
 $("revoke-others").addEventListener("click", async () => {
-  await fetch("/auth/sessions/revoke-others", { method: "POST", credentials: "same-origin" });
+  await fetch(`${ADMIN_BASE}/auth/sessions/revoke-others`, { method: "POST", credentials: "same-origin" });
   note("ok", "Other sessions ended."); load();
 });
 $("logout").addEventListener("click", async () => {
-  await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
-  location.href = "/admin/sign-in/";
+  await fetch(`${ADMIN_BASE}/auth/logout`, { method: "POST", credentials: "same-origin" });
+  location.href = `${ADMIN_BASE}/sign-in/`;
 });
 load();
-

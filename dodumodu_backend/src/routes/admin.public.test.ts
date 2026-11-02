@@ -78,9 +78,9 @@ const env = {
   RATE_LIMIT_KV: {} as unknown as KVNamespace,
 } as unknown as Env;
 
-function makeApp() {
+function makeApp(namespace = "/admin") {
   const app = new Hono<{ Bindings: Env }>();
-  app.route("/admin", adminRoute);
+  app.route(namespace, adminRoute);
   return app;
 }
 
@@ -94,6 +94,54 @@ test("unauthenticated GET /admin/sign-in/ returns HTML login page (not JSON 401)
   const body = await res.text();
   assert.ok(body.includes("<!doctype html>"));
   assert.ok(!body.includes('"error"'));
+});
+
+test("custom namespace sign-in rewrites both auth assets and serves them publicly", async () => {
+  const namespace = "/4ehhi-5deggi";
+  const customEnv = { ...env, ADMIN_BASE_PATH: namespace } as unknown as Env;
+  const app = makeApp(namespace);
+  const signIn = await app.fetch(
+    new Request(`http://localhost${namespace}/sign-in`),
+    customEnv,
+  );
+  assert.equal(signIn.status, 200);
+  const html = await signIn.text();
+  assert.match(html, new RegExp(`href="${namespace}/assets/auth\\.css"`));
+  assert.match(html, new RegExp(`src="${namespace}/assets/auth\\.js"`));
+  assert.ok(!html.includes("/admin/assets/"));
+
+  const trailingSignIn = await app.fetch(
+    new Request(`http://localhost${namespace}/sign-in/`),
+    customEnv,
+  );
+  assert.equal(trailingSignIn.status, 200);
+  assert.equal(await trailingSignIn.text(), html);
+
+  const css = await app.fetch(
+    new Request(`http://localhost${namespace}/assets/auth.css`),
+    customEnv,
+  );
+  assert.equal(css.status, 200);
+  assert.match(css.headers.get("Content-Type") ?? "", /^text\/css/);
+
+  const js = await app.fetch(
+    new Request(`http://localhost${namespace}/assets/auth.js`),
+    customEnv,
+  );
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get("Content-Type") ?? "", /^text\/javascript/);
+
+  const legacyCss = await app.fetch(
+    new Request("http://localhost/admin/assets/auth.css"),
+    customEnv,
+  );
+  assert.equal(legacyCss.status, 404);
+
+  const legacyJs = await app.fetch(
+    new Request("http://localhost/admin/assets/auth.js"),
+    customEnv,
+  );
+  assert.equal(legacyJs.status, 404);
 });
 
 test("unauthenticated GET /admin/assets/auth.css returns CSS", async () => {
@@ -115,7 +163,7 @@ test("unauthenticated GET /admin/assets/auth.js returns JavaScript", async () =>
   assert.ok(body.length > 0);
   // Meaningful asset content: the auth.js module defines the AUTH endpoint,
   // imports the QR element, and declares showNote — not an error response.
-  assert.ok(body.includes("const AUTH = \"/auth\";"));
+  assert.ok(body.includes("window.ADMIN_BASE_PATH || \"/admin\""));
   assert.ok(body.includes("import { makeQrElement }"));
   assert.ok(body.includes("function showNote"));
 });

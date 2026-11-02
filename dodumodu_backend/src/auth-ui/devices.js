@@ -7,8 +7,9 @@ const $ = (id) => document.getElementById(id);
 function note(kind, text) { const n = $("note"); n.className = "note " + kind; n.textContent = text; n.hidden = !text; }
 
 async function load() {
-  const res = await fetch("/admin-v2/devices", { credentials: "same-origin" });
-  if (res.status === 401 || res.status === 403) { location.href = "/admin/sign-in/"; return; }
+const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
+  const res = await fetch(`${ADMIN_BASE}/admin-v2/devices`, { credentials: "same-origin" });
+  if (res.status === 401 || res.status === 403) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
   const { devices } = await res.json();
   const list = $("list");
   list.innerHTML = "";
@@ -38,7 +39,7 @@ async function withStepup(action) {
   if (res && res.status === 403) {
     const code = prompt("Re-enter your authenticator code:");
     if (!code) return res;
-    const su = await fetch("/auth/stepup", {
+    const su = await fetch(`${ADMIN_BASE}/auth/stepup`, {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }),
     });
@@ -49,14 +50,14 @@ async function withStepup(action) {
 
 async function revoke(id) {
   const res = await withStepup(() =>
-    fetch("/admin-v2/devices/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }));
+    fetch(`${ADMIN_BASE}/admin-v2/devices/` + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }));
   if (res && res.status === 200) { note("ok", "Device revoked."); load(); }
   else { note("error", "Could not revoke that device."); }
 }
 
 $("invite").addEventListener("click", async () => {
   const res = await withStepup(() =>
-    fetch("/admin-v2/devices/invite", { method: "POST", credentials: "same-origin",
+    fetch(`${ADMIN_BASE}/admin-v2/devices/invite`, { method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" }, body: "{}" }));
   if (res && res.status === 200) {
     const { invite_url } = await res.json();
@@ -70,4 +71,3 @@ $("invite").addEventListener("click", async () => {
 });
 
 load();
-
