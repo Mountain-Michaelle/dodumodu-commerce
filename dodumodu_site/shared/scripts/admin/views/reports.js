@@ -8,6 +8,7 @@ const MONTH_WINDOWS = [12, 24];
 // first" is the default page; Prev/Next shift the window, and an explicit date
 // filter can jump anywhere (the backend caps the span at 93 days).
 const VISIT_PAGE_DAYS = 10;
+let visitPaging = false;
 const lagosToday = () => new Date(Date.now() + 36e5).toISOString().slice(0, 10);
 function shiftDay(date, days) {
   const [y, m, d] = date.split("-").map(Number);
@@ -226,13 +227,17 @@ export function reportsView({ shell }) {
     const range = (visitorData && visitorData.dailyRange) || { from: visitFrom, to: visitTo };
 
     const page = (direction) => {
-      const step = direction * VISIT_PAGE_DAYS;
-      const nextTo = shiftDay(visitTo, step);
+      if (visitPaging) return;
+      visitPaging = true;
+      const nextTo = direction < 0
+        ? shiftDay(range.from, -1)
+        : shiftDay(range.to, VISIT_PAGE_DAYS);
       // Never page into the future: clamp the window's end to today.
       const clampedTo = nextTo > today ? today : nextTo;
       visitTo = clampedTo;
       visitFrom = shiftDay(clampedTo, -(VISIT_PAGE_DAYS - 1));
       load();
+      setTimeout(() => { visitPaging = false; }, 250);
     };
     const atLatest = visitTo >= today;
     const pageTotal = daily.reduce((sum, day) => sum + Number(day.visitors || 0), 0);

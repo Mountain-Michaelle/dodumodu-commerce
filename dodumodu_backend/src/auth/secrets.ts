@@ -13,9 +13,16 @@ export interface AuthSecrets {
 }
 
 export function loadAuthSecrets(env: AuthEnv): AuthSecrets {
-  const otpKey = env.OTP_KEY ? loadKey(env.OTP_KEY, "otp") : null;
-  const throttleKey = env.THROTTLE_KEY ? loadKey(env.THROTTLE_KEY, "throttle") : null;
-  const totpEncKey = env.TOTP_ENC_KEY ? loadKey(env.TOTP_ENC_KEY, "totp-enc") : null;
+  let otpKey: Uint8Array | null = null;
+  let throttleKey: Uint8Array | null = null;
+  let totpEncKey: Uint8Array | null = null;
+  try {
+    otpKey = env.OTP_KEY ? loadKey(env.OTP_KEY, "OTP_KEY") : null;
+    throttleKey = env.THROTTLE_KEY ? loadKey(env.THROTTLE_KEY, "THROTTLE_KEY") : null;
+    totpEncKey = env.TOTP_ENC_KEY ? loadKey(env.TOTP_ENC_KEY, "TOTP_ENC_KEY") : null;
+  } catch (cause) {
+    throw new AuthServerFaultError(cause);
+  }
   if (!otpKey || !throttleKey || !totpEncKey) {
     // Missing secrets is OUR fault, not the caller's: fail closed as 503
     // {retry:true} (spec §4), never 401 and never a bare 500.

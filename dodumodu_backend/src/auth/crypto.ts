@@ -9,7 +9,37 @@ export const toB64 = (u8: Uint8Array): string => {
   for (const b of u8) s += String.fromCharCode(b);
   return btoa(s);
 };
-export const fromB64 = (s: string): Uint8Array => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+export const fromB64 = (s: string): Uint8Array => {
+  if (typeof s !== "string" || !s) throw new Error("invalid base64");
+  if (/[\s\u0000-\u001f\u007f]/.test(s)) throw new Error("invalid base64: whitespace is not allowed");
+  if (!/^(?:[A-Za-z0-9+/]*={0,2}|[A-Za-z0-9_-]*={0,2})$/.test(s)) {
+    throw new Error("invalid base64");
+  }
+
+  const firstPad = s.indexOf("=");
+  const core = firstPad >= 0 ? s.slice(0, firstPad) : s;
+  const providedPad = firstPad >= 0 ? s.slice(firstPad) : "";
+  const remainder = core.length % 4;
+  if (remainder === 1) throw new Error("invalid base64 length");
+  const expectedPad = remainder === 0 ? 0 : 4 - remainder;
+  if (providedPad && providedPad !== "=".repeat(expectedPad)) {
+    throw new Error("invalid base64 padding");
+  }
+
+  const standard = core.replace(/-/g, "+").replace(/_/g, "/");
+  let decoded: string;
+  try {
+    decoded = atob(standard + "=".repeat(expectedPad));
+  } catch {
+    throw new Error("invalid base64");
+  }
+  const bytes = Uint8Array.from(decoded, (c) => c.charCodeAt(0));
+
+  if (toB64(bytes).replace(/=+$/, "") !== standard) {
+    throw new Error("invalid base64 encoding");
+  }
+  return bytes;
+};
 export const b64u = (u8: Uint8Array): string =>
   toB64(u8).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
