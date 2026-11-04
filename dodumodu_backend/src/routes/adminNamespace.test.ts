@@ -281,3 +281,19 @@ test("composed Worker custom namespace root rejects a missing v2 session", async
   assert.equal(res.status, 401);
   assert.equal(await res.text(), "Unauthorized");
 });
+
+test("composed Worker custom namespace /me rejects a missing v2 session", async () => {
+  const namespace = "/4ehhi-5deggi";
+  const v2Env = makeEnv({
+    ENVIRONMENT: "production",
+    ADMIN_BASE_PATH: namespace,
+    ADMIN_AUTH_V2: "1",
+  });
+  const res = await composedApp.request(
+    `http://localhost${namespace}/me`,
+    { headers: { Accept: "application/json" } },
+    v2Env,
+  );
+  assert.equal(res.status, 401);
+  assert.equal(await res.text(), "Unauthorized");
+});
