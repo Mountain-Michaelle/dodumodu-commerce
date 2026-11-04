@@ -400,14 +400,14 @@ async function doRequest(email) {
   if (status === 202) {
     state.stage = "otp";
     render();
-    showNote("ok", "If this email is registered, check your inbox.");
+    showNote("ok", "Your one-time code was sent successfully.");
     startResendCountdown(45);
   } else { await handleResult(status, data); }
 }
 
 async function doResend() {
   const { status, data } = await api(AUTH + "/resend", {});
-  if (status === 202) { showNote("ok", "If this email is registered, check your inbox."); startResendCountdown(45); return; }
+  if (status === 202) { showNote("ok", "Your one-time code was sent successfully."); startResendCountdown(45); return; }
   if (status === 401) { showNote("error", "Login session expired. Enter your email again to get a new code."); return; }
   await handleResult(status, data);
 }

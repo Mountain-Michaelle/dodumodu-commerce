@@ -12,7 +12,11 @@ import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
-import { adminBasePath, isLegacyAdminPath } from "./config/adminBase";
+import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml } from "./config/adminBase";
+import { loadSession } from "./auth/middleware";
+import { adminAuthEnabled } from "./auth/config";
+import { ADMIN_CONSOLE_HTML } from "./generated/adminPages";
+import { getSidToken } from "./auth/ctx";
 import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
@@ -151,6 +155,15 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
     }
     if (rest === "/admin-v2" || rest.startsWith("/admin-v2/")) {
       return adminAuthAdminRoute.fetch(subReq, c.env);
+    }
+    if (adminAuthEnabled(c.env as never) && (rest === "/" || rest === "")) {
+      if (!getSidToken(c as never)) return c.text("Unauthorized", 401);
+      const session = await loadSession(c as never);
+      if (!session || session.role !== "admin") {
+        return c.text("Unauthorized", 401);
+      }
+      const base = active;
+      return c.html(rewriteAdminHtml(ADMIN_CONSOLE_HTML, base), 200);
     }
     return adminRoute.fetch(subReq, c.env);
   }

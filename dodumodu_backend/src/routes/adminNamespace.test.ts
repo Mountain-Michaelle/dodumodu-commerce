@@ -7,6 +7,7 @@ import { adminBasePath, isLegacyAdminPath, DEFAULT_ADMIN_BASE_PATH } from "../co
 import type { Env } from "../env";
 import { registerDbDriver } from "../db";
 import { neonDriver } from "../dbDrivers/neon";
+import { app as composedApp } from "../app";
 
 /* Admin namespace dispatcher — spec §1, §6. */
 
@@ -83,7 +84,10 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     DEPLOY_TRIGGER_SECRET: "",
     GITHUB_DEPLOY_TOKEN: "",
     MEDIA_BUCKET: {} as unknown as R2Bucket,
-    RATE_LIMIT_KV: {} as unknown as KVNamespace,
+    RATE_LIMIT_KV: {
+      get: async () => null,
+      put: async () => undefined,
+    } as unknown as KVNamespace,
     ...overrides,
   } as unknown as Env;
 }
@@ -260,4 +264,20 @@ test("custom namespace preserves POST auth requests", async () => {
   }), env);
   assert.notEqual(res.status, 404, "POST auth handler, not methodless rewritten GET, must be reached");
   assert.equal(res.status, 403, "a mismatched origin reaches originGuard before auth DB work");
+});
+
+test("composed Worker custom namespace root rejects a missing v2 session", async () => {
+  const namespace = "/4ehhi-5deggi";
+  const v2Env = makeEnv({
+    ENVIRONMENT: "production",
+    ADMIN_BASE_PATH: namespace,
+    ADMIN_AUTH_V2: "1",
+  });
+  const res = await composedApp.request(
+    `http://localhost${namespace}/`,
+    { headers: { Accept: "text/html" } },
+    v2Env,
+  );
+  assert.equal(res.status, 401);
+  assert.equal(await res.text(), "Unauthorized");
 });
