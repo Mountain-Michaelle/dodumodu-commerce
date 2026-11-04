@@ -26,10 +26,24 @@ export class AuthLockedError extends Error {
 // exception). The caller MUST call auth_refund and answer 503 {retry:true}
 // (R-NOLOCK 3: never 401 for a fault; a Worker killed mid-request cannot refund).
 export class AuthServerFaultError extends Error {
-  constructor(cause?: unknown) {
+  readonly code: string;
+  readonly stage: string;
+  readonly category: "configuration" | "dependency" | "cryptography" | "internal";
+
+  constructor(
+    cause?: unknown,
+    options: {
+      code?: string;
+      stage?: string;
+      category?: "configuration" | "dependency" | "cryptography" | "internal";
+    } = {},
+  ) {
     super("server fault in auth path");
     this.name = "AuthServerFaultError";
     if (cause !== undefined) this.cause = cause;
+    this.code = options.code ?? "AUTH_INTERNAL_FAULT";
+    this.stage = options.stage ?? "unknown";
+    this.category = options.category ?? "internal";
   }
 }
 
