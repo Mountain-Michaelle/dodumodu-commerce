@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { adminRoute } from "./admin";
+import { authRoute } from "../auth/routes";
 import { adminBasePath, isLegacyAdminPath, DEFAULT_ADMIN_BASE_PATH } from "../config/adminBase";
 import type { Env } from "../env";
 
@@ -92,7 +93,18 @@ function dispatchApp(env: Env) {
     const active = adminBasePath({ ENVIRONMENT: env.ENVIRONMENT, ADMIN_BASE_PATH: env.ADMIN_BASE_PATH });
     if (active !== null && (path === active || path.startsWith(active + "/"))) {
       const rest = path === active ? "/" : path.slice(active.length);
-      const subReq = new Request("http://localhost" + rest, c.req.raw);
+      const raw = c.req.raw;
+      const init: RequestInit & { duplex?: "half" } = {
+        method: raw.method,
+        headers: raw.headers,
+        duplex: "half",
+      };
+      if (raw.method !== "GET" && raw.method !== "HEAD") init.body = raw.body;
+      const subReq = new Request("http://localhost" + rest, init);
+      if (rest === "/auth" || rest.startsWith("/auth/")) {
+        const authRest = rest === "/auth" ? "/" : rest.slice("/auth".length);
+        return authRoute.request(authRest, init, c.env);
+      }
       return adminRoute.fetch(subReq, c.env);
     }
     if (isLegacyAdminPath(path)) return c.text("Not found", 404);
@@ -191,4 +203,24 @@ test("default namespace is /admin in development", async () => {
   const env = makeEnv();
   const active = adminBasePath({ ENVIRONMENT: env.ENVIRONMENT, ADMIN_BASE_PATH: env.ADMIN_BASE_PATH });
   assert.equal(active, "/admin");
+});
+
+test("custom namespace preserves POST auth requests", async () => {
+  const namespace = "/4ehhi-5deggi";
+  const env = makeEnv({
+    ENVIRONMENT: "production",
+    ADMIN_BASE_PATH: namespace,
+    ADMIN_AUTH_V2: "1",
+  });
+  const app = dispatchApp(env);
+  const res = await app.fetch(new Request(`http://localhost${namespace}/auth/request`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "https://example.com",
+    },
+    body: JSON.stringify({ email: "admin@example.com" }),
+  }), env);
+  assert.notEqual(res.status, 404, "POST auth handler, not methodless rewritten GET, must be reached");
+  assert.equal(res.status, 403, "a mismatched origin reaches originGuard before auth DB work");
 });
