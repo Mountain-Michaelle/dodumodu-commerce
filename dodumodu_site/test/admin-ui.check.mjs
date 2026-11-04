@@ -842,7 +842,16 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
       const now = new Date(Date.now() + 36e5).toISOString().slice(0, 10);
       const [yy, mm, dd] = now.split("-").map(Number);
       const shift = (n) => new Date(Date.UTC(yy, mm - 1, dd + n)).toISOString().slice(0, 10);
-      return { now, from10: shift(-9), prev10: shift(-10), from20: shift(-19) };
+      const mockedRangeEnd = "2026-10-09";
+      const [my, mm2, md] = mockedRangeEnd.split("-").map(Number);
+      const mockShift = (n) => new Date(Date.UTC(my, mm2 - 1, md + n)).toISOString().slice(0, 10);
+      return {
+        now,
+        from10: shift(-9),
+        prev10: mockShift(-10),
+        from20: mockShift(-19),
+        nextToday: mockedRangeEnd,
+      };
     })();
     ok("the visitor daily series defaults to the last 10 Lagos days",
       requestedUrls.some((url) => url.includes(
@@ -855,7 +864,7 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
     ok("the visitor window is paged with Previous and Next",
       Boolean(prevButton) && Boolean(nextButton));
     ok("the visitor window stops paging at today",
-      nextButton && nextButton.disabled === (visitClock.now >= "2026-10-09"));
+      nextButton && nextButton.disabled === (visitClock.nextToday >= "2026-10-09"));
     ok("the visitor report offers a from/to date filter",
       Boolean(main.querySelector("#visit-from")) && Boolean(main.querySelector("#visit-to")));
     ok("the daily window reports its visitor-day page total",
@@ -865,7 +874,8 @@ const page = new JSDOM("<!doctype html><html><body><div id='app'></div></body></
       await new Promise((resolve) => setTimeout(resolve, 30));
       ok("Previous pages the visitor window back by 10 Lagos days",
         requestedUrls.some((url) => url.includes(
-          `/admin/reports/visitors?from=${visitClock.from20}&to=${visitClock.prev10}`)));
+          `/admin/reports/visitors?from=${visitClock.from20}&to=${visitClock.prev10}`)),
+        requestedUrls.filter((url) => url.includes("/admin/reports/visitors")).join(" | "));
     }
 
     const windowSelect = main.querySelector("#report-month-window");

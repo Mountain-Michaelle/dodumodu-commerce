@@ -32,12 +32,30 @@ test("fromB64 handles standard base64 with + and /", () => {
   assert.deepEqual(fromB64("AQIDBAUGBwgJCgsMDQ4PEA=="), new Uint8Array([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]));
 });
 
+test("fromB64 accepts unpadded and padded base64url", () => {
+  const bytes = new Uint8Array([251, 255]);
+  const url = b64u(bytes);
+  assert.deepEqual(fromB64(url), bytes);
+  assert.deepEqual(fromB64(url + "="), bytes);
+});
+
+test("fromB64 rejects whitespace and malformed encoding", () => {
+  assert.throws(() => fromB64("BwcH\nBwc="), /whitespace/);
+  assert.throws(() => fromB64("BwcH!Bwc="), /invalid base64/);
+  assert.throws(() => fromB64("A==="), /invalid base64/);
+});
+
 // A valid 32-byte key (base64 of 32 bytes of 0x07). Used for every keyed test below.
 const KEY32 = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
 
 test("loadKey accepts exactly 32-byte standard base64", () => {
   const k = loadKey(KEY32, "otp");
   assert.equal(k.length, 32);
+});
+
+test("loadKey accepts unpadded base64url", () => {
+  const url = KEY32.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  assert.equal(loadKey(url, "otp").length, 32);
 });
 
 test("loadKey rejects wrong lengths", () => {
@@ -213,5 +231,3 @@ test("toHex/fromHex round-trips every byte value (DB bytea boundary)", () => {
   // Empty input must not throw.
   assert.deepEqual(fromHex(""), new Uint8Array(0));
 });
-
-

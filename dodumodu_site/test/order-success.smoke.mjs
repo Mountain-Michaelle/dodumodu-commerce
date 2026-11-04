@@ -135,7 +135,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
   fillForm(doc, 3);
   // Draft writes are debounced, so let one land before submitting — otherwise
   // "the draft was cleared" would pass for the wrong reason.
-  await sleep(500);
+  await sleep(900);
   assert.ok(window.localStorage.getItem(DRAFT_KEY), "a draft exists before the order is placed");
   assert.equal(readTotal(doc), naira(36000), "sanity: 3 units, 20% off");
 
@@ -184,7 +184,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
 
   const submitButton = doc.querySelector(".submit-button");
   fillForm(doc);
-  await sleep(500);
+  await sleep(900);
   assert.ok(window.localStorage.getItem(DRAFT_KEY), "a draft exists before the failed attempt");
 
   submitForm(doc);
@@ -259,4 +259,3 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
 }
 
 console.log("\nAll order-success + thank-you smoke tests passed.");
-

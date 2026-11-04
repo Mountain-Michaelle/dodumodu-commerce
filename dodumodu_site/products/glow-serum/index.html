@@ -52,10 +52,10 @@
      bytes, and the preload below must declare the same srcset or it downloads
      the 640w file and then the <picture> throws it away. -->
 <link rel="preload" as="image"
-      href="https://picsum.photos/seed/glow-serum-hero/640/640.webp"
-      imagesrcset="https://picsum.photos/seed/glow-serum-hero/320/320.webp 320w, https://picsum.photos/seed/glow-serum-hero/640/640.webp 640w"
+      href="https://picsum.photos/seed/glow-serum-hero/640/640"
+      imagesrcset="https://picsum.photos/seed/glow-serum-hero/320/320 320w, https://picsum.photos/seed/glow-serum-hero/640/640 640w"
       imagesizes="(max-width: 480px) 92vw, 480px"
-      fetchpriority="high" type="image/webp">
+      fetchpriority="high" type="image/jpeg">
 
 <!-- =====================================================================
      01. CRITICAL CSS (Mobile-first, desktop responsive, CLS safe)
@@ -224,10 +224,6 @@
                onerror swaps in an inline SVG - a few hundred bytes, no request -
                so a dead image CDN can never leave a hole in the page. -->
           <picture>
-            <source type="image/webp"
-                    srcset="https://picsum.photos/seed/glow-serum-hero/320/320.webp 320w,
-                            https://picsum.photos/seed/glow-serum-hero/640/640.webp 640w"
-                    sizes="(max-width: 480px) 92vw, 480px">
             <img class="hero-fallback"
                  src="https://picsum.photos/seed/glow-serum-hero/640/640"
                  srcset="https://picsum.photos/seed/glow-serum-hero/320/320 320w,
@@ -764,7 +760,7 @@
   };
   form.querySelectorAll('textarea').forEach(function (el) {
     el.addEventListener('input', function () { grow(el); });
-    if (el.value) grow(el); /* empty: CSS min-height already gives the same 96px, so skip the reflow at load */
+    grow(el);
   });
 
   /* ---- Inline validation (same .field / [data-invalid] contract as the app) ---- */
