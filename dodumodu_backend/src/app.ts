@@ -118,10 +118,18 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
 
   if (active !== null && (path === active || path.startsWith(active + "/"))) {
     const rest = path === active ? "/" : path.slice(active.length);
-    const subReq = new Request(
-      "http://localhost" + rest + new URL(c.req.url).search,
-      c.req.raw,
-    );
+    const url = "http://localhost" + rest + new URL(c.req.url).search;
+    const raw = c.req.raw;
+    const method = raw.method;
+    const init: RequestInit & { duplex?: "half" } = {
+      method,
+      headers: raw.headers,
+      duplex: "half",
+    };
+    if (method !== "GET" && method !== "HEAD") {
+      init.body = raw.body;
+    }
+    const subReq = new Request(url, init);
 
     // Admin rate limiting (read + write) runs only for the admin namespace,
     // never for storefront traffic.
@@ -138,7 +146,8 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
     }
 
     if (rest === "/auth" || rest.startsWith("/auth/")) {
-      return adminAuthRoute.fetch(subReq, c.env);
+      const authRest = rest === "/auth" ? "/" : rest.slice("/auth".length);
+      return adminAuthRoute.request(authRest, init, c.env);
     }
     if (rest === "/admin-v2" || rest.startsWith("/admin-v2/")) {
       return adminAuthAdminRoute.fetch(subReq, c.env);
