@@ -21,12 +21,20 @@ export function loadAuthSecrets(env: AuthEnv): AuthSecrets {
     throttleKey = env.THROTTLE_KEY ? loadKey(env.THROTTLE_KEY, "THROTTLE_KEY") : null;
     totpEncKey = env.TOTP_ENC_KEY ? loadKey(env.TOTP_ENC_KEY, "TOTP_ENC_KEY") : null;
   } catch (cause) {
-    throw new AuthServerFaultError(cause);
+    throw new AuthServerFaultError(cause, {
+      code: "AUTH_SECRET_INVALID",
+      stage: "secrets.load",
+      category: "configuration",
+    });
   }
   if (!otpKey || !throttleKey || !totpEncKey) {
     // Missing secrets is OUR fault, not the caller's: fail closed as 503
     // {retry:true} (spec §4), never 401 and never a bare 500.
-    throw new AuthServerFaultError("auth secrets not configured");
+    throw new AuthServerFaultError("auth secrets not configured", {
+      code: "AUTH_SECRET_MISSING",
+      stage: "secrets.load",
+      category: "configuration",
+    });
   }
   return {
     otpKey, throttleKey, totpEncKey,

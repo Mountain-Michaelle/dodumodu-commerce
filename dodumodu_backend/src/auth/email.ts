@@ -17,7 +17,6 @@ export function resendProvider(apiKey: string, from: string): EmailProvider {
     async send(to, subject, text, idempotencyKey): Promise<boolean> {
       const body = JSON.stringify({ from, to, subject, text });
       let lastStatus: number | null = null;
-      let lastText = "";
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
@@ -31,13 +30,17 @@ export function resendProvider(apiKey: string, from: string): EmailProvider {
             signal: AbortSignal.timeout(EMAIL_TIMEOUT_MS),
           });
           lastStatus = res.status;
-          lastText = await res.text().catch(() => "");
           if (res.ok) return true;
         } catch {
           // retry once with the same key, then give up
         }
       }
-      console.error(`[auth] email send failed to ${to}: status=${lastStatus} body=${lastText.slice(0, 200)}`);
+      console.error("[auth]", JSON.stringify({
+        event: "email_provider_failure",
+        operation: "email.send",
+        status: lastStatus,
+        attempts: 2,
+      }));
       return false;
     },
   };
@@ -86,7 +89,11 @@ export function sendInBackground(
   to: string, subject: string, text: string, key: string,
 ): void {
   void afterResponse(c, provider.send(to, subject, text, key).then((ok) => {
-    if (!ok) console.error(`[auth] ${subject} send failed to ${to} (Resend rejected or error)`);
+    if (!ok) console.error("[auth]", JSON.stringify({
+      event: "email_provider_failure",
+      operation: "email.background_send",
+      delivery: "rejected",
+    }));
   }));
 }
 
@@ -163,4 +170,3 @@ export async function sendDeviceEvent(
     `device-${kind}:${to}`,
   );
 }
-

@@ -28,3 +28,37 @@ test("loadAuthSecrets maps malformed keys to an auth server fault", () => {
     AuthServerFaultError,
   );
 });
+
+test("loadAuthSecrets reports stable metadata for missing and malformed secrets", () => {
+  let missing: unknown;
+  try {
+    loadAuthSecrets({
+      DATABASE_URL: "",
+      OTP_KEY: undefined,
+      THROTTLE_KEY: key,
+      TOTP_ENC_KEY: key,
+    } as Parameters<typeof loadAuthSecrets>[0]);
+  } catch (error) {
+    missing = error;
+  }
+  assert.ok(missing instanceof AuthServerFaultError);
+  assert.equal(missing.code, "AUTH_SECRET_MISSING");
+  assert.equal(missing.stage, "secrets.load");
+  assert.equal(missing.category, "configuration");
+
+  let malformed: unknown;
+  try {
+    loadAuthSecrets({
+      DATABASE_URL: "",
+      OTP_KEY: "not base64!",
+      THROTHLE_KEY: key,
+      TOTP_ENC_KEY: key,
+    } as Parameters<typeof loadAuthSecrets>[0]);
+  } catch (error) {
+    malformed = error;
+  }
+  assert.ok(malformed instanceof AuthServerFaultError);
+  assert.equal(malformed.code, "AUTH_SECRET_INVALID");
+  assert.equal(malformed.stage, "secrets.load");
+  assert.equal(malformed.category, "configuration");
+});

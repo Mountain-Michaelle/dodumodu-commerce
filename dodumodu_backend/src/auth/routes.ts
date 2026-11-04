@@ -47,6 +47,7 @@ import { q, q1, sql } from "./sql";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { sha256, toHex, decryptSecret, totpMatch, randomToken } from "./crypto";
 import { providerForEnv, sendLoginCode, sendInBackground, testMailbox, fromForEnv } from "./email";
+import { authCorrelationId, authFailureDiagnostic, logAuthFailure } from "./diagnostics";
 import { setFlowCookie, setSidCookie, setDidCookie, setVidCookie, clearSidCookie, clearFlowCookie,
   getFlowToken } from "./ctx";
 import { loadFlow } from "./flows";
@@ -62,7 +63,10 @@ function mapError(c: Context<AppEnv>, e: unknown): Response {
     return c.json({ error: "Too many attempts", retry_after: e.retryAfterSecs }, 429);
   }
   if (e instanceof AuthServerFaultError) {
-    return c.json({ error: "Something went wrong", retry: true }, 503);
+    const correlationId = authCorrelationId();
+    logAuthFailure(authFailureDiagnostic(c, e, correlationId));
+    c.header("X-Correlation-ID", correlationId);
+    return c.json({ error: "Something went wrong", retry: true, error_id: correlationId }, 503);
   }
   if (e instanceof AuthForbiddenError) return c.json({ error: e.message }, 403);
   if (e instanceof AuthUnauthorizedError) return c.json({ error: e.message }, 401);
@@ -73,7 +77,10 @@ function mapError(c: Context<AppEnv>, e: unknown): Response {
     return c.json({ error: "Invalid code", recovery_available: true }, 401);
   }
   if (e instanceof AuthRejectError) return c.json(NEUTRAL_401, 401);
-  throw e; // unknown -> 500 (fail closed; never allow)
+  const correlationId = authCorrelationId();
+  logAuthFailure(authFailureDiagnostic(c, { code: "AUTH_UNEXPECTED", stage: "handler", cause: e }, correlationId));
+  c.header("X-Correlation-ID", correlationId);
+  return c.json({ error: "Something went wrong", error_id: correlationId }, 500);
 }
 
 async function guarded(c: Context<AppEnv>, fn: () => Promise<Response>): Promise<Response> {
@@ -197,7 +204,11 @@ authRoute.post("/request", async (c) => guarded(c, async () => {
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
     const ok = await sendLoginCode(provider, to, code, `login-code:${out.flowToken}:1`);
     if (!ok) {
-      return c.json({ error: "Unable to send code. Please try again later." }, 503);
+      throw new AuthServerFaultError(new Error("email provider rejected delivery"), {
+        code: "AUTH_EMAIL_DELIVERY_FAILED",
+        stage: "email.delivery",
+        category: "dependency",
+      });
     }
   }
   if (out.sendDeniedAlert) {
@@ -226,7 +237,11 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
     const ok = await sendLoginCode(provider, to, code, `login-code:${out.flowToken}:1`);
     if (!ok) {
-      return c.json({ error: "Unable to send code. Please try again later." }, 503);
+      throw new AuthServerFaultError(new Error("email provider rejected delivery"), {
+        code: "AUTH_EMAIL_DELIVERY_FAILED",
+        stage: "email.delivery",
+        category: "dependency",
+      });
     }
   }
   setFlowCookie(c as never, out.flowToken, FLOW_TTL_SECS);

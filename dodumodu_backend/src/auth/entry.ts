@@ -167,6 +167,10 @@ export async function requestCode(
   } catch (e) {
     if (e instanceof AuthLockedError) throw e;
     await refund(db, reservation).catch(() => {});
-    throw new AuthServerFaultError(e);
+    throw new AuthServerFaultError(e, {
+      code: "AUTH_DATABASE_REQUEST_FAILED",
+      stage: "authentication.request",
+      category: "dependency",
+    });
   }
 }

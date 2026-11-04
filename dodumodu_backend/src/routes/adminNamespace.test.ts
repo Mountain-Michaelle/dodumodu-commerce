@@ -5,6 +5,8 @@ import { adminRoute } from "./admin";
 import { authRoute } from "../auth/routes";
 import { adminBasePath, isLegacyAdminPath, DEFAULT_ADMIN_BASE_PATH } from "../config/adminBase";
 import type { Env } from "../env";
+import { registerDbDriver } from "../db";
+import { neonDriver } from "../dbDrivers/neon";
 
 /* Admin namespace dispatcher — spec §1, §6. */
 
@@ -113,6 +115,41 @@ function dispatchApp(env: Env) {
   app.get("/:slug", (c) => c.text("product:" + c.req.param("slug")));
   return app;
 }
+
+test("custom namespace missing auth secrets returns sanitized structured 503", async () => {
+  registerDbDriver(neonDriver);
+  const env = makeEnv({
+    ENVIRONMENT: "production",
+    ADMIN_BASE_PATH: "/4ehhi-5deggi",
+    ADMIN_AUTH_V2: "1",
+    DATABASE_URL: "postgresql://user:password@example.com/database",
+    OTP_KEY: "",
+    THROTTLE_KEY: "",
+    TOTP_ENC_KEY: "",
+  });
+  const errors: unknown[][] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => errors.push(args);
+  try {
+    const app = dispatchApp(env);
+    const response = await app.request("http://localhost/4ehhi-5deggi/auth/request", {
+      method: "POST",
+      headers: { Host: "localhost", Origin: "http://localhost", "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "admin@example.com" }),
+    }, env);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("X-Correlation-ID")?.length, 24);
+    const body = await response.json() as Record<string, unknown>;
+    assert.equal(body.error_id, response.headers.get("X-Correlation-ID"));
+    assert.equal(body.retry, true);
+    assert.equal(JSON.stringify(body).includes("password"), false);
+    const serializedLog = JSON.stringify(errors);
+    assert.match(serializedLog, /AUTH_SECRET_MISSING|auth secrets not configured/);
+    assert.doesNotMatch(serializedLog, /admin@example\.com|password|postgresql:/);
+  } finally {
+    console.error = originalError;
+  }
+});
 
 /* ---- Active namespace routing ---- */
 
