@@ -12,12 +12,6 @@ name: deploy-storefront
 # a build verified when its intended set no longer matches.
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "dodumodu_backend/**"
-      - "dodumodu_site/**"
-      - ".github/workflows/deploy-storefront.yml"
   workflow_dispatch:
     inputs:
       reason:
@@ -176,5 +170,4 @@ jobs:
         env:
           WORKER_URL: ${{ secrets.WORKER_URL }}
           DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
-
 

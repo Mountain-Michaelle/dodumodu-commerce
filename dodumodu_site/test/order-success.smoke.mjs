@@ -167,6 +167,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
   assert.equal(window.sessionStorage.getItem("skincare_order_idempotency_key"), null, "the idempotency key is gone");
   const handoff = JSON.parse(window.sessionStorage.getItem("skincare_last_order"));
   assert.equal(handoff.reference, CONFIRMED_COD.reference, "thank-you is handed the server's own reference");
+  window.close();
   console.log("PASS: a placed order leaves an empty form, no spinner, and a one-unit price");
 }
 
@@ -206,6 +207,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
     /That address is too short/,
     "the server's message is shown against the field it names",
   );
+  window.close();
   console.log("PASS: a refused order keeps every field, the draft and the explanation");
 }
 
@@ -255,6 +257,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
     /^ddmd-[0-9a-f]{15}$/.test(reference.textContent),
     "and shaped the way the order service writes it",
   );
+  dom.window.close();
   console.log("PASS: thank-you offers a way back, explains next steps, and shows a lowercase reference");
 }
 

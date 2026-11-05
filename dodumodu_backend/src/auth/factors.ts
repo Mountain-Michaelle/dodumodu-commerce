@@ -9,6 +9,7 @@ import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { AuthRejectError, AuthLockedError, AuthServerFaultError } from "./errors";
 import { loadFlow, type VerifySecrets, type Stage } from "./flows";
 import { CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS } from "./config";
+import { clearDeviceFailures, recordDeviceFailure } from "./device-failures";
 
 /**
  * POST /auth/code {code}. Real codes only verify on REAL flows (user_id NOT
@@ -54,9 +55,11 @@ export async function verifyCode(
         RETURNING f.stage`);
     if (!row) {
       await noteFuse(db, tag).catch(() => {});
+      await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip).catch(() => {});
       throw new AuthRejectError("code");
     }
     await clearKeys(db, [key]);
+    await clearDeviceFailures(db, flow.id);
     return { next: row.stage };
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError) throw e;

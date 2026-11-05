@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administrative users</title>
+  <link rel="stylesheet" href="/auth-ui/auth.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Administrative users</h1>
+    <div class="links">
+      <a href="/admin/">Back</a>
+    </div>
+    <form id="create-form" class="user-create">
+      <label for="create-email">Email</label>
+      <input id="create-email" type="email" autocomplete="email" required />
+      <label for="create-role">Role</label>
+      <select id="create-role">
+        <option value="general">General staff</option>
+        <option value="mono">Mono staff</option>
+        <option value="admin">Administrator</option>
+      </select>
+      <button class="small-btn" id="create-user" type="submit">Create user</button>
+    </form>
+    <div class="links user-filters">
+      <input id="search" type="search" placeholder="Search users" aria-label="Search users" />
+      <select id="role-filter" aria-label="Filter by role">
+        <option value="">All roles</option>
+        <option value="admin">Administrators</option>
+        <option value="general">General staff</option>
+        <option value="mono">Mono staff</option>
+      </select>
+    </div>
+    <div id="list" class="once"><span class="muted">Loading…</span></div>
+    <section id="access-panel" class="once" hidden>
+      <div class="links">
+        <h2 id="access-user"></h2>
+        <button class="ghost small-btn" id="access-close" type="button">Close</button>
+      </div>
+      <p class="muted small">Changes replace the user's explicit grants. Role defaults and admin-only restrictions are enforced by the server.</p>
+      <form id="access-form">
+        <div id="permission-list"></div>
+        <button class="small-btn" type="submit">Save permissions</button>
+      </form>
+    </section>
+    <p class="note" id="note" hidden></p>
+  </main>
+  <script src="/auth-ui/users.js" defer></script>
+</body>
+</html>

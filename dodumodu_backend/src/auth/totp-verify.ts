@@ -14,6 +14,7 @@ import {
   TOTP_FAILS_TO_UNLOCK_RECOVERY,
   TOTP_MAX_FAILS_PER_FLOW,
 } from "./config";
+import { clearDeviceFailures, recordDeviceFailure } from "./device-failures";
 
 function totpKey(tag: string, ip: string): string {
   return `totp:${tag}:${ip}`;
@@ -91,9 +92,11 @@ export async function verifyTotp(
            WHERE EXISTS (SELECT 1 FROM adv)`);
       if (!row) {
         await noteFuse(db, tag).catch(() => {});
+        await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip).catch(() => {});
         throw new AuthRejectError("backup");
       }
       await clearKeys(db, [key]);
+      await clearDeviceFailures(db, flow.id);
       return { next: row.stage, remaining: row.remaining, usedBackup: true };
     }
     const urow = await q1<{ enc: string | null; active: boolean; enroll_open: boolean }>(db,
@@ -136,8 +139,10 @@ export async function verifyTotp(
       ]);
       // Never advertise recovery on a flow that has just died.
       if (fail && fail.stage !== "dead" && fail.recovery_unlocked) {
+        await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip, false).catch(() => {});
         throw new AuthRecoverableError("totp");
       }
+      await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip, false).catch(() => {});
       throw new AuthRejectError("totp");
     }
     // Success: advance with the completion CASE (unacked backup generation ->
@@ -160,6 +165,7 @@ export async function verifyTotp(
       throw new AuthRejectError("totp");
     }
     await clearKeys(db, [key]);
+    await clearDeviceFailures(db, flow.id);
     return { next: adv.stage, remaining: null, usedBackup: false };
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError || e instanceof AuthRecoverableError) throw e;

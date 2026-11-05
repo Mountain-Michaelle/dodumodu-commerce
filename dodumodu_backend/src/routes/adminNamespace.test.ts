@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { adminRoute } from "./admin";
 import { authRoute } from "../auth/routes";
-import { adminBasePath, isLegacyAdminPath, DEFAULT_ADMIN_BASE_PATH } from "../config/adminBase";
+import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml, DEFAULT_ADMIN_BASE_PATH } from "../config/adminBase";
 import type { Env } from "../env";
 import { registerDbDriver } from "../db";
 import { neonDriver } from "../dbDrivers/neon";
@@ -170,6 +170,13 @@ test("admin assets work under active namespace", async () => {
   const res = await app.fetch(new Request("http://localhost/e5he78f823523/assets/auth.js"), env);
   assert.equal(res.status, 200, "auth.js is public → 200");
   assert.ok((await res.text()).includes("AUTH"), "auth.js content served");
+});
+
+test("auth management HTML rewrites auth-ui assets into the active namespace", () => {
+  const html = '<link rel="stylesheet" href="/auth-ui/auth.css"><script src="/auth-ui/devices.js" defer></script>';
+  const rewritten = rewriteAdminHtml(html, "/e5he78f823523");
+  assert.match(rewritten, /href="\/e5he78f823523\/assets\/auth\.css"/);
+  assert.match(rewritten, /src="\/e5he78f823523\/assets\/devices\.js"/);
 });
 
 test("console assets are served under the active namespace", async () => {

@@ -22,6 +22,7 @@ import { PHRASE_MAX_ATTEMPTS, BLOCK_IP_TTL_HOURS } from "./config";
 import { writeAuthLog } from "./authLog";
 import { createBlock, ipBlockHashHex } from "./blocks";
 import { enqueue } from "./outbox";
+import { recordDeviceFailure } from "./device-failures";
 
 export interface Guarded {
   ok: boolean;
@@ -127,6 +128,7 @@ export async function recoverWithBackup(
            RETURNING bc.set_id::text AS set_id`);
     if (!used) {
       const wrong = await registerWrongRecovery(db, flowId);
+      await recordDeviceFailure(db, secrets.throttleKey, flowId, ip).catch(() => {});
       await noteFuse(db, tag).catch(() => {});
       await writeAuthLog(db, {
         event: "backup_code_fail", status: wrong.blocked ? "blocked" : "fail",
@@ -145,4 +147,3 @@ export async function recoverWithBackup(
     void reservation;
   }
 }
-
