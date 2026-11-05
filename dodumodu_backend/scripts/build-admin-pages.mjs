@@ -55,10 +55,13 @@ const out =
   lit('ADMIN_DEVICES_HTML', read('devices.html')
     .replaceAll('/auth-ui/', '/admin/assets/')) +
   lit('ADMIN_DEVICES_JS', read('devices.js')) +
+  lit('ADMIN_USERS_HTML', read('users.html')
+    .replaceAll('/auth-ui/', '/admin/assets/')) +
+  lit('ADMIN_USERS_JS', read('users.js')) +
   lit('ADMIN_QR_JS', read('qr.js')) +
   lit('ADMIN_QR_LOGO_MJS', read('qr-logo.mjs'))
 
 writeFileSync(OUT, out)
 
 console.log(`built ${OUT}`)
-console.log(`  admin login page, console shell, sessions, devices, assets`)
+console.log(`  admin login page, console shell, sessions, devices, users, assets`)

@@ -18,6 +18,7 @@ const pages = [
   { html: "login.html", js: "auth.js" },
   { html: "sessions.html", js: "sessions.js" },
   { html: "devices.html", js: "devices.js" },
+  { html: "users.html", js: "users.js" },
 ];
 
 test("every JS getElementById target exists in its HTML", () => {
@@ -70,4 +71,27 @@ test("autocomplete hints match the spec (one-time-code, no passwords)", () => {
   assert.match(js, /one-time-code/, "emailed code + TOTP + backup codes use one-time-code");
   assert.doesNotMatch(js, /current-password/, "recovery phrase removed: no current-password hint");
   assert.doesNotMatch(js, /new-password/, "recovery phrase removed: no new-password hint");
+});
+
+test("user management UI covers create, roles and permissions", () => {
+  const html = read("users.html");
+  const js = read("users.js");
+  assert.match(html, /id="create-email"/);
+  assert.match(html, /id="role-filter"/);
+  assert.match(html, /id="permission-list"/);
+  assert.match(js, /permissions\/registry/, "loads the server permission registry");
+  assert.match(js, /JSON\.stringify\(\{ perms \}\)/, "saves the complete permission grant set");
+  assert.match(js, /body: JSON\.stringify\(\{ role:/, "exposes role changes");
+});
+
+test("device and session management UI calls their real mutation endpoints", () => {
+  const devices = read("devices.js");
+  const sessions = read("sessions.js");
+  assert.match(devices, /\$\{ADMIN_BASE\}\/admin-v2\/devices/, "loads devices from the admin namespace");
+  assert.match(devices, /method: "DELETE"/, "revokes a device");
+  assert.match(devices, /\/devices\/invite/, "creates a device invite");
+  assert.match(sessions, /\$\{ADMIN_BASE\}\/auth\/sessions/, "loads sessions from the auth namespace");
+  assert.match(sessions, /\/auth\/sessions\/revoke-others/, "revokes other sessions");
+  assert.match(sessions, /method: "DELETE"/, "revokes an individual session");
+  assert.match(sessions, /response\.ok/, "reports mutation failures instead of falsely succeeding");
 });

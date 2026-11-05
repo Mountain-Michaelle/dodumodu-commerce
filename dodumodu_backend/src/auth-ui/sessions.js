@@ -2,13 +2,14 @@
  * innerHTML) so a stored user-agent can't inject markup (spec §5.9). */
 "use strict";
 const $ = (id) => document.getElementById(id);
+const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
 
 function note(kind, text) { const n = $("note"); n.className = "note " + kind; n.textContent = text; n.hidden = !text; }
 
 async function load() {
-const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
   const res = await fetch(`${ADMIN_BASE}/auth/sessions`, { credentials: "same-origin" });
-  if (res.status === 401) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
+  if (res.status === 401 || res.status === 403) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
+  if (!res.ok) { note("error", "Could not load sessions."); return; }
   const { sessions } = await res.json();
   const list = $("list");
   list.innerHTML = "";
@@ -26,8 +27,15 @@ const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "End";
       btn.addEventListener("click", async () => {
-        await fetch(`${ADMIN_BASE}/auth/sessions/` + encodeURIComponent(s.sid), { method: "DELETE", credentials: "same-origin" });
-        load();
+        btn.disabled = true;
+        const response = await fetch(`${ADMIN_BASE}/auth/sessions/` + encodeURIComponent(s.sid), { method: "DELETE", credentials: "same-origin" });
+        if (!response.ok) {
+          btn.disabled = false;
+          note("error", "Could not end that session.");
+          return;
+        }
+        note("ok", "Session ended.");
+        await load();
       });
       row.appendChild(btn);
     } else {
@@ -39,11 +47,18 @@ const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
 }
 
 $("revoke-others").addEventListener("click", async () => {
-  await fetch(`${ADMIN_BASE}/auth/sessions/revoke-others`, { method: "POST", credentials: "same-origin" });
-  note("ok", "Other sessions ended."); load();
+  const button = $("revoke-others");
+  button.disabled = true;
+  const response = await fetch(`${ADMIN_BASE}/auth/sessions/revoke-others`, { method: "POST", credentials: "same-origin" });
+  button.disabled = false;
+  if (!response.ok) { note("error", "Could not end other sessions."); return; }
+  const { revoked } = await response.json();
+  note("ok", `${revoked} other session${revoked === 1 ? "" : "s"} ended.`);
+  await load();
 });
 $("logout").addEventListener("click", async () => {
-  await fetch(`${ADMIN_BASE}/auth/logout`, { method: "POST", credentials: "same-origin" });
+  const response = await fetch(`${ADMIN_BASE}/auth/logout`, { method: "POST", credentials: "same-origin" });
+  if (!response.ok) { note("error", "Could not sign out."); return; }
   location.href = `${ADMIN_BASE}/sign-in/`;
 });
 load();

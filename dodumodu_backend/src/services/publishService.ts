@@ -129,7 +129,10 @@ export const publishService = {
       buildStatus: "pending",
     });
 
-    const deployment = await triggerGitHubDispatch(env);
+    const deployment = await triggerGitHubDispatch(env, {
+      publishId: record.id,
+      productId: payload.product.id,
+    });
     // Only write a status when there is something to say. A local publish with no
     // hook configured stays "pending" rather than being marked "failed" for the
     // absence of something that was never expected to be there.
@@ -163,7 +166,10 @@ export const publishService = {
     const latest = await publishesRepo.latestForProduct(db, productId);
     if (!latest) return null;
 
-    const deployment = await triggerGitHubDispatch(env);
+    const deployment = await triggerGitHubDispatch(env, {
+      publishId: latest.id,
+      productId: latest.productId,
+    });
     await publishesRepo.markBuildStatus(db, latest.id, deployment.status);
     console.log(JSON.stringify({
       event: "product_redeploy",
@@ -173,5 +179,4 @@ export const publishService = {
     return { publishId: latest.id, deployment };
   },
 };
-
 

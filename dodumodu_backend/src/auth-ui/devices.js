@@ -3,13 +3,14 @@
  * 403; the UI re-prompts for an authenticator code, then retries (spec §5.9). */
 "use strict";
 const $ = (id) => document.getElementById(id);
+const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
 
 function note(kind, text) { const n = $("note"); n.className = "note " + kind; n.textContent = text; n.hidden = !text; }
 
 async function load() {
-const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
   const res = await fetch(`${ADMIN_BASE}/admin-v2/devices`, { credentials: "same-origin" });
   if (res.status === 401 || res.status === 403) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
+  if (!res.ok) { note("error", "Could not load trusted devices."); return; }
   const { devices } = await res.json();
   const list = $("list");
   list.innerHTML = "";
@@ -26,7 +27,10 @@ const ADMIN_BASE = window.ADMIN_BASE_PATH || "/admin";
     if (d.status !== "revoked") {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "Revoke";
-      btn.addEventListener("click", () => revoke(d.id));
+      btn.addEventListener("click", () => {
+        if (!confirm(`Revoke ${d.label || "this device"}? Its sessions will be ended.`)) return;
+        revoke(d.id, btn);
+      });
       row.appendChild(btn);
     }
     list.appendChild(row);
@@ -48,14 +52,17 @@ async function withStepup(action) {
   return res;
 }
 
-async function revoke(id) {
+async function revoke(id, button) {
+  button.disabled = true;
   const res = await withStepup(() =>
     fetch(`${ADMIN_BASE}/admin-v2/devices/` + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }));
-  if (res && res.status === 200) { note("ok", "Device revoked."); load(); }
-  else { note("error", "Could not revoke that device."); }
+  if (res && res.status === 200) { note("ok", "Device revoked."); await load(); }
+  else { button.disabled = false; note("error", "Could not revoke that device."); }
 }
 
 $("invite").addEventListener("click", async () => {
+  const button = $("invite");
+  button.disabled = true;
   const res = await withStepup(() =>
     fetch(`${ADMIN_BASE}/admin-v2/devices/invite`, { method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" }, body: "{}" }));
@@ -68,6 +75,7 @@ $("invite").addEventListener("click", async () => {
     const a = document.createElement("a"); a.href = invite_url; a.textContent = invite_url;
     box.appendChild(p); box.appendChild(a); box.hidden = false;
   } else { note("error", "Could not create an invite."); }
+  button.disabled = false;
 });
 
 load();

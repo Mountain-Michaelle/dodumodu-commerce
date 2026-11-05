@@ -34,6 +34,7 @@ export const PHRASE_MAX = 64;
 // panel; the 5th kills the flow. 3rd wrong phrase/backup blocks device+IP.
 export const TOTP_FAILS_TO_UNLOCK_RECOVERY = 3;
 export const TOTP_MAX_FAILS_PER_FLOW = 5;
+export const DEVICE_AUTH_MAX_FAILURES = 3;
 export const PHRASE_MAX_ATTEMPTS = 3;
 export const SESSION_IDLE_SECS_STAFF = 3600;
 export const SESSION_IDLE_SECS_ADMIN = 3600;

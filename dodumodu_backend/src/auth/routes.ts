@@ -41,7 +41,7 @@ import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin
 import { liftBlock } from "./blocks";
 import { grantStepup, listSessions,
   revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
-  deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes } from "./admin-ops";
+  deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes, replaceGrants } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
 import { q, q1, sql } from "./sql";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
@@ -606,6 +606,7 @@ adminRoute.get("/notifications", async (c) => guarded(c, async () => {
 // target's access changes on the next request without a logout.
 adminRoute.patch("/users/:id", async (c) => guarded(c, async () => {
   const s = authInit(c);
+  await guard({ perm: "users.manage" })(c);
   const sess = await requireStepUp(c);
   const target = await resolveUser(s.db, c.req.param("id") ?? "");
   if (!target) throw new AuthRejectError("user");
@@ -631,6 +632,7 @@ adminRoute.patch("/users/:id", async (c) => guarded(c, async () => {
 // POST /admin/users -> create a user (users.manage + step-up for the admin role).
 adminRoute.post("/users", async (c) => guarded(c, async () => {
   const s = authInit(c);
+  await guard({ perm: "users.manage" })(c);
   const sess = await requireStepUp(c);
   const { email, role } = await json<{ email?: string; role?: string }>(c);
   const id = await createUser(s.db, email, role ?? "staff", sess.userId);
@@ -639,8 +641,20 @@ adminRoute.post("/users", async (c) => guarded(c, async () => {
 
 adminRoute.put("/users/:id/permissions", async (c) => guarded(c, async () => {
   const s = authInit(c);
+  await guard({ perm: "access.manage" })(c);
   const sess = await requireStepUp(c);
-  const { perm, grant } = await json<{ perm?: string; grant?: boolean }>(c);
+  const body = await json<{ perm?: string; grant?: boolean; perms?: unknown }>(c);
+  if (body.perms !== undefined) {
+    const { perms } = body;
+    if (!Array.isArray(perms) || !perms.every((key) => typeof key === "string")) {
+      throw new AuthRejectError("perms");
+    }
+    const target = await resolveUser(s.db, c.req.param("id") ?? "");
+    if (!target || target.id === sess.userId) throw new AuthForbiddenError("Cannot change your own access");
+    const result = await replaceGrants(s.db, target.id, target.role, perms as string[]);
+    return c.json({ ok: true, effective: result.effective, removed: result.removed });
+  }
+  const { perm, grant } = body;
   if (!perm || !isV2Perm(perm)) throw new AuthRejectError("perm");
   const target = await resolveUser(s.db, c.req.param("id") ?? "");
   if (!target) throw new AuthRejectError("user");

@@ -143,6 +143,21 @@ export const v2api = {
 
 /** The signed-in operator and what they may do. Drives which buttons exist. */
 export async function loadIdentity() {
+  try {
+    const res = await fetch(`${API_BASE}${ADMIN_BASE}/auth/me`, { credentials: "same-origin" });
+    if (res.ok) {
+      const session = await res.json();
+      if (session && typeof session.email === "string") {
+        return {
+          email: session.email,
+          role: session.role,
+          permissions: session.perms || [],
+        };
+      }
+    }
+  } catch {
+    // Fall back to the legacy Access identity when v2 auth is disabled.
+  }
   return api.get("/me");
 }
 

@@ -154,7 +154,9 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
       return adminAuthRoute.request(authRest, init, c.env);
     }
     if (rest === "/admin-v2" || rest.startsWith("/admin-v2/")) {
-      return adminAuthAdminRoute.fetch(subReq, c.env);
+      const adminV2Rest = rest === "/admin-v2" ? "/" : rest.slice("/admin-v2".length);
+      const adminUrl = "http://localhost" + adminV2Rest + new URL(c.req.url).search;
+      return adminAuthAdminRoute.fetch(new Request(adminUrl, init), c.env);
     }
     if (adminAuthEnabled(c.env as never) && (rest === "/" || rest === "")) {
       if (!getSidToken(c as never)) return c.text("Unauthorized", 401);

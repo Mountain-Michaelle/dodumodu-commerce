@@ -50,6 +50,8 @@ import {
   ADMIN_DEVICES_HTML,
   ADMIN_SESSIONS_JS,
   ADMIN_DEVICES_JS,
+  ADMIN_USERS_HTML,
+  ADMIN_USERS_JS,
   ADMIN_QR_JS,
   ADMIN_QR_LOGO_MJS,
   ADMIN_CONSOLE_ASSETS,
@@ -88,6 +90,7 @@ const PUBLIC_PATHS = [
   "/assets/auth.js",
   "/assets/sessions.js",
   "/assets/devices.js",
+  "/assets/users.js",
   "/assets/qr.js",
   "/assets/qr-logo.mjs",
 ];
@@ -188,6 +191,10 @@ adminRoute.get("/assets/devices.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(namespaceJs(ADMIN_DEVICES_JS, c.env), 200);
 });
+adminRoute.get("/assets/users.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(namespaceJs(ADMIN_USERS_JS, c.env), 200);
+});
 adminRoute.get("/assets/qr.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(ADMIN_QR_JS, 200);
@@ -223,6 +230,8 @@ adminRoute.get("/sessions", (c) => c.html(namespaceHtml(ADMIN_SESSIONS_HTML, c.e
 adminRoute.get("/sessions/", (c) => c.html(namespaceHtml(ADMIN_SESSIONS_HTML, c.env), 200));
 adminRoute.get("/devices", (c) => c.html(namespaceHtml(ADMIN_DEVICES_HTML, c.env), 200));
 adminRoute.get("/devices/", (c) => c.html(namespaceHtml(ADMIN_DEVICES_HTML, c.env), 200));
+adminRoute.get("/users", (c) => c.html(namespaceHtml(ADMIN_USERS_HTML, c.env), 200));
+adminRoute.get("/users/", (c) => c.html(namespaceHtml(ADMIN_USERS_HTML, c.env), 200));
 
 /**
  * The one place a thrown error becomes an HTTP response.

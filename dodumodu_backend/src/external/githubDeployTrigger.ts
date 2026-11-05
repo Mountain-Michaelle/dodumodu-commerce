@@ -25,7 +25,10 @@ const DISPATCH_TIMEOUT_MS = 10_000;
 const REPO = "Mountain-Michaelle/dodumodu-commerce";
 const EVENT_TYPE = "storefront-deploy";
 
-export async function triggerGitHubDispatch(env: Env): Promise<DispatchResult> {
+export async function triggerGitHubDispatch(
+  env: Env,
+  context?: { publishId?: number | string; productId?: number | string; buildId?: number | string },
+): Promise<DispatchResult> {
   const token = (env.GITHUB_DEPLOY_TOKEN ?? "").trim();
 
   if (token === "") {
@@ -59,7 +62,12 @@ export async function triggerGitHubDispatch(env: Env): Promise<DispatchResult> {
       },
       body: JSON.stringify({
         event_type: EVENT_TYPE,
-        client_payload: { source: "admin-publish" },
+        client_payload: {
+          source: "admin-publish",
+          publish_id: context?.publishId ?? null,
+          product_id: context?.productId ?? null,
+          build_id: context?.buildId ?? null,
+        },
       }),
     });
 
