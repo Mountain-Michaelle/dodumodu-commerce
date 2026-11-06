@@ -1,5 +1,5 @@
 import { el } from "./dom.js";
-import { v2api } from "./api.js";
+import { api, v2api } from "./api.js";
 import {
   adminTable, adminField, fieldset, saveBar, readForm, applyFieldErrors,
   statusBadge, toast, toastError, openModal, confirmDialog, definitionList,
@@ -125,7 +125,10 @@ export async function withStepUpRetry(run) {
     if (err?.status !== 403) throw err;
     const code = window.prompt("Re-enter your authenticator code to confirm this sensitive action:");
     if (!code) throw err;
-    await v2api.post("/auth/stepup", { code }).catch(() => { throw err; });
+    // Step-up lives on /auth (authRoute), NOT under /admin-v2 (v2api).
+    // api.post builds ${ADMIN_BASE}${path} -> ${ADMIN_BASE}/auth/stepup,
+    // matching the backend route registered at src/auth/routes.ts:376.
+    await api.post("/auth/stepup", { code }).catch(() => { throw err; });
     return run();
   }
 }
