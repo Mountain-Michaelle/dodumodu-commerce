@@ -38,6 +38,7 @@ import { deviceStart } from "./devices";
 import { createDeviceInvite, acceptDeviceInvite, revokeDevice, listDevices } from "./device-invites";
 import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin,
   listAccountRequests, resolveAccountRequest, listNotifications } from "./admin-reads";
+import { notificationService } from "../services/notificationService";
 import { liftBlock } from "./blocks";
 import { grantStepup, listSessions,
   revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
@@ -597,8 +598,29 @@ adminRoute.post("/account-requests/:id/resolve", async (c) => guarded(c, async (
 // GET /admin-v2/notifications -> open requests + dead letters + live blocks.
 adminRoute.get("/notifications", async (c) => guarded(c, async () => {
   const s = authInit(c);
-  await requireSession(c);
-  return c.json(await listNotifications(s.db));
+  const sess = await requireSession(c);
+  const queues = await listNotifications(s.db);
+  const notifications = await notificationService.list(s.db, sess.userId);
+  const unread = (await notificationService.unreadCount(s.db, sess.userId)) + queues.unread;
+  return c.json({ ...queues, notifications, unread });
+}));
+
+// PATCH /admin-v2/notifications/:id/read -> marks one persisted notification.
+adminRoute.patch("/notifications/:id/read", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireSession(c);
+  const ok = await notificationService.markRead(s.db, sess.userId, c.req.param("id") ?? "");
+  if (!ok) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true, unread: await notificationService.unreadCount(s.db, sess.userId) });
+}));
+
+// POST /admin-v2/notifications/read-all -> marks only the caller's notifications.
+adminRoute.post("/notifications/read-all", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireSession(c);
+  await notificationService.markAllRead(s.db, sess.userId);
+  const queues = await listNotifications(s.db);
+  return c.json({ ok: true, unread: queues.unread });
 }));
 
 // PATCH /admin-v2/users/:id -> names, role, active/staff flags (step-up).

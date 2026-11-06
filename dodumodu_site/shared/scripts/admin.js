@@ -190,11 +190,17 @@ async function refreshBell() {
     if (!data || typeof data.unread !== "number") return;
     const link = document.querySelector('a[href="#notifications"]');
     const host = link?.parentElement;
-    if (!host || host.querySelector(".nav-badge")) return;
+    if (!host) return;
+    const existing = host.querySelector(".nav-badge");
     if (data.unread > 0) {
+      if (existing) {
+        existing.textContent = String(data.unread);
+        existing.setAttribute("aria-label", `${data.unread} items need attention`);
+        return;
+      }
       const badge = el("span", { class: "nav-badge", text: String(data.unread), "aria-label": `${data.unread} items need attention` });
       host.append(badge);
-    }
+    } else existing?.remove();
   } catch { /* notifications unavailable — the page still lists it */ }
 }
 

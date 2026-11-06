@@ -9,6 +9,7 @@ import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
 import { siteBuildsRepo } from "../data/siteBuildsRepo";
 import { publishService } from "../services/publishService";
+import { notificationService } from "../services/notificationService";
 import {
   verifyStorefront, resolvePublishState, publishVersion, readPublishVersion, readBuildId,
 } from "../services/storefrontStatus";
@@ -523,6 +524,20 @@ adminRoute.post("/products/:id/publish", async (c) => {
 
   try {
     const { record, deployment } = await publishService.publish(db, c.env, product.slug, c.get("principal").email);
+    try {
+      await notificationService.createForAdmins(db, {
+        type: "publish_requested",
+        title: "Product publish requested",
+        body: `${product.name} - rebuild ${deployment.status}`,
+        href: `/products/${product.id}`,
+        dedupeKey: `publish-requested:${record.id}`,
+      });
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: "notification_create_failed", notificationType: "publish_requested",
+        publishId: record.id, error: err instanceof Error ? err.message : String(err),
+      }));
+    }
     // 200 either way, and deliberately so. The publish SUCCEEDED - the immutable
     // snapshot exists and is what customers will receive once the storefront
     // rebuilds. A deploy hook failure is reported in the body, because returning

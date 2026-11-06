@@ -168,13 +168,16 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
       return c.html(rewriteAdminHtml(ADMIN_CONSOLE_HTML, base), 200);
     }
     if (adminAuthEnabled(c.env as never)) {
-      if (!getSidToken(c as never)) return c.text("Unauthorized", 401);
-      const session = await loadSession(c as never);
-      if (!session || session.role !== "admin") return c.text("Unauthorized", 401);
-      const headers = new Headers(raw.headers);
-      headers.set("cf-access-authenticated-user-email", session.email);
-      const legacyRequest = new Request(url, { ...init, headers });
-      return adminRoute.fetch(legacyRequest, c.env);
+      const sid = getSidToken(c as never);
+      if (sid) {
+        const session = await loadSession(c as never);
+        if (!session || session.role !== "admin") return c.text("Unauthorized", 401);
+        const headers = new Headers(raw.headers);
+        headers.set("cf-access-authenticated-user-email", session.email);
+        const legacyRequest = new Request(url, { ...init, headers });
+        return adminRoute.fetch(legacyRequest, c.env);
+      }
+      // No v2 session cookie: fall through to legacy admin auth (Cloudflare Access header)
     }
     return adminRoute.fetch(subReq, c.env);
   }
