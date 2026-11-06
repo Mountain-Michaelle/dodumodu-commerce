@@ -130,7 +130,7 @@ function rowFor(user) {
 
 async function load() {
   const response = await fetch(USERS_API, { credentials: "same-origin" });
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     location.href = `${BASE}/sign-in/`;
     return;
   }

@@ -8,7 +8,7 @@ function note(kind, text) { const n = $("note"); n.className = "note " + kind; n
 
 async function load() {
   const res = await fetch(`${ADMIN_BASE}/auth/sessions`, { credentials: "same-origin" });
-  if (res.status === 401 || res.status === 403) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
+  if (res.status === 401) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
   if (!res.ok) { note("error", "Could not load sessions."); return; }
   const { sessions } = await res.json();
   const list = $("list");
