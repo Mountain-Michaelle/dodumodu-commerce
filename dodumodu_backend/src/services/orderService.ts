@@ -10,6 +10,7 @@ import { paymentService } from "./paymentService";
 import { codPolicyService, CodNotAvailableError } from "./codPolicyService";
 import type { OrderInput } from "../validation/orderSchema";
 import { normalizePhone } from "../shared/normalizePhone";
+import { notificationService } from "./notificationService";
 
 export class ProductNotFoundError extends Error {}
 export class PackageNotFoundError extends Error {}
@@ -202,6 +203,20 @@ export const orderService = {
     }
 
     await ordersRepo.writeStatusHistory(db, order.id, null, order.status, "system");
+    try {
+      await notificationService.createForAdmins(db, {
+        type: "order_created",
+        title: "New order received",
+        body: `${order.reference} - ${order.quantity} item${order.quantity === 1 ? "" : "s"} (${order.status === "confirmed_cod" ? "Pay on delivery" : "Payment pending"})`,
+        href: `/orders/${order.id}`,
+        dedupeKey: `order-created:${order.id}`,
+      });
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: "notification_create_failed", notificationType: "order_created",
+        orderId: order.id, error: err instanceof Error ? err.message : String(err),
+      }));
+    }
     console.log(JSON.stringify({
       event: "order_created", reference: order.reference,
       quantity: order.quantity, discountPercent: order.discountPercent,

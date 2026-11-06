@@ -2,6 +2,7 @@ import type { Db } from "../db";
 import type { Env } from "../env";
 import { ordersRepo, type OrderRow } from "../data/ordersRepo";
 import { opayClient, type OpayWebhookPayload } from "../external/opayClient";
+import { notificationService } from "./notificationService";
 
 const RECONCILE_STALE_MINUTES = 10;
 const RECONCILE_ALERT_RETRY_THRESHOLD = 5;
@@ -60,6 +61,22 @@ export const paymentService = {
     const { applied, order: updated } = await ordersRepo.applyStatusTransition(
       db, order.id, "awaiting_payment", toStatus, "webhook",
     );
+    if (applied) {
+      try {
+        await notificationService.createForAdmins(db, {
+          type: toStatus === "paid" ? "payment_succeeded" : "payment_failed",
+          title: toStatus === "paid" ? "Payment received" : "Payment failed",
+          body: `${order.reference} - ${order.amount} NGN`,
+          href: `/orders/${order.id}`,
+          dedupeKey: `payment-${order.id}-${toStatus}`,
+        });
+      } catch (err) {
+        console.error(JSON.stringify({
+          event: "notification_create_failed", notificationType: toStatus === "paid" ? "payment_succeeded" : "payment_failed",
+          orderId: order.id, error: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    }
     return applied ? { kind: "applied", order: updated! } : { kind: "no_op", order: updated ?? order };
   },
 
@@ -78,7 +95,23 @@ export const paymentService = {
         const { applied } = await ordersRepo.applyStatusTransition(
           db, order.id, "awaiting_payment", toStatus, "reconcile",
         );
-        if (applied) repaired.push(order.id);
+        if (applied) {
+          repaired.push(order.id);
+          try {
+            await notificationService.createForAdmins(db, {
+              type: toStatus === "paid" ? "payment_succeeded" : "payment_failed",
+              title: toStatus === "paid" ? "Payment received" : "Payment failed",
+              body: `${order.reference} - reconciled ${order.amount} NGN`,
+              href: `/orders/${order.id}`,
+              dedupeKey: `payment-reconcile-${order.id}-${toStatus}`,
+            });
+          } catch (err) {
+            console.error(JSON.stringify({
+              event: "notification_create_failed", notificationType: toStatus === "paid" ? "payment_succeeded" : "payment_failed",
+              orderId: order.id, error: err instanceof Error ? err.message : String(err),
+            }));
+          }
+        }
       }
 
       if (order.retryCount + 1 >= RECONCILE_ALERT_RETRY_THRESHOLD) {
