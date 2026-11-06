@@ -254,3 +254,14 @@ export async function revokeOtherSessions(
       RETURNING sid::text AS sid`);
   return rows.length;
 }
+
+/** End every session of a user (admin revoke-all). Does not bump
+ * session_version — use forceLogout when that stronger invalidation is needed. */
+export async function revokeAllSessions(
+  db: Db, userId: string,
+): Promise<number> {
+  const rows = await q<{ sid: string }>(db,
+    sql`DELETE FROM aa_sessions WHERE user_id = ${userId}
+      RETURNING sid::text AS sid`);
+  return rows.length;
+}
