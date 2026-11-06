@@ -41,7 +41,7 @@ import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin
 import { notificationService } from "../services/notificationService";
 import { liftBlock } from "./blocks";
 import { grantStepup, listSessions,
-  revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
+  revokeSession, revokeOtherSessions, revokeAllSessions, createUser, grantPerm, revokePerm, patchUser,
   deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes, replaceGrants } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
 import { q, q1, sql } from "./sql";
@@ -543,6 +543,57 @@ adminRoute.get("/users/:id", async (c) => guarded(c, async () => {
   return c.json(detail);
 }));
 
+// GET /admin-v2/users/:id/sessions -> sessions of the target user (admin, users.view).
+adminRoute.get("/users/:id/sessions", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.view" })(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) return c.json({ error: "Not found" }, 404);
+  return c.json({ sessions: await listSessions(s.db, target.id, "") });
+}));
+
+// DELETE /admin-v2/users/:id/sessions/:sid -> end one session of the target user.
+adminRoute.delete("/users/:id/sessions/:sid", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.manage" })(c);
+  await requireStepUp(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) return c.json({ error: "Not found" }, 404);
+  await revokeSession(s.db, c.req.param("sid") ?? "", target.id);
+  return c.json({ ok: true });
+}));
+
+// POST /admin-v2/users/:id/sessions/revoke-all -> end every session of the target user.
+adminRoute.post("/users/:id/sessions/revoke-all", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.manage" })(c);
+  await requireStepUp(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) return c.json({ error: "Not found" }, 404);
+  const n = await revokeAllSessions(s.db, target.id);
+  return c.json({ ok: true, revoked: n });
+}));
+
+// GET /admin-v2/users/:id/devices -> devices of the target user (admin, users.view).
+adminRoute.get("/users/:id/devices", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.view" })(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) return c.json({ error: "Not found" }, 404);
+  return c.json({ devices: await listDevices(s.db, target.id) });
+}));
+
+// DELETE /admin-v2/users/:id/devices/:deviceId -> revoke a device of the target user.
+adminRoute.delete("/users/:id/devices/:deviceId", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await guard({ perm: "users.manage" })(c);
+  await requireStepUp(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) return c.json({ error: "Not found" }, 404);
+  await revokeDevice(s.db, c.req.param("deviceId") ?? "", target.id, true);
+  return c.json({ ok: true });
+}));
+
 // GET /admin-v2/permissions/registry -> grouped registry for the access matrix.
 adminRoute.get("/permissions/registry", async (c) => guarded(c, async () => {
   await guard({ perm: "users.view" })(c);
@@ -781,3 +832,4 @@ adminRoute.post("/internal/cleanup", async (c) => guarded(c, async () => {
   const counts = await runCleanup(s.db, 500);
   return c.json({ ok: true, counts });
 }));
+

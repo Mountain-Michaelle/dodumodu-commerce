@@ -11,6 +11,14 @@ function note(kind, text) {
   el.hidden = !text;
 }
 
+function panelNote(panel, kind, text) {
+  const el = $(panel + "-note");
+  if (!el) return;
+  el.className = "note " + kind;
+  el.textContent = text;
+  el.hidden = !text;
+}
+
 async function stepUp(action) {
   let response = await action();
   if (response.status !== 403) return response;
@@ -28,8 +36,20 @@ async function stepUp(action) {
 let users = [];
 let registry = [];
 
+// Selected-user security state (sessions/devices panels).
+let selectedUserId = null;
+let selectedUserEmail = null;
+let sessionsRequestId = 0;
+let devicesRequestId = 0;
+
 function errorMessage(response) {
   return response.status === 403 ? "Fresh administrator verification is required." : "The operation could not be completed.";
+}
+
+function shortSid(sid) {
+  if (!sid) return "—";
+  const s = String(sid);
+  return s.length > 8 ? s.slice(0, 4) + "…" + s.slice(-4) : s;
 }
 
 function rowFor(user) {
@@ -89,6 +109,21 @@ function rowFor(user) {
     access.addEventListener("click", () => openAccess(user));
     actions.appendChild(access);
   }
+
+  const sessionsBtn = document.createElement("button");
+  sessionsBtn.type = "button";
+  sessionsBtn.className = "ghost small-btn";
+  sessionsBtn.textContent = "Sessions";
+  sessionsBtn.addEventListener("click", () => openSessions(user));
+  actions.appendChild(sessionsBtn);
+
+  const devicesBtn = document.createElement("button");
+  devicesBtn.type = "button";
+  devicesBtn.className = "ghost small-btn";
+  devicesBtn.textContent = "Devices";
+  devicesBtn.addEventListener("click", () => openDevices(user));
+  actions.appendChild(devicesBtn);
+
   row.appendChild(actions);
   return row;
 }
@@ -194,5 +229,155 @@ $("access-form").addEventListener("submit", async (event) => {
 });
 $("search").addEventListener("input", load);
 $("role-filter").addEventListener("change", load);
+
+// --- Sessions panel ---
+
+function closePanels() {
+  $("sessions-panel").hidden = true;
+  $("devices-panel").hidden = true;
+  selectedUserId = null;
+  selectedUserEmail = null;
+  $("sessions-list").replaceChildren();
+  $("sessions-loading").hidden = true;
+  $("sessions-empty").hidden = true;
+  $("sessions-actions").hidden = true;
+  panelNote("sessions", "", "");
+  $("devices-list").replaceChildren();
+  $("devices-loading").hidden = true;
+  $("devices-empty").hidden = true;
+  panelNote("devices", "", "");
+}
+
+async function openSessions(user) {
+  closePanels();
+  selectedUserId = user.id;
+  selectedUserEmail = user.email;
+  $("sessions-user").textContent = user.email + " — " + user.role;
+  $("sessions-user-email").textContent = user.email;
+  $("sessions-panel").hidden = false;
+  const reqId = ++sessionsRequestId;
+  $("sessions-loading").hidden = false;
+  $("sessions-list").replaceChildren();
+  $("sessions-empty").hidden = true;
+  $("sessions-actions").hidden = true;
+  panelNote("sessions", "", "");
+  try {
+    const res = await fetch(`${USERS_API}/${encodeURIComponent(user.id)}/sessions`, { credentials: "same-origin" });
+    if (reqId !== sessionsRequestId) return;
+    if (!res.ok) { panelNote("sessions", "error", "Could not load sessions."); $("sessions-loading").hidden = true; return; }
+    const data = await res.json();
+    const sessions = data.sessions || [];
+    renderSessions(sessions);
+  } catch { if (reqId !== sessionsRequestId) return; panelNote("sessions", "error", "Could not load sessions."); }
+  finally { if (reqId === sessionsRequestId) $("sessions-loading").hidden = true; }
+}
+
+function renderSessions(sessions) {
+  const list = $("sessions-list");
+  list.replaceChildren();
+  if (sessions.length === 0) { $("sessions-empty").hidden = false; $("sessions-actions").hidden = true; return; }
+  $("sessions-empty").hidden = true; $("sessions-actions").hidden = false;
+  for (const s of sessions) {
+    const row = document.createElement("div"); row.className = "row";
+    const left = document.createElement("div");
+    const sid = document.createElement("div"); sid.textContent = shortSid(s.sid);
+    const meta = document.createElement("div"); meta.className = "label";
+    const parts = [];
+    if (s.created_at) parts.push("created " + new Date(s.created_at).toLocaleString());
+    if (s.last_seen_at) parts.push("last seen " + new Date(s.last_seen_at).toLocaleString());
+    meta.textContent = parts.join(" · ");
+    left.appendChild(sid); left.appendChild(meta); row.appendChild(left);
+    if (!s.current) {
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "Revoke";
+      btn.addEventListener("click", () => revokeSession(selectedUserId, s.sid, btn));
+      row.appendChild(btn);
+    } else { const tag = document.createElement("span"); tag.className = "small"; tag.textContent = "This session"; row.appendChild(tag); }
+    list.appendChild(row);
+  }
+}
+
+async function revokeSession(userId, sid, button) {
+  if (!confirm("Revoke this session? The user will be signed out on that device.")) return;
+  button.disabled = true; const reqId = ++sessionsRequestId;
+  try {
+    const res = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE", credentials: "same-origin" }));
+    if (reqId !== sessionsRequestId) return;
+    if (res.ok) { panelNote("sessions", "ok", "Session revoked."); await openSessions({ id: userId, email: selectedUserEmail, role: "" }); }
+    else { button.disabled = false; panelNote("sessions", "error", "Could not revoke that session."); }
+  } catch { button.disabled = false; panelNote("sessions", "error", "Could not revoke that session."); }
+}
+
+async function revokeAllSessions(userId, button) {
+  if (!confirm("Revoke ALL sessions for this user? Every active session will be ended and the user will be signed out everywhere.")) return;
+  button.disabled = true; const reqId = ++sessionsRequestId;
+  try {
+    const res = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(userId)}/sessions/revoke-all`, { method: "POST", credentials: "same-origin" }));
+    if (reqId !== sessionsRequestId) return;
+    if (res.ok) { const data = await res.json(); panelNote("sessions", "ok", (data.revoked || 0) + " session" + (data.revoked === 1 ? "" : "s") + " revoked."); await openSessions({ id: userId, email: selectedUserEmail, role: "" }); }
+    else { button.disabled = false; panelNote("sessions", "error", "Could not revoke sessions."); }
+  } catch { button.disabled = false; panelNote("sessions", "error", "Could not revoke sessions."); }
+}
+
+async function openDevices(user) {
+  closePanels(); selectedUserId = user.id; selectedUserEmail = user.email;
+  $("devices-user").textContent = user.email + " — " + user.role;
+  $("devices-user-email").textContent = user.email;
+  $("devices-panel").hidden = false;
+  const reqId = ++devicesRequestId;
+  $("devices-loading").hidden = false;
+  $("devices-list").replaceChildren();
+  $("devices-empty").hidden = true;
+  panelNote("devices", "", "");
+  try {
+    const res = await fetch(`${USERS_API}/${encodeURIComponent(user.id)}/devices`, { credentials: "same-origin" });
+    if (reqId !== devicesRequestId) return;
+    if (!res.ok) { panelNote("devices", "error", "Could not load devices."); $("devices-loading").hidden = true; return; }
+    const data = await res.json(); const devices = data.devices || [];
+    renderDevices(devices);
+  } catch { if (reqId !== devicesRequestId) return; panelNote("devices", "error", "Could not load devices."); }
+  finally { if (reqId === devicesRequestId) $("devices-loading").hidden = true; }
+}
+
+function renderDevices(devices) {
+  const list = $("devices-list"); list.replaceChildren();
+  if (devices.length === 0) { $("devices-empty").hidden = false; return; }
+  $("devices-empty").hidden = true;
+  for (const d of devices) {
+    const row = document.createElement("div"); row.className = "row";
+    const left = document.createElement("div");
+    const label = document.createElement("div"); label.textContent = d.label || "This device";
+    const meta = document.createElement("div"); meta.className = "label";
+    const parts = [];
+    if (d.status) parts.push(d.status);
+    if (d.created_via) parts.push(d.created_via);
+    if (d.last_seen_at) parts.push("last seen " + new Date(d.last_seen_at).toLocaleString());
+    meta.textContent = parts.join(" · ");
+    left.appendChild(label); left.appendChild(meta); row.appendChild(left);
+    if (d.status !== "revoked") {
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "Revoke";
+      btn.addEventListener("click", () => revokeDevice(selectedUserId, d.id, btn));
+      row.appendChild(btn);
+    }
+    list.appendChild(row);
+  }
+}
+
+async function revokeDevice(userId, deviceId, button) {
+  if (!confirm("Revoke this device? All sessions on that device will be ended and the device will no longer be trusted.")) return;
+  button.disabled = true; const reqId = ++devicesRequestId;
+  try {
+    const res = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", credentials: "same-origin" }));
+    if (reqId !== devicesRequestId) return;
+    if (res.ok) { panelNote("devices", "ok", "Device revoked."); await openDevices({ id: userId, email: selectedUserEmail, role: "" }); }
+    else { button.disabled = false; panelNote("devices", "error", "Could not revoke that device."); }
+  } catch { button.disabled = false; panelNote("devices", "error", "Could not revoke that device."); }
+}
+
+$("sessions-close").addEventListener("click", closePanels);
+$("devices-close").addEventListener("click", closePanels);
+$("sessions-revoke-all").addEventListener("click", () => { if (selectedUserId) revokeAllSessions(selectedUserId, $("sessions-revoke-all")); });
+
+const _origLoad = load;
+load = async function () { closePanels(); await _origLoad(); };
 
 Promise.all([loadRegistry(), load()]);

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { adminRoute } from "./admin";
-import { authRoute } from "../auth/routes";
+import { authRoute, adminRoute as authAdminRoute } from "../auth/routes";
 import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml, DEFAULT_ADMIN_BASE_PATH } from "../config/adminBase";
 import type { Env } from "../env";
 import { registerDbDriver } from "../db";
@@ -319,4 +319,86 @@ test("composed Worker custom namespace /me without v2 cookie and without legacy 
     v2Env,
   );
   assert.equal(res.status, 401);
+});
+
+/* ---- Step-up route registration (direct router tests) ---- */
+
+test("authRoute POST /stepup is registered (not 404)", async () => {
+  const env = makeEnv({ ADMIN_AUTH_V2: "1" });
+  const res = await authRoute.fetch(new Request("http://localhost/stepup", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://localhost",
+    },
+    body: JSON.stringify({ code: "123456" }),
+  }), env);
+  // originGuard may return 403 (Host header not set in test env), but
+  // not 404: the route is registered on authRoute, not falling through
+  // to Hono's default not-found handler.
+  assert.notEqual(res.status, 404, "POST /stepup must be registered on authRoute");
+});
+
+test("adminRoute has no POST /auth/stepup route (GET returns 404)", async () => {
+  const env = makeEnv({ ADMIN_AUTH_V2: "1" });
+  // GET bypasses originGuard; no route /stepup exists on adminRoute -> 404.
+  const res = await authAdminRoute.fetch(new Request("http://localhost/stepup", {
+    method: "GET",
+  }), env);
+  assert.equal(res.status, 404, "No /stepup route on adminRoute");
+});
+
+test("authRoute POST /stepup requires matching Origin (originGuard preserved)", async () => {
+  const env = makeEnv({ ADMIN_AUTH_V2: "1" });
+  const res = await authRoute.fetch(new Request("http://localhost/stepup", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "https://evil.example",
+    },
+    body: JSON.stringify({ code: "123456" }),
+  }), env);
+  assert.equal(res.status, 403, "mismatched origin -> 403 from originGuard");
+});
+
+/* ---- Step-up route registration under custom namespace (composed Worker) ---- */
+
+test("composed Worker custom namespace POST /auth/stepup is not 404 (dispatcher routes to auth router)", async () => {
+  const namespace = "/4ehhi-5deggi";
+  const v2Env = makeEnv({
+    ENVIRONMENT: "production",
+    ADMIN_BASE_PATH: namespace,
+    ADMIN_AUTH_V2: "1",
+  });
+  const res = await composedApp.request(
+    `http://localhost${namespace}/auth/stepup`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost",
+      },
+      body: JSON.stringify({ code: "123456" }),
+    },
+    v2Env,
+  );
+  // Not 404 from product catch-all: dispatcher routed /auth/* to auth router.
+  assert.notEqual(res.status, 404, "composed worker must route /auth/stepup to auth router, not product catch-all");
+});
+
+test("composed Worker custom namespace GET /admin-v2/auth/stepup returns 404 (no route on adminRoute)", async () => {
+  const namespace = "/4ehhi-5deggi";
+  const v2Env = makeEnv({
+    ENVIRONMENT: "production",
+    ADMIN_BASE_PATH: namespace,
+    ADMIN_AUTH_V2: "1",
+  });
+  const res = await composedApp.request(
+    `http://localhost${namespace}/admin-v2/auth/stepup`,
+    { method: "GET" },
+    v2Env,
+  );
+  // Dispatcher strips /admin-v2 prefix; adminRoute has no /stepup route -> 404.
+  // GET bypasses originGuard so we reach route matching.
+  assert.equal(res.status, 404, "composed worker: no /admin-v2/auth/stepup route on adminRoute");
 });

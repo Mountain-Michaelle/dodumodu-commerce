@@ -45,6 +45,36 @@
       </form>
     </section>
     <p class="note" id="note" hidden></p>
+
+    <!-- Sessions panel (loaded on demand for the selected user) -->
+    <section id="sessions-panel" class="once" hidden>
+      <div class="links">
+        <h2 id="sessions-user"></h2>
+        <button class="ghost small-btn" id="sessions-close" type="button">Close</button>
+      </div>
+      <p class="muted small" id="sessions-desc">Authentication sessions for <span id="sessions-user-email"></span>.</p>
+      <div id="sessions-loading" class="once" hidden><span class="muted">Loading sessions…</span></div>
+      <div id="sessions-list" class="once"></div>
+      <div id="sessions-empty" class="once" hidden><p class="muted small">No active sessions.</p></div>
+      <div id="sessions-actions" class="links" style="margin-top:12px">
+        <button class="danger small-btn" id="sessions-revoke-all" type="button">Revoke all sessions</button>
+      </div>
+      <p class="note" id="sessions-note" hidden></p>
+    </section>
+
+    <!-- Devices panel (loaded on demand for the selected user) -->
+    <section id="devices-panel" class="once" hidden>
+      <div class="links">
+        <h2 id="devices-user"></h2>
+        <button class="ghost small-btn" id="devices-close" type="button">Close</button>
+      </div>
+      <p class="muted small" id="devices-desc">Recognized devices for <span id="devices-user-email"></span>.</p>
+      <div id="devices-loading" class="once" hidden><span class="muted">Loading devices…</span></div>
+      <div id="devices-list" class="once"></div>
+      <div id="devices-empty" class="once" hidden><p class="muted small">No recognized devices.</p></div>
+      <p class="note" id="devices-note" hidden></p>
+    </section>
+
   </main>
   <script src="/auth-ui/users.js" defer></script>
 </body>
