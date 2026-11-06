@@ -9,7 +9,7 @@ function note(kind, text) { const n = $("note"); n.className = "note " + kind; n
 
 async function load() {
   const res = await fetch(`${ADMIN_BASE}/admin-v2/devices`, { credentials: "same-origin" });
-  if (res.status === 401 || res.status === 403) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
+  if (res.status === 401) { location.href = `${ADMIN_BASE}/sign-in/`; return; }
   if (!res.ok) { note("error", "Could not load trusted devices."); return; }
   const { devices } = await res.json();
   const list = $("list");

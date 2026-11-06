@@ -273,7 +273,7 @@ test("custom namespace preserves POST auth requests", async () => {
   assert.equal(res.status, 403, "a mismatched origin reaches originGuard before auth DB work");
 });
 
-test("composed Worker custom namespace root rejects a missing v2 session", async () => {
+test("composed Worker custom namespace root redirects missing v2 session to sign-in", async () => {
   const namespace = "/4ehhi-5deggi";
   const v2Env = makeEnv({
     ENVIRONMENT: "production",
@@ -285,8 +285,8 @@ test("composed Worker custom namespace root rejects a missing v2 session", async
     { headers: { Accept: "text/html" } },
     v2Env,
   );
-  assert.equal(res.status, 401);
-  assert.equal(await res.text(), "Unauthorized");
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get("location"), `${namespace}/sign-in/`);
 });
 
 test("composed Worker custom namespace /me without v2 cookie falls through to legacy auth (401 JSON)", async () => {

@@ -159,26 +159,23 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
       return adminAuthAdminRoute.fetch(new Request(adminUrl, init), c.env);
     }
     if (adminAuthEnabled(c.env as never) && (rest === "/" || rest === "")) {
-      if (!getSidToken(c as never)) return c.text("Unauthorized", 401);
-      const session = await loadSession(c as never);
-      if (!session || session.role !== "admin") {
-        return c.text("Unauthorized", 401);
-      }
-      const base = active;
-      return c.html(rewriteAdminHtml(ADMIN_CONSOLE_HTML, base), 200);
-    }
-    if (adminAuthEnabled(c.env as never)) {
+      // Console root: an expired/missing session must redirect to sign-in,
+      // never render a raw 401 as the user-facing experience.
       const sid = getSidToken(c as never);
       if (sid) {
         const session = await loadSession(c as never);
-        if (!session || session.role !== "admin") return c.text("Unauthorized", 401);
-        const headers = new Headers(raw.headers);
-        headers.set("cf-access-authenticated-user-email", session.email);
-        const legacyRequest = new Request(url, { ...init, headers });
-        return adminRoute.fetch(legacyRequest, c.env);
+        if (session && session.role === "admin") {
+          const base = active;
+          return c.html(rewriteAdminHtml(ADMIN_CONSOLE_HTML, base), 200);
+        }
       }
-      // No v2 session cookie: fall through to legacy admin auth (Cloudflare Access header)
+      return c.redirect(`${active}/sign-in/`, 302);
     }
+    // Do NOT gate any /admin/* path on a v2 session here. V1's PUBLIC_PATHS
+    // exemption (sign-in page + assets) lives in adminRoute.use("*") and must
+    // run for every path under the active namespace — including /admin/sign-in/
+    // and /admin/assets/*. A stale, expired, malformed or revoked __Host-sid
+    // cookie must never block a public route before V1's exemption is checked.
     return adminRoute.fetch(subReq, c.env);
   }
 
