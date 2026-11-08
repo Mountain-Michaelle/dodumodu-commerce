@@ -265,3 +265,18 @@ export async function revokeAllSessions(
       RETURNING sid::text AS sid`);
   return rows.length;
 }
+
+
+/**
+ * Make one ACTIVE ADMIN the primary account (the single recipient of notifications and
+ * the auto-assignee of new orders). Validate first, then clear, then set: a unique index
+ * allows only one primary, and while no primary exists everything falls back to
+ * "all active admins", so a failure between the steps loses no notification.
+ */
+export async function setPrimaryUser(db: Db, targetId: string): Promise<void> {
+  const ok = await q1<{ id: string }>(db,
+    sql`SELECT id::text AS id FROM aa_users WHERE id = ${targetId}::uuid AND is_active AND role = 'admin'`);
+  if (!ok) throw new AuthRejectError("user");
+  await q(db, sql`UPDATE aa_users SET is_primary = false WHERE is_primary AND id <> ${targetId}::uuid`);
+  await q(db, sql`UPDATE aa_users SET is_primary = true WHERE id = ${targetId}::uuid AND NOT is_primary`);
+}

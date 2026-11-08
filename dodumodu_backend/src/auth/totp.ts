@@ -186,3 +186,40 @@ export async function ackBackupCodes(db: Db, flowToken: string): Promise<{ next:
   if (!row) throw new AuthRejectError("flow");
   return { next: row.stage };
 }
+
+/**
+ * A reload on the "save your backup codes" step: the codes were shown once and are gone,
+ * so issue a fresh set (the unacknowledged one is revoked, so only what the user now sees
+ * is valid). One statement; only while the flow is at backup_codes. Touches last_step_at so
+ * the resume window restarts.
+ */
+export async function reissueBackupCodes(db: Db, flowToken: string): Promise<{ codes: string[] }> {
+  const flow = await loadFlow(db, flowToken);
+  if (!flow || flow.stage !== "backup_codes" || flow.user_id === null) {
+    throw new AuthRejectError("flow");
+  }
+  const { codes, hashes } = await genBackupCodes();
+  const vals = sql.join(hashes.map((h) => sql`(decode(${h}, 'hex'))`), sql`, `);
+  const row = await q1<{ ok: boolean }>(db,
+    sql`WITH f AS (
+         UPDATE aa_auth_flows SET last_step_at = now()
+          WHERE id = ${flow.id} AND stage = 'backup_codes' AND expires_at > now()
+          RETURNING user_id),
+        rev AS (
+         UPDATE aa_backup_code_sets SET revoked_at = now()
+          WHERE revoked_at IS NULL AND acked_at IS NULL
+            AND user_id IN (SELECT user_id FROM f)),
+        ns AS (
+         INSERT INTO aa_backup_code_sets (user_id, generation)
+         SELECT f.user_id, COALESCE((SELECT max(generation) + 1
+                                       FROM aa_backup_code_sets b WHERE b.user_id = f.user_id), 1)
+           FROM f
+          RETURNING id),
+        ins AS (
+         INSERT INTO aa_backup_codes (set_id, code_hash)
+         SELECT ns.id, v.code_hash FROM ns, (VALUES ${vals}) AS v(code_hash)
+         RETURNING 1)
+        SELECT EXISTS (SELECT 1 FROM ns) AS ok WHERE EXISTS (SELECT 1 FROM f)`);
+  if (!row?.ok) throw new AuthRejectError("flow");
+  return { codes };
+}

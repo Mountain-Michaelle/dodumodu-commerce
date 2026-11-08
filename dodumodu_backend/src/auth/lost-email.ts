@@ -13,6 +13,7 @@ import { emailTag } from "./keys";
 import { reserve, sendCap } from "./throttle";
 import { ipBlockHashHex } from "./blocks";
 import { logInfo } from "./authLog";
+import { notificationService } from "../services/notificationService";
 import { LOST_EMAIL_MAX_ATTEMPTS, LOST_EMAIL_ALERT_COOLDOWN_HOURS } from "./config";
 
 export interface LostEmailOutcome {
@@ -49,13 +50,22 @@ export async function requestLostEmail(
   // One open request per attempted handle per 24 h (dedupe via NOT EXISTS;
   // the Neon HTTP driver has no interactive transactions, so guard in-SQL).
   const ipHashHex = await ipBlockHashHex(throttleKey, ip);
-  await q(db, sql`
+  const created = await q<{ id: string }>(db, sql`
     INSERT INTO aa_account_requests (username_attempted, ip_hash)
     SELECT ${attempted}, decode(${ipHashHex}, 'hex')
      WHERE NOT EXISTS (
        SELECT 1 FROM aa_account_requests
         WHERE username_attempted = ${attempted} AND status = 'open'
-          AND created_at > now() - interval '24 hours')`);
+          AND created_at > now() - interval '24 hours')
+    RETURNING id::text AS id`);
+  if (created[0]) {
+    // Tell the admin bell. Never fails the (uniform) response.
+    await notificationService.createForAdmins(db, {
+      type: "account_request", title: "Lost-email recovery request",
+      body: `A user asked for help recovering access: "${attempted}"`,
+      href: "/users", dedupeKey: `account-request:${created[0].id}`,
+    }).catch(() => {});
+  }
   await logInfo(db, {
     event: "lost_email", status: "success", userId: row.id, usernameAttempted: attempted,
     ipHashHex,

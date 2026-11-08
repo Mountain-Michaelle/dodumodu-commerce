@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { registerDbDriver } from "../db";
 import { closePools, pgDriver } from "../dbDrivers/pg";
 import { visitorDays, visitorYearSnapshots } from "../schema";
@@ -22,6 +22,16 @@ test("visitor writes, distinct reports, geography, annual snapshots and bounded 
   const ipD = "203.0.113.34";
   const version = 1;
   const geo = { country: "NG", region: "Lagos" };
+
+  // Deterministic start state. started_on is stamped with the day the migration ran,
+  // so without pinning it this test only passed on a DB migrated on 2026-10-08, and
+  // it also assumes empty tables. This test deletes rows: local databases only.
+  const host = new URL(databaseUrl!).hostname;
+  assert.ok(["localhost", "127.0.0.1", "::1", "[::1]"].includes(host),
+    `refusing to reset visitor tables on non-local host "${host}"`);
+  await db.execute(sql`DELETE FROM visitor_days`);
+  await db.execute(sql`DELETE FROM visitor_year_snapshots`);
+  await db.execute(sql`UPDATE visitor_analytics_meta SET started_on = '2026-10-08'`);
 
   const firstDay = new Date("2026-10-08T22:59:59.000Z");
   const sameLagosDay = new Date("2026-10-08T21:00:00.000Z");

@@ -12,6 +12,16 @@
     <div class="links">
       <a href="/admin/">Back</a>
     </div>
+    <!-- Lost-email recovery requests (people who typed their username on the login page) -->
+    <section id="requests-panel" class="once" hidden>
+      <div class="links">
+        <h2>Lost-email requests</h2>
+        <button class="ghost small-btn" id="requests-refresh" type="button">Refresh</button>
+      </div>
+      <p class="muted small">Contact the person through details you already hold, then mark the request resolved.</p>
+      <div id="requests-list" class="once"></div>
+      <p class="note" id="requests-note" hidden></p>
+    </section>
     <form id="create-form" class="user-create">
       <label for="create-email">Email</label>
       <input id="create-email" type="email" autocomplete="email" required />

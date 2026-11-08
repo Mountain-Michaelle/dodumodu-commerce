@@ -23,6 +23,7 @@ import { writeAuthLog } from "./authLog";
 import { createBlock, ipBlockHashHex } from "./blocks";
 import { enqueue } from "./outbox";
 import { recordDeviceFailure } from "./device-failures";
+import { normalizeBackupCode } from "./totp";
 
 export interface Guarded {
   ok: boolean;
@@ -31,7 +32,6 @@ export interface Guarded {
   blocked?: boolean;
 }
 
-/** Load the flow and enforce: stage 'totp', recovery_unlocked, not expired. */
 async function loadRecoverable(db: Db, flowToken: string) {
   const flow = await loadFlow(db, flowToken);
   if (!flow || flow.stage !== "totp" || flow.user_id === null) {
@@ -39,11 +39,10 @@ async function loadRecoverable(db: Db, flowToken: string) {
   }
   const row = await q1<{ recovery_unlocked: boolean; email: string }>(db,
     sql`SELECT recovery_unlocked, email FROM aa_auth_flows WHERE id = ${flow.id}`);
-  if (!row?.recovery_unlocked) throw new AuthRejectError("flow"); // not unlocked -> neutral
+  if (!row?.recovery_unlocked) throw new AuthRejectError("flow");
   return { flowId: flow.id, userId: flow.user_id, email: row.email };
 }
 
-/** On a wrong phrase/backup: bump phrase_fails; 3rd -> flow dead. Returns state. */
 async function registerWrongRecovery(db: Db, flowId: string): Promise<Guarded> {
   const row = await q1<{ phrase_fails: number }>(db,
     sql`UPDATE aa_auth_flows
@@ -56,30 +55,23 @@ async function registerWrongRecovery(db: Db, flowId: string): Promise<Guarded> {
   return { ok: false, attemptsLeft: Math.max(0, PHRASE_MAX_ATTEMPTS - row.phrase_fails), blocked };
 }
 
-/**
- * Slice 7 wiring, called once when the flow dies on the 3rd wrong phrase:
- * a 'device' block on the flow's vid_hash (until an admin lifts) and an 'ip'
- * block on the network (BLOCK_IP_TTL_HOURS, so a shared NAT recovers on its
- * own). Both carry the flow's user + a random appeal handle; the alert goes
- * through the outbox (deduped per flow). Best-effort AFTER the flow is dead:
- * a block-write failure never changes the response the attacker already got.
- */
 async function blockOnRecoveryFails(
   db: Db, throttleKey: Uint8Array, flowId: string, userId: string, ip: string,
 ): Promise<void> {
   try {
-    const f = await q1<{ vid_hash: string | null }>(db,
-      sql`SELECT encode(vid_hash, 'hex') AS vid_hash FROM aa_auth_flows WHERE id = ${flowId}`);
-    const ref = randomToken();
+    const f = await q1<{ vid_hash: string }>(db,
+      sql`SELECT vid_hash FROM aa_admin_devices d JOIN aa_users u
+           ON u.id = d.user_id AND u.is_active AND u.role = 'admin'
+       WHERE d.user_id = ${userId} AND d.id IN (SELECT device_id FROM aa_auth_flows WHERE id = ${flowId})`);
+    const ref = `${userId}:${flowId}:${ip}`;
     await createBlock(db, {
       kind: "ip", keyHashHex: await ipBlockHashHex(throttleKey, ip), blockRef: ref,
-      userId, reason: `recovery_fails:${flowId}`,
-      expiresAt: new Date(Date.now() + BLOCK_IP_TTL_HOURS * 3600_000),
+      userId, reason: `recovery_fails:${flowId}`, expiresAt: new Date(Date.now() + BLOCK_IP_TTL_HOURS * 3600_000),
     });
     if (f?.vid_hash) {
       await createBlock(db, {
         kind: "device", keyHashHex: f.vid_hash, blockRef: randomToken(),
-        userId, reason: `recovery_fails:${flowId}`, // NULL expires: admin lifts
+        userId, reason: `recovery_fails:${flowId}`,
       });
     }
     await enqueue(db, "recovery_block", `recovery_block:${flowId}`);
@@ -92,7 +84,6 @@ async function blockOnRecoveryFails(
   }
 }
 
-/** On success: move the flow to totp_enroll in recovery_reset mode. */
 async function advanceToReset(db: Db, flowId: string, userId: string, via: string): Promise<Stage> {
   const row = await q1<{ stage: Stage }>(db,
     sql`UPDATE aa_auth_flows
@@ -101,13 +92,11 @@ async function advanceToReset(db: Db, flowId: string, userId: string, via: strin
          WHERE id = ${flowId} AND stage = 'totp'
          RETURNING stage`);
   if (!row) throw new AuthRejectError("flow");
-  // Kill every existing session (the authenticator is being replaced) + audit.
   await q(db, sql`UPDATE aa_users SET session_version = session_version + 1 WHERE id = ${userId}`);
   await writeAuthLog(db, { event: "recovery_login_used", status: "success", userId, reason: via }).catch(() => {});
   return row.stage;
 }
 
-/** POST /auth/recovery/backup-code {code}. Same gate + counters as the phrase. */
 export async function recoverWithBackup(
   db: Db, secrets: VerifySecrets, flowToken: string, code: string, ip: string,
 ): Promise<{ next: Stage } | Guarded> {
@@ -116,24 +105,24 @@ export async function recoverWithBackup(
   const key = `recovery:${tag}:${ip}`;
   const reservation = await reserve(db, key, "anon", PHRASE_MAX_ATTEMPTS + 1);
   try {
-    const norm = code.replace(/-/g, "");
-    const hashHex = toHex(await sha256(norm));
-    // Consume one code from the current acknowledged, unrevoked generation.
+    const hashHex = toHex(await sha256(normalizeBackupCode(code)));
     const used = await q1<{ set_id: string }>(db,
       sql`UPDATE aa_backup_codes bc SET used_at = now()
             FROM aa_backup_code_sets s
            WHERE bc.set_id = s.id AND s.user_id = ${userId}
              AND s.acked_at IS NOT NULL AND s.revoked_at IS NULL
              AND bc.code_hash = decode(${hashHex}, 'hex') AND bc.used_at IS NULL
-           RETURNING bc.set_id::text AS set_id`);
+         RETURNING bc.set_id::text AS set_id`);
     if (!used) {
       const wrong = await registerWrongRecovery(db, flowId);
-      await recordDeviceFailure(db, secrets.throttleKey, flowId, ip).catch(() => {});
-      await noteFuse(db, tag).catch(() => {});
-      await writeAuthLog(db, {
-        event: "backup_code_fail", status: wrong.blocked ? "blocked" : "fail",
-        userId, reason: "recovery",
-      }).catch(() => {});
+      await Promise.all([
+        recordDeviceFailure(db, secrets.throttleKey, flowId, ip).catch(() => {}),
+        noteFuse(db, tag).catch(() => {}),
+        writeAuthLog(db, {
+          event: "backup_code_fail", status: wrong.blocked ? "blocked" : "fail",
+          userId, reason: "recovery",
+        }).catch(() => {}),
+      ]);
       if (wrong.blocked) await blockOnRecoveryFails(db, secrets.throttleKey, flowId, userId, ip);
       return wrong;
     }

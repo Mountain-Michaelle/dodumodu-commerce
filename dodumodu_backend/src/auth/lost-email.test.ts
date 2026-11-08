@@ -20,8 +20,9 @@ const throttleKey = loadKey("CwcHCwcHCwcHCwcHCwcHCwcHCwcHCwcHCwcHCwcHCwc=", "thr
 
 after(async () => {
   if (!databaseUrl) return;
-  await q(db, sql`SET aa.maint='on'`);
-  await q(db, sql`DELETE FROM aa_auth_log WHERE username_attempted LIKE ${tag + "%"}`);
+  // Append-only table: the maintenance flag is set INSIDE the same statement, so it
+  // works through any pooler (a session-level SET can land on a different connection).
+  await q(db, sql`WITH m AS (SELECT set_config('aa.maint', 'on', true)) DELETE FROM aa_auth_log WHERE EXISTS (SELECT 1 FROM m) AND username_attempted LIKE ${tag + "%"}`);
   await q(db, sql`DELETE FROM aa_account_requests WHERE username_attempted LIKE ${tag + "%"}`);
   await q(db, sql`DELETE FROM aa_users WHERE email LIKE ${tag + "%"}`);
   for (const ip of ["10.81.1.1", "10.81.2.2"]) {

@@ -24,6 +24,10 @@ export type DispatchResult = {
 const DISPATCH_TIMEOUT_MS = 10_000;
 const REPO = "Mountain-Michaelle/dodumodu-commerce";
 const EVENT_TYPE = "storefront-deploy";
+/** One quick retry for a transient blip (network error, 429, 5xx). Never after a timeout. */
+const RETRY_DELAY_MS = 500;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const isTransient = (status: number) => status === 429 || status >= 500;
 
 export async function triggerGitHubDispatch(
   env: Env,
@@ -50,8 +54,7 @@ export async function triggerGitHubDispatch(
     durationMs: Date.now() - started,
   });
 
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
+  const send = () => fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
       method: "POST",
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
       headers: {
@@ -70,6 +73,20 @@ export async function triggerGitHubDispatch(
         },
       }),
     });
+
+  try {
+    let res: Response;
+    try {
+      res = await send();
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") throw err; // already waited 10s
+      await sleep(RETRY_DELAY_MS);
+      res = await send();
+    }
+    if (!res.ok && isTransient(res.status)) {
+      await sleep(RETRY_DELAY_MS);
+      res = await send();
+    }
 
     if (!res.ok) {
       return finish({

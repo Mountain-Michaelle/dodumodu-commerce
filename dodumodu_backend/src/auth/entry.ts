@@ -66,17 +66,19 @@ async function resolveUser(
 async function createFlow(
   db: Db, email: string, userId: string | null, ctx: RequestCtx,
   vidHash: string | null,
+  trusted = false,
 ): Promise<string> {
   const token = randomToken();
   const hashHex = await tokenHashHex(token);
   await q(db,
     sql`INSERT INTO aa_auth_flows
-      (token_hash, email, user_id, stage, via, device_id, expires_at, ip_prefix, country, vid_hash)
+      (token_hash, email, user_id, stage, via, device_id, expires_at, ip_prefix, country, vid_hash, trusted)
       VALUES (decode(${hashHex}, 'hex'), ${email}, ${userId},
         'otp', 'email', NULL,
         now() + (${FLOW_TTL_SECS}::int * interval '1 second'),
         ${ctx.prefix}, ${ctx.country},
-        ${vidHash === null ? sql`NULL::bytea` : sql`decode(${vidHash}, 'hex')`})`);
+        ${vidHash === null ? sql`NULL::bytea` : sql`decode(${vidHash}, 'hex')`},
+        ${trusted})`);
   return token;
 }
 
@@ -152,15 +154,19 @@ export async function requestCode(
       }
       return { flowToken, sendCode: null, sendDeniedAlert, friction: false };
     }
+    // A cookie-matched ACTIVE device is the trusted browser: it keeps default
+    // throttling. No cookie / a cookie that matches nothing = a new browser:
+    // allowed in, but strict (3rd failure device-blocks it until an admin lifts).
+    const trusted = deviceHashHex !== null && found.recognized;
     const emailCap = await sendCap(db, sendEmailKey(tag), OTP_SENDS_PER_HOUR, SEND_CAP_WINDOW);
     const ipCap = await sendCap(db, sendIpKey(tag, ctx.ip), OTP_SENDS_PER_HOUR_IP, SEND_CAP_WINDOW);
     if (!emailCap || !ipCap) {
-      const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash);
+      const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash, trusted);
       const friction = await noteFuse(db, tag).catch(() => false);
       return { flowToken, sendCode: null, sendDeniedAlert: null, friction };
     }
     const ch = await issueChallenge(db, found.user_id, secrets.otpKey, true);
-    const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash);
+    const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash, trusted);
     if (!ch.sendNow) return { flowToken, sendCode: null, sendDeniedAlert: null, friction: false };
     const code = await deriveChallengeCode(secrets.otpKey, found.user_id, ch.nonceHex);
     return { flowToken, sendCode: { to: email!, code }, sendDeniedAlert: null, friction: false };

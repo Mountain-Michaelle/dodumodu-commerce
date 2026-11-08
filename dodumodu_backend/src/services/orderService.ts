@@ -11,6 +11,7 @@ import { codPolicyService, CodNotAvailableError } from "./codPolicyService";
 import type { OrderInput } from "../validation/orderSchema";
 import { normalizePhone } from "../shared/normalizePhone";
 import { notificationService } from "./notificationService";
+import { assignmentRepo } from "../data/assignmentRepo";
 
 export class ProductNotFoundError extends Error {}
 export class PackageNotFoundError extends Error {}
@@ -202,7 +203,28 @@ export const orderService = {
       throw err;
     }
 
-    await ordersRepo.writeStatusHistory(db, order.id, null, order.status, "system");
+    // The order row already exists. A failed history write must not turn a placed order
+    // into a 500 (the customer would retry and be answered with the same order anyway,
+    // but would first be told it failed): log it for repair and carry on.
+    try {
+      await ordersRepo.writeStatusHistory(db, order.id, null, order.status, "system");
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: "order_history_write_failed",
+        orderId: order.id,
+        detail: err instanceof Error ? err.message : String(err),
+      }));
+    }
+    if (env.ASSIGNMENT_MODE_ENABLED === "true") {
+      try {
+        await assignmentRepo.autoAssignToPrimary(db, order.id);
+      } catch (err) {
+        console.error(JSON.stringify({
+          event: "order_auto_assign_failed", orderId: order.id,
+          detail: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    }
     try {
       await notificationService.createForAdmins(db, {
         type: "order_created",

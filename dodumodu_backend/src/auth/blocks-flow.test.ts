@@ -25,8 +25,9 @@ const secrets: EntrySecrets = {
 
 after(async () => {
   if (!databaseUrl) return;
-  await q(db, sql`SET aa.maint='on'`);
-  await q(db, sql`DELETE FROM aa_auth_log WHERE user_id IN
+  // Append-only table: the maintenance flag is set INSIDE the same statement, so it
+  // works through any pooler (a session-level SET can land on a different connection).
+  await q(db, sql`WITH m AS (SELECT set_config('aa.maint', 'on', true)) DELETE FROM aa_auth_log WHERE EXISTS (SELECT 1 FROM m) AND user_id IN
     (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"})`);
   await q(db, sql`DELETE FROM aa_blocks WHERE user_id IN
     (SELECT id FROM aa_users WHERE email LIKE ${tag + "%"})`);

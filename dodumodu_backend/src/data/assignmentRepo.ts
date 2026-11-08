@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "../db";
 import { adminStaff, orderAssignments, orders, spamFlags } from "../schema";
+import { q } from "../auth/sql";
 import { orderMatchKey, lagosDayStart } from "../abuse/orderEvidence";
 
 // Order assignment: fulfilment routing, kept entirely outside the order/payment
@@ -141,6 +142,30 @@ async function writeHistory(
   await db.insert(orderAssignments).values({ orderId, assigneeEmail, actorEmail, action, reason: reason ?? null });
 }
 
+/**
+ * Route a brand-new order to the PRIMARY account, in ONE guarded statement (assignment
+ * row + history row together), so it stays correct on the Neon HTTP driver.
+ * No-op (returns null) when no active primary exists, the order already has an
+ * assignee, or its phone is spam-flagged.
+ */
+async function autoAssignToPrimary(db: Db, orderId: number): Promise<string | null> {
+  const rows = await q<{ assignee_email: string }>(db, sql`
+    WITH p AS (
+      SELECT email FROM aa_users WHERE is_primary AND is_active LIMIT 1
+    ), u AS (
+      UPDATE orders SET assigned_to = p.email, assigned_at = now()
+        FROM p
+       WHERE orders.id = ${orderId} AND orders.assigned_to IS NULL
+         AND NOT EXISTS (SELECT 1 FROM spam_flags f
+                          WHERE f.phone_norm = orders.phone_norm AND f.reverted_at IS NULL)
+      RETURNING orders.id AS order_id, p.email AS email
+    )
+    INSERT INTO order_assignments (order_id, assignee_email, actor_email, action, reason)
+    SELECT order_id, email, 'system', 'assign', 'auto-assigned to primary user' FROM u
+    RETURNING assignee_email`);
+  return rows[0]?.assignee_email ?? null;
+}
+
 export const assignmentRepo = {
-  listStaff, listForOrder, conflictingAssignee, assignOrder, unassignOrder, writeHistory,
+  autoAssignToPrimary, listStaff, listForOrder, conflictingAssignee, assignOrder, unassignOrder, writeHistory,
 };

@@ -75,15 +75,23 @@ test("null bytes and malformed encodings are refused", () => {
 });
 
 test("a symlink pointing outside the root is refused", () => {
-  withRoot((root) => {
-    try {
-      symlinkSync(join(root, "secret.txt"), join(root, "uploads", "escape.txt"));
-    } catch {
-      return; // symlinks unavailable here (Windows without Developer Mode)
-    }
-    // The path is inside the root, so only the realpath check can catch this.
-    assert.equal(resolveMediaPath(root, "uploads/escape.txt"), null);
-  });
+  // The link target must really be OUTSIDE the root (a sibling temp dir). Pointing it
+  // at a file inside the root is a legitimate in-root link and is correctly served.
+  const outside = mkdtempSync(join(tmpdir(), "dodumodu-outside-"));
+  try {
+    writeFileSync(join(outside, "secret.txt"), "not for serving");
+    withRoot((root) => {
+      try {
+        symlinkSync(join(outside, "secret.txt"), join(root, "uploads", "escape.txt"));
+      } catch {
+        return; // symlinks unavailable here (Windows without Developer Mode)
+      }
+      // The path is inside the root, so only the realpath check can catch this.
+      assert.equal(resolveMediaPath(root, "uploads/escape.txt"), null);
+    });
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("the write path resolves too — a key that does not exist yet is fine", () => {

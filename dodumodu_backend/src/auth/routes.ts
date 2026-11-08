@@ -27,7 +27,7 @@ function maskEmail(email: string): string {
 }
 import { requestCode } from "./entry";
 import { verifyCode } from "./factors";
-import { totpEnrollStart, totpEnrollConfirm, genBackupCodes, ackBackupCodes,
+import { totpEnrollStart, totpEnrollConfirm, genBackupCodes, ackBackupCodes, reissueBackupCodes,
   normalizeBackupCode, normalizeTotpCode } from "./totp";
 import { verifyTotp } from "./totp-verify";
 import { requestLostEmail } from "./lost-email";
@@ -41,8 +41,8 @@ import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin
 import { notificationService } from "../services/notificationService";
 import { liftBlock } from "./blocks";
 import { grantStepup, listSessions,
-  revokeSession, revokeOtherSessions, revokeAllSessions, createUser, grantPerm, revokePerm, patchUser,
-  deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes, replaceGrants } from "./admin-ops";
+  revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
+  deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes, replaceGrants, setPrimaryUser } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
 import { q, q1, sql } from "./sql";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
@@ -50,9 +50,10 @@ import { sha256, toHex, decryptSecret, totpMatch, randomToken } from "./crypto";
 import { providerForEnv, sendLoginCode, sendInBackground, testMailbox, fromForEnv } from "./email";
 import { authCorrelationId, authFailureDiagnostic, logAuthFailure } from "./diagnostics";
 import { setFlowCookie, setSidCookie, setDidCookie, setVidCookie, clearSidCookie, clearFlowCookie,
-  getFlowToken } from "./ctx";
+  getFlowToken, afterResponse } from "./ctx";
 import { loadFlow } from "./flows";
 import { orderV2Routes } from "../routes/admin/ordersV2";
+import { recordLoginSuccess, recordRateLimited, recordUserCreated, type EventCtx } from "./security-events";
 
 type AppEnv = { Bindings: AuthEnv };
 
@@ -88,7 +89,34 @@ async function guarded(c: Context<AppEnv>, fn: () => Promise<Response>): Promise
   try {
     return await fn();
   } catch (e) {
+    if (e instanceof AuthLockedError) await afterResponse(c, notifyRateLimited(c));
     return mapError(c, e);
+  }
+}
+
+/** Request facts the security notifications need (device id + IP + keys). */
+function eventCtx(c: Context<AppEnv>): EventCtx {
+  const s = authInit(c);
+  return {
+    ip: s.ctx.ip, ua: s.ctx.ua, country: s.ctx.country, vid: s.vidToken,
+    throttleKey: loadAuthSecrets(c.env).throttleKey,
+  };
+}
+
+/** A 429 on a sign-in path: tell the admin, but only when the email is a real account. */
+async function notifyRateLimited(c: Context<AppEnv>): Promise<void> {
+  try {
+    const s = authInit(c);
+    let email: string | null = null;
+    const flowToken = getFlowToken(c as never);
+    if (flowToken) email = (await loadFlow(s.db, flowToken))?.email ?? null;
+    if (!email) {
+      const body = (await c.req.json().catch(() => ({}))) as { email?: unknown };
+      email = typeof body.email === "string" ? body.email : null;
+    }
+    await recordRateLimited(s.db, eventCtx(c), email);
+  } catch {
+    /* observing a 429 must never change the 429 */
   }
 }
 
@@ -154,14 +182,16 @@ authRoute.get("/device/available", async (c) => {
 });
 
 // GET /auth/status -> where is this browser's in-progress flow? Lets the UI
-// resume the current stage after a refresh (5-min step window). Never leaks
+// resume the current stage after a refresh (FLOW_STEP_RESUME_SECS window, 3 min). Never leaks
 // the full email (masked only) or user_id; 404 = start at email.
 authRoute.get("/status", async (c) => {
   const s = authInit(c);
   const token = getFlowToken(c as never);
   if (!token) return c.json({ error: "Not found" }, 404);
-  const row = await q1<{ stage: string; email: string; via: string; ip_prefix: string | null }>(s.db,
-    sql`SELECT stage, email, via, ip_prefix FROM aa_auth_flows
+  const row = await q1<{ stage: string; email: string; via: string; ip_prefix: string | null; left: number }>(s.db,
+    sql`SELECT stage, email, via, ip_prefix,
+             GREATEST(0, floor(extract(epoch FROM (last_step_at + (${FLOW_STEP_RESUME_SECS}::int * interval '1 second') - now()))))::int AS left
+        FROM aa_auth_flows
       WHERE token_hash = decode(${await tokenHashHex(token)}, 'hex')
         AND expires_at > now()
         AND user_id IS NOT NULL
@@ -172,6 +202,7 @@ authRoute.get("/status", async (c) => {
     stage: row.stage,
     email_masked: maskEmail(row.email),
     strict: row.via === "device" && row.ip_prefix !== null,
+    expires_in: row.left,   // seconds of resume window left; the UI shows it, the server enforces it
   });
 });
 
@@ -285,6 +316,16 @@ authRoute.post("/backup-codes/ack", async (c) => guarded(c, async () => {
   return c.json({ next: out.next });
 }));
 
+// POST /auth/backup-codes/reissue: a reload on the backup-codes step lost the shown-once
+// codes, so issue a fresh set bound to this flow (the unacknowledged set is revoked).
+authRoute.post("/backup-codes/reissue", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const token = getFlowToken(c as never);
+  if (!token) throw new AuthRejectError("flow");
+  const out = await reissueBackupCodes(s.db, token);
+  return c.json({ backup_codes: out.codes });
+}));
+
 // POST /auth/lost-email {username} -> ALWAYS 202 {ok:true} (uniform for
 // registered/unknown/malformed; §4.6 Option A). Registered handles enqueue an
 // account request for admin review + at most one capped alert per cooldown.
@@ -343,7 +384,7 @@ authRoute.post("/session", async (c) => guarded(c, async () => {
   if (!token) throw new AuthRejectError("flow");
   const flow = await loadFlow(s.db, token);
   if (!flow || flow.stage !== "ready" || flow.user_id === null) throw new AuthRejectError("flow");
-  const u = await q1<{ role: string }>(s.db, sql`SELECT role FROM aa_users WHERE id = ${flow.user_id}`);
+  const u = await q1<{ role: string; email: string }>(s.db, sql`SELECT role, email FROM aa_users WHERE id = ${flow.user_id}`);
   if (!u) throw new AuthRejectError("flow");
   const args = { flowToken: token, ...s.ctx, tier: "normal" as const, deviceToken: s.deviceToken };
   const fin = u.role === "admin"
@@ -352,6 +393,8 @@ authRoute.post("/session", async (c) => guarded(c, async () => {
   setSidCookie(c as never, fin.sessionToken, SESSION_ABSOLUTE_SECS);
   if (fin.deviceToken) setDidCookie(c as never, fin.deviceToken, DEVICE_TTL_SECS);
   clearFlowCookie(c as never);
+  await afterResponse(c, (async () => recordLoginSuccess(s.db, eventCtx(c),
+    { id: flow.user_id!, email: u.email, role: u.role }))());
   return c.json({ ok: true });
 }));
 
@@ -543,57 +586,6 @@ adminRoute.get("/users/:id", async (c) => guarded(c, async () => {
   return c.json(detail);
 }));
 
-// GET /admin-v2/users/:id/sessions -> sessions of the target user (admin, users.view).
-adminRoute.get("/users/:id/sessions", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  await guard({ perm: "users.view" })(c);
-  const target = await resolveUser(s.db, c.req.param("id") ?? "");
-  if (!target) return c.json({ error: "Not found" }, 404);
-  return c.json({ sessions: await listSessions(s.db, target.id, "") });
-}));
-
-// DELETE /admin-v2/users/:id/sessions/:sid -> end one session of the target user.
-adminRoute.delete("/users/:id/sessions/:sid", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  await guard({ perm: "users.manage" })(c);
-  await requireStepUp(c);
-  const target = await resolveUser(s.db, c.req.param("id") ?? "");
-  if (!target) return c.json({ error: "Not found" }, 404);
-  await revokeSession(s.db, c.req.param("sid") ?? "", target.id);
-  return c.json({ ok: true });
-}));
-
-// POST /admin-v2/users/:id/sessions/revoke-all -> end every session of the target user.
-adminRoute.post("/users/:id/sessions/revoke-all", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  await guard({ perm: "users.manage" })(c);
-  await requireStepUp(c);
-  const target = await resolveUser(s.db, c.req.param("id") ?? "");
-  if (!target) return c.json({ error: "Not found" }, 404);
-  const n = await revokeAllSessions(s.db, target.id);
-  return c.json({ ok: true, revoked: n });
-}));
-
-// GET /admin-v2/users/:id/devices -> devices of the target user (admin, users.view).
-adminRoute.get("/users/:id/devices", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  await guard({ perm: "users.view" })(c);
-  const target = await resolveUser(s.db, c.req.param("id") ?? "");
-  if (!target) return c.json({ error: "Not found" }, 404);
-  return c.json({ devices: await listDevices(s.db, target.id) });
-}));
-
-// DELETE /admin-v2/users/:id/devices/:deviceId -> revoke a device of the target user.
-adminRoute.delete("/users/:id/devices/:deviceId", async (c) => guarded(c, async () => {
-  const s = authInit(c);
-  await guard({ perm: "users.manage" })(c);
-  await requireStepUp(c);
-  const target = await resolveUser(s.db, c.req.param("id") ?? "");
-  if (!target) return c.json({ error: "Not found" }, 404);
-  await revokeDevice(s.db, c.req.param("deviceId") ?? "", target.id, true);
-  return c.json({ ok: true });
-}));
-
 // GET /admin-v2/permissions/registry -> grouped registry for the access matrix.
 adminRoute.get("/permissions/registry", async (c) => guarded(c, async () => {
   await guard({ perm: "users.view" })(c);
@@ -709,6 +701,9 @@ adminRoute.post("/users", async (c) => guarded(c, async () => {
   const sess = await requireStepUp(c);
   const { email, role } = await json<{ email?: string; role?: string }>(c);
   const id = await createUser(s.db, email, role ?? "staff", sess.userId);
+  await afterResponse(c, (async () => recordUserCreated(s.db, eventCtx(c),
+    { id, email: String(email).trim().toLowerCase(), role: role ?? "staff" },
+    { id: sess.userId, email: sess.email }))());
   return c.json({ ok: true, id });
 }));
 
@@ -765,6 +760,17 @@ adminRoute.post("/users/:id/force-logout", async (c) => guarded(c, async () => {
   const target = await resolveUser(s.db, c.req.param("id") ?? "");
   if (!target) throw new AuthRejectError("user");
   await forceLogout(s.db, target.id);
+  return c.json({ ok: true });
+}));
+
+// POST /admin/users/:id/primary -> make this admin THE main account: it alone receives
+// notifications and is the auto-assignee for new orders (step-up required).
+adminRoute.post("/users/:id/primary", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await requireStepUp(c);
+  const target = await resolveUser(s.db, c.req.param("id") ?? "");
+  if (!target) throw new AuthRejectError("user");
+  await setPrimaryUser(s.db, target.id);
   return c.json({ ok: true });
 }));
 
@@ -832,4 +838,3 @@ adminRoute.post("/internal/cleanup", async (c) => guarded(c, async () => {
   const counts = await runCleanup(s.db, 500);
   return c.json({ ok: true, counts });
 }));
-

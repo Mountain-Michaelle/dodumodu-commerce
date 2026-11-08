@@ -130,6 +130,7 @@ const env: Env = {
   RESEND_API_KEY: process.env.RESEND_API_KEY ?? "",
   TURNSTILE_SECRET: process.env.TURNSTILE_SECRET ?? "",
   AUTH_FROM_EMAIL: process.env.AUTH_FROM_EMAIL ?? "auth@example.com",
+  ORDER_BACKUP_EMAIL: process.env.ORDER_BACKUP_EMAIL ?? "",
   ADMIN_BASE_PATH: process.env.ADMIN_BASE_PATH ?? "/admin",
 
   // The only local-only values in the whole Env: real bindings on the Worker.
