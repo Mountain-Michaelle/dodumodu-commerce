@@ -373,6 +373,56 @@ async function revokeDevice(userId, deviceId, button) {
   } catch { button.disabled = false; panelNote("devices", "error", "Could not revoke that device."); }
 }
 
+// ---- Lost-email requests (admin-v2/account-requests) ----
+// The attempted username is user-typed: it is only ever put in with textContent.
+async function loadRequests() {
+  const panel = $("requests-panel");
+  try {
+    const res = await fetch(`${BASE}/admin-v2/account-requests`, { credentials: "same-origin" });
+    if (res.status === 403 || res.status === 401) { panel.hidden = true; return; } // no permission: stay hidden
+    if (!res.ok) { panel.hidden = false; panelNote("requests", "error", "Could not load requests."); return; }
+    const { requests } = await res.json();
+    panel.hidden = false;
+    renderRequests(Array.isArray(requests) ? requests : []);
+  } catch { panel.hidden = false; panelNote("requests", "error", "Could not load requests."); }
+}
+
+function renderRequests(requests) {
+  const list = $("requests-list"); list.replaceChildren();
+  panelNote("requests", "", "");
+  if (requests.length === 0) {
+    const none = document.createElement("p"); none.className = "muted small"; none.textContent = "No open requests.";
+    list.appendChild(none); return;
+  }
+  for (const r of requests) {
+    const row = document.createElement("div"); row.className = "row";
+    const left = document.createElement("div");
+    const who = document.createElement("div"); who.textContent = r.usernameAttempted;
+    const meta = document.createElement("div"); meta.className = "label";
+    meta.textContent = "asked " + new Date(r.createdAt).toLocaleString();
+    left.appendChild(who); left.appendChild(meta); row.appendChild(left);
+    for (const [action, label, cls] of [["resolved", "Resolved", "small-btn"], ["dismissed", "Dismiss", "ghost small-btn"]]) {
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = cls; btn.textContent = label;
+      btn.addEventListener("click", () => resolveRequest(r.id, action, btn));
+      row.appendChild(btn);
+    }
+    list.appendChild(row);
+  }
+}
+
+async function resolveRequest(id, action, button) {
+  button.disabled = true;
+  try {
+    const res = await stepUp(() => fetch(`${BASE}/admin-v2/account-requests/${encodeURIComponent(id)}/resolve`, {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    }));
+    if (res.ok) { await loadRequests(); return; }
+    button.disabled = false; panelNote("requests", "error", errorMessage(res));
+  } catch { button.disabled = false; panelNote("requests", "error", "The operation could not be completed."); }
+}
+$("requests-refresh").addEventListener("click", loadRequests);
+
 $("sessions-close").addEventListener("click", closePanels);
 $("devices-close").addEventListener("click", closePanels);
 $("sessions-revoke-all").addEventListener("click", () => { if (selectedUserId) revokeAllSessions(selectedUserId, $("sessions-revoke-all")); });
@@ -380,4 +430,4 @@ $("sessions-revoke-all").addEventListener("click", () => { if (selectedUserId) r
 const _origLoad = load;
 load = async function () { closePanels(); await _origLoad(); };
 
-Promise.all([loadRegistry(), load()]);
+Promise.all([loadRegistry(), load(), loadRequests()]);

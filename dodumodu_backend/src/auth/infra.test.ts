@@ -22,10 +22,10 @@ after(async () => {
   if (!databaseUrl) return;
   // The append-only trigger blocks DELETE; retention/cleanup uses the aa_maint
   // escape hatch (the same path the retention job uses).
-  await q(db, sql`SET aa.maint = 'on'`);
-  await q(db, sql`DELETE FROM aa_auth_log WHERE reason LIKE ${tag + "%"}`);
+  await q(db, sql`WITH m AS (SELECT set_config('aa.maint', 'on', true)) DELETE FROM aa_auth_log WHERE EXISTS (SELECT 1 FROM m) AND reason LIKE ${tag + "%"}`);
   await q(db, sql`DELETE FROM aa_blocks WHERE block_ref LIKE ${tag + "%"}`);
   await q(db, sql`DELETE FROM aa_alert_outbox WHERE dedupe_key LIKE ${tag + "%"}`);
+  await q(db, sql`DELETE FROM aa_users WHERE email LIKE ${tag + "%"}`);
   await closePools();
 });
 
@@ -40,7 +40,11 @@ test("writeAuthLog inserts and returns an id; the row is append-only", { skip: !
 
 test("blocks: create -> active; expired -> inactive; lift -> inactive", { skip: !databaseUrl }, async () => {
   const ref = `${tag}-dev`;
-  const actor = (await q<{ id: string }>(db, sql`SELECT id::text AS id FROM aa_users LIMIT 1`))[0];
+  // Self-contained: create the lifter instead of assuming the DB already has a user
+  // (a freshly migrated database has none, which made this test fail spuriously).
+  const actor = (await q<{ id: string }>(db,
+    sql`INSERT INTO aa_users (email, role) VALUES (${tag + "-lifter@example.com"}, 'admin')
+        RETURNING id::text AS id`))[0];
   assert.ok(actor, "a user exists to act as the lifter");
   await createBlock(db, { kind: "device", keyHashHex: kh, blockRef: ref, reason: tag });
   const blk = await isBlocked(db, "device", kh);
@@ -63,9 +67,9 @@ test("outbox: enqueue is idempotent; claim + send clears it", { skip: !databaseU
   assert.ok(first, "first enqueue inserts");
   const dup = await enqueue(db, "phrase_block", key, null);
   assert.equal(dup, null, "duplicate dedupe_key does not insert again");
-  const claimed = await claimOutbox(db, 10);
+  const claimed = await claimOutbox(db, 1000);
   assert.ok(claimed.some((r) => r.id === first), "the row is claimable");
   await markSent(db, first!);
-  const again = await claimOutbox(db, 10);
+  const again = await claimOutbox(db, 1000);
   assert.ok(!again.some((r) => r.id === first), "a sent row is not re-claimed");
 });

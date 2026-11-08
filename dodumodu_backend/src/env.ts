@@ -145,6 +145,11 @@ export type Env = {
   TURNSTILE_SECRET: string;
   /** From address for login codes. Must be a Resend-verified sender/domain. */
   AUTH_FROM_EMAIL: string;
+  /**
+   * Optional. Every verified order is also emailed here (comma-separated, max 3) the moment
+   * it reaches the backend, independent of the database. Empty/unset = feature skipped.
+   */
+  ORDER_BACKUP_EMAIL?: string;
 
   // Build-deploy secrets — set via wrangler secret put; never committed.
   /** CI authenticates build-status mutations (mark-deployed/verified/failed) with this secret. */

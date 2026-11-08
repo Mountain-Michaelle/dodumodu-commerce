@@ -34,6 +34,7 @@ const state = {
   cooldownUntil: 0,
   timer: null,
   inFlight: false,
+  emailMasked: "",     // masked address of a resumed flow (never the full email)
 };
 
 function showNote(kind, text) {
@@ -76,10 +77,11 @@ const STAGES = {
   totp:         { label: "Authenticator", type: "text",  ac: "one-time-code", im: "numeric", btn: "Verify",   sub: "Enter the 6-digit code from your authenticator app." },
   totp_enroll:  { label: "Authenticator", type: "text",  ac: "one-time-code", im: "numeric", btn: "Verify",   sub: "Enter the 6-digit code from your authenticator app." },
   recovery:     { label: "Backup code",   type: "text",  ac: "one-time-code", im: "text",    btn: "Verify",   sub: "Enter one of your backup codes (XXXXX-XXXXX)." },
+  lost:         { label: "Username or email", type: "text", ac: "username", im: "text", btn: "Request help", sub: "Lost access to your email? Enter your username or email and our team will review your request." },
   backup_codes: { label: "Ready",         type: "text",  ac: "off",           im: "text",    btn: "Continue", sub: "Backup codes saved. Continue to finish signing in." },
   ready:        { label: "Ready",         type: "text",  ac: "off",           im: "text",    btn: "Sign in",  sub: "All checks passed. Continue to sign in." },
 };
-const NEEDS_INPUT = new Set(["email", "otp", "totp", "totp_enroll", "recovery"]);
+const NEEDS_INPUT = new Set(["email", "otp", "totp", "totp_enroll", "recovery", "lost"]);
 const ENROLL_GATED_SUB = "Set up your authenticator app first.";
 
 // Strip whitespace/dashes people paste from authenticator apps ("123 456").
@@ -161,6 +163,11 @@ function render() {
   const resend = $("resend-link");
   if (resend) { resend.hidden = state.stage !== "otp"; tick(); }
   setHidden("device-link", !(state.stage === "email" && state.device));
+  setHidden("lost-link", state.stage !== "email");
+  setHidden("back-link", state.stage !== "lost");
+  if (state.stage === "otp" && state.emailMasked) {
+    $("subtitle").textContent = `Enter the code we emailed to ${state.emailMasked}.`;
+  }
 
   applyGate();
   if (needsInput && !enrollGated()) input.focus();
@@ -348,6 +355,7 @@ async function onSubmit(ev) {
   await guarded(async () => {
     switch (state.stage) {
       case "email":        await doRequest(value); break;
+      case "lost":         await doLost(value); break;
       case "otp":          await doCode(value); break;
       case "totp":         await doTotp(value); break;
       case "recovery":     await doTotp(value); break;
@@ -403,6 +411,18 @@ async function doRequest(email) {
     showNote("ok", "Your one-time code was sent successfully.");
     startResendCountdown(45);
   } else { await handleResult(status, data); }
+}
+
+// Lost email: the server answers the SAME 202 for known, unknown and malformed input, so
+// the message must not claim an account was found.
+async function doLost(username) {
+  const { status, data } = await api(AUTH + "/lost-email", { username });
+  if (status === 202) {
+    $("input").value = "";
+    showNote("ok", "Request received. If that matches an account, our team will review it and contact you using the details on file.");
+    return;
+  }
+  await handleResult(status, data);
 }
 
 async function doResend() {
@@ -585,8 +605,60 @@ if ($("device-link")) {
   });
 }
 
+if ($("lost-link")) {
+  $("lost-link").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    if (state.stage !== "email") return;
+    showNote("", "");
+    state.stage = "lost";
+    render();
+  });
+}
+if ($("back-link")) {
+  $("back-link").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    if (state.stage !== "lost") return;
+    showNote("", "");
+    state.stage = "email";
+    render();
+  });
+}
+
+// Reload / reopened tab: ask the server where this browser's flow is. Within the server's
+// resume window (3 min since the last completed step) we land on the SAME stage; otherwise
+// (404) the normal email stage shows. The server is the only authority on the window.
+async function resumeFlow() {
+  let res;
+  try { res = await fetch(AUTH + "/status", { credentials: "same-origin" }); } catch { return; }
+  if (res.status !== 200) return;
+  let data;
+  try { data = await res.json(); } catch { return; }
+  if (!data || !STAGES[data.stage] || data.stage === "email" || data.stage === "lost") return;
+  state.stage = data.stage;
+  state.strict = !!data.strict;
+  state.emailMasked = typeof data.email_masked === "string" ? data.email_masked : "";
+  const left = Number.isFinite(data.expires_in) ? data.expires_in : 0;
+  render();
+  if (data.stage === "backup_codes") {
+    // The codes were shown once and the reload lost them: issue a fresh set.
+    const r = await api(AUTH + "/backup-codes/reissue", {});
+    if (r.status === 200 && r.data && Array.isArray(r.data.backup_codes)) {
+      showBackupCodes(r.data.backup_codes);   // the codes live inside #note, so the warning goes in the hint
+      setHint("Your previous backup codes were replaced. Save these new ones.");
+      return;
+    }
+  }
+  if (data.stage === "totp_enroll") {
+    showNote("warn", "Welcome back. A new QR code was generated: remove any older entry from your authenticator.");
+  } else {
+    showNote("ok", `Welcome back${state.emailMasked ? `, ${state.emailMasked}` : ""}. Continue where you left off` +
+      (left > 0 ? ` (this step is kept for ${formatCountdown(left)}).` : "."));
+  }
+}
+
 $("form").addEventListener("submit", onSubmit);
 render();
+resumeFlow();
 // Show the trusted-device option only if this browser holds an active device
 // (checked against our own cookie; leaks nothing about a given email).
 fetch(AUTH + "/device/available", { credentials: "same-origin" })

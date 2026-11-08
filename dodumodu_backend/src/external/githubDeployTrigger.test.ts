@@ -97,3 +97,21 @@ test("network error is failed and retryable", async () => {
     }
   );
 });
+
+test("a transient 502 is retried once and the dispatch then succeeds", async () => {
+  let n = 0;
+  await withFetch(async () => { n += 1; return new Response(null, { status: n === 1 ? 502 : 204 }); }, async () => {
+    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "t" } as never);
+    assert.equal(r.status, "triggered");
+    assert.equal(n, 2);
+  });
+});
+
+test("a 401/404 is NOT retried (retrying cannot fix a bad token or repo)", async () => {
+  let n = 0;
+  await withFetch(async () => { n += 1; return new Response(null, { status: 401 }); }, async () => {
+    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "t" } as never);
+    assert.equal(r.status, "failed");
+    assert.equal(n, 1);
+  });
+});

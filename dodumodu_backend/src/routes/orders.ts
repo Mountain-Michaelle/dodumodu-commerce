@@ -6,33 +6,56 @@ import { orderSchema } from "../validation/orderSchema";
 import { orderService, ProductNotFoundError, PackageNotFoundError, InvalidQuantityError, PaymentUnavailableError, PaymentMethodMismatchError } from "../services/orderService";
 import type { OrderRow } from "../data/ordersRepo";
 import { CodNotAvailableError } from "../services/codPolicyService";
+import { sendInBackground, sendOrderBackup, sendOrderFailureAlert } from "../services/orderBackupMailer";
 
 export const ordersRoute = new Hono<{ Bindings: Env; Variables: { parsedBody: unknown; prefetchedOrder?: OrderRow | null } }>();
 
 // Exported for tests only: the fail-closed rules here are security-relevant, so
 // they need to be provable without a real Cloudflare round trip. The schema above
 // deliberately does NOT duplicate this decision - see validation/orderSchema.ts.
-export async function verifyTurnstile(env: Env, token: string, remoteIp: string) {
+export type TurnstileOutcome = "ok" | "failed" | "unavailable";
+
+// Cloudflare's verifier is reached from the Worker, not from the customer's phone, but
+// it can still be slow or briefly down. A hung or erroring verifier must never become
+// an unhandled 500 that the storefront reads as "your order failed": it is bounded by a
+// timeout and reported as its own outcome ("unavailable") so the route can answer a
+// retryable 503. It still FAILS CLOSED - an unverified order is never accepted.
+const TURNSTILE_TIMEOUT_MS = 8_000;
+
+export async function verifyTurnstileOutcome(env: Env, token: string, remoteIp: string): Promise<TurnstileOutcome> {
   // Local development has no Turnstile secret: there is no widget to solve
   // offline, so verification is skipped - and only there. With
   // ENVIRONMENT=production a missing secret fails closed, exactly like a bad
   // token does, because production must never silently accept an unverified
   // order. Same code both ways; only the configuration differs.
   if (!env.TURNSTILE_SECRET_KEY) {
-    if (env.ENVIRONMENT === "production") return false;
+    if (env.ENVIRONMENT === "production") return "failed";
     console.warn(JSON.stringify({
       event: "turnstile_skipped", reason: "TURNSTILE_SECRET_KEY is not set (non-production only)",
     }));
-    return true;
+    return "ok";
   }
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      signal: AbortSignal.timeout(TURNSTILE_TIMEOUT_MS),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: remoteIp }),
+    });
+    if (res.status >= 500) return "unavailable";
+    const data = await res.json<{ success: boolean }>();
+    return data.success ? "ok" : "failed";
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "turnstile_unavailable",
+      reason: err instanceof Error ? err.name : "unknown",
+    }));
+    return "unavailable";
+  }
+}
 
-  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: remoteIp }),
-  });
-  const data = await res.json<{ success: boolean }>();
-  return data.success;
+export async function verifyTurnstile(env: Env, token: string, remoteIp: string) {
+  return (await verifyTurnstileOutcome(env, token, remoteIp)) === "ok";
 }
 
 // Order of checks: body parse -> idempotency + abuse observation (orderGuard) ->
@@ -55,13 +78,32 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
   }
 
   const remoteIp = c.req.header("cf-connecting-ip") ?? "";
-  const humanVerified = await verifyTurnstile(c.env, parsed.data.turnstileToken, remoteIp);
-  if (!humanVerified) {
-    await noteOrderOutcome(c, "turnstile_failed");
-    return c.json({ error: "Bot verification failed" }, 400);
+  // A REPLAY of an order that already exists (the guard found it by idempotency key)
+  // creates nothing, so there is nothing for a bot check to protect - and a Turnstile
+  // token is single-use. A customer on a bad connection whose first request succeeded
+  // but whose response was lost retries with the SAME token; re-verifying it would
+  // answer "Bot verification failed" for an order that was in fact placed.
+  const isReplay = (c.get("prefetchedOrder") ?? null) !== null;
+  if (!isReplay) {
+    const outcome = await verifyTurnstileOutcome(c.env, parsed.data.turnstileToken, remoteIp);
+    if (outcome === "unavailable") {
+      // Our verifier is the problem, not the customer: say so, and ask for a retry.
+      c.header("Retry-After", "2");
+      return c.json({ error: "Verification is temporarily unavailable. Please try again in a moment." }, 503);
+    }
+    if (outcome !== "ok") {
+      await noteOrderOutcome(c, "turnstile_failed");
+      return c.json({ error: "Bot verification failed" }, 400);
+    }
   }
 
   const db = createDb(c.env.DATABASE_URL);
+  // Safety net, started NOW and never awaited: the order is emailed in parallel with the
+  // database write, so it exists somewhere even if the write is rejected. A replay sends
+  // again on purpose - Resend's idempotency key makes that a no-op if the first one went out.
+  const mailMeta = { ip: remoteIp || null, clientKind: c.get("clientKind") ?? null };
+  sendInBackground(c, sendOrderBackup(c.env, parsed.data, mailMeta));
+  let created = false;
   try {
     const { order, checkoutUrl } = await orderService.createOrder(db, c.env, parsed.data, {
       // The row the guard already found, so a replay does not repeat the lookup.
@@ -77,7 +119,9 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     // Legitimate progression is the negative evidence that disarms the abuse rules
     });
     // for this address, recorded from the order the server actually created.
-    await noteOrderOutcome(c, "created", { status: order.status, id: order.id });
+    created = true;
+    // Bookkeeping must never turn a saved order into a failure for the customer.
+    await noteOrderOutcome(c, "created", { status: order.status, id: order.id }).catch(() => {});
     // Never echo back any price-related field the client sent - every field
     // below is the value the server computed, so the thank-you page can show
     // an accurate breakdown without recomputing anything itself.
@@ -96,7 +140,13 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       checkoutUrl,
     });
   } catch (err) {
-    if (err instanceof ProductNotFoundError) return c.json({ error: "Product not found" }, 404);
+    const failed = (reason: string) => {
+      if (!created) {
+        sendInBackground(c, sendOrderFailureAlert(c.env, db, parsed.data, mailMeta, reason,
+          err instanceof Error ? err.message : String(err)));
+      }
+    };
+    if (err instanceof ProductNotFoundError) { failed("product_not_found"); return c.json({ error: "Product not found" }, 404); }
     if (err instanceof PackageNotFoundError) return c.json({ error: "Invalid package selected" }, 400);
     if (err instanceof InvalidQuantityError) {
       return c.json({ error: "Invalid request", fields: { quantity: [err.message] } }, 400);
@@ -115,6 +165,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     if (err instanceof PaymentUnavailableError) {
       // Pay Now can't proceed (OPay not configured, or provider down).
       // Return 400 so the client shows a real message instead of a 500.
+      failed("payment_unavailable");
       return c.json({ error: err.message }, 400);
     }
     if (err instanceof PaymentMethodMismatchError) {
@@ -125,6 +176,9 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       return c.json({ error: err.message }, 400);
     }
 
+    // Anything else - including the database rejecting the order - is a lost order unless
+    // someone is told: send the full payload to the admin before the 500 goes out.
+    failed("order_not_saved");
     throw err;
   }
 });

@@ -49,7 +49,9 @@ export const SESSION_LOOKUP_MAX_IDLE_SECS = Math.max(
   3600,
   600,
 );
-export const FLOW_STEP_RESUME_SECS = 300;
+// A reload (or a closed-and-reopened tab) resumes the CURRENT stage for this long after the
+// last completed step. Matches the emailed-code lifetime (3 min); after it, start again.
+export const FLOW_STEP_RESUME_SECS = 180;
 export const STEPUP_WINDOW_SECS = 300;
 export const STEPUP_WINDOW_SECS_STRICT = 120;
 export const BACKUP_CODE_COUNT = 8;
