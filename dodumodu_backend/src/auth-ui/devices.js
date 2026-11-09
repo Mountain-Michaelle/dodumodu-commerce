@@ -17,18 +17,23 @@ async function load() {
   devices.forEach((d) => {
     const row = document.createElement("div");
     row.className = "row";
-    const left = document.createElement("div");
-    const label = document.createElement("div");
+
+    // Col 1: Device name
+    const label = document.createElement("div"); label.className = "label";
     label.textContent = d.label || "This device"; // textContent only
-    left.appendChild(label);
-    row.appendChild(left);
+    row.appendChild(label);
 
     // Col 2: Device identifier (truncated) + copy button
     const idText = d.id || "";
     const idDisplay = idText.length > 30 ? idText.slice(0, 30) + "..." : idText;
+    const idCell = document.createElement("div");
+    idCell.style.display = "flex";
+    idCell.style.alignItems = "center";
+    idCell.style.gap = "8px";
+
     const deviceId = document.createElement("span"); deviceId.className = "device-id";
     deviceId.textContent = idDisplay; deviceId.title = idText;
-    row.appendChild(deviceId);
+    idCell.appendChild(deviceId);
 
     const idCopyBtn = document.createElement("button");
     idCopyBtn.type = "button";
@@ -46,15 +51,22 @@ async function load() {
         setTimeout(() => idCopyBtn.classList.remove("copy-error"), 1500);
       }
     });
-    row.appendChild(idCopyBtn);
+    idCell.appendChild(idCopyBtn);
+    row.appendChild(idCell);
 
-    // Cols 3-5: Meta split into separate columns
-    const meta = document.createElement("div"); meta.className = "label";
+    // Col 3: Trust Status
     const status = document.createElement("span"); status.className = "trust-status"; status.textContent = d.status;
+    row.appendChild(status);
+
+    // Col 4: Created Via
     const via = document.createElement("span"); via.className = "created-via"; via.textContent = d.created_via;
+    row.appendChild(via);
+
+    // Col 5: Last Seen
     const seen = document.createElement("span"); seen.className = "last-seen"; seen.textContent = new Date(d.last_seen_at).toLocaleString();
-    meta.appendChild(status); meta.appendChild(via); meta.appendChild(seen);
-    row.appendChild(meta);
+    row.appendChild(seen);
+
+    // Col 6: Revoke button
     if (d.status !== "revoked") {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "Revoke";
@@ -64,6 +76,7 @@ async function load() {
       });
       row.appendChild(btn);
     }
+
     list.appendChild(row);
   });
 }

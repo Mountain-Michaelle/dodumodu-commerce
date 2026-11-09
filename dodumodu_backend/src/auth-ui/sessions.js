@@ -16,9 +16,8 @@ async function load() {
   sessions.forEach((s) => {
     const row = document.createElement("div");
     row.className = "row";
-    const left = document.createElement("div");
-    const when = document.createElement("div"); when.className = "label";
-    when.textContent = new Date(s.last_seen_at).toLocaleString();
+
+    // Col 1: Device / Browser (truncated + copy)
     const uaText = s.ua || "Unknown device";
     const displayText = uaText.length > 30 ? uaText.slice(0, 30) + "..." : uaText;
     const ua = document.createElement("div"); ua.className = "small";
@@ -49,9 +48,14 @@ async function load() {
 
     deviceCell.appendChild(ua);
     deviceCell.appendChild(copyBtn);
-    left.appendChild(when);
-    left.appendChild(deviceCell);
-    row.appendChild(left);
+    row.appendChild(deviceCell);
+
+    // Col 2: Last Activity
+    const when = document.createElement("div"); when.className = "label";
+    when.textContent = new Date(s.last_seen_at).toLocaleString();
+    row.appendChild(when);
+
+    // Col 3 / Col 4: Status badge or End button
     if (!s.current) {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "End";
@@ -71,6 +75,7 @@ async function load() {
       const tag = document.createElement("span"); tag.className = "small"; tag.textContent = "This device";
       row.appendChild(tag);
     }
+
     list.appendChild(row);
   });
 }
