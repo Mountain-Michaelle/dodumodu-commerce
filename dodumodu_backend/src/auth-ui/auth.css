@@ -228,23 +228,26 @@ body:has(.page-shell) {
 .row:last-child { border-bottom: 0; }
 .row:hover { background: var(--accent-soft); }
 
-/* Promote JS-created children into grid columns */
-.row > div { display: contents; }
-
 /* ===== Sessions page columns ===== */
-/* Col 1: Device / Browser (truncated in JS + copy btn) */
-[data-page="sessions"] .row > div > .small {
+/* Col 1: Device / Browser cell (div containing UA text + copy button) */
+[data-page="sessions"] .row > div:first-child {
   grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+/* Device text inside cell */
+[data-page="sessions"] .row > div:first-child > .small {
   font-size: 0.875rem;
   color: var(--fg);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 12px 16px;
 }
 /* Col 2: Last Activity */
-[data-page="sessions"] .row > div > .label {
+[data-page="sessions"] .row > .label {
   grid-column: 2;
   font-size: 0.875rem;
   color: var(--muted);
@@ -262,7 +265,7 @@ body:has(.page-shell) {
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
-  background: rgba(53, 196, 138, 0.12);
+  background: rgba(16, 185, 129, 0.15);
   color: var(--ok);
 }
 /* Col 4: Actions (End button) */
@@ -273,39 +276,45 @@ body:has(.page-shell) {
 
 /* ===== Devices page columns ===== */
 /* Col 1: Device name */
-[data-page="devices"] .row > div > .label:first-child {
+[data-page="devices"] .row > .label {
   grid-column: 1;
   font-size: 0.875rem;
   color: var(--fg);
   padding: 12px 16px;
 }
-/* Col 2: Device identifier (truncated + copy btn) */
-[data-page="devices"] .row > div > .device-id {
+/* Col 2: Device identifier cell (div containing truncated ID + copy button) */
+[data-page="devices"] .row > div:nth-child(2) {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+/* Device ID text inside cell */
+[data-page="devices"] .row > div:nth-child(2) > .device-id {
   font-size: 0.875rem;
   color: var(--fg);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 12px 16px;
 }
 /* Col 3: Trust status */
-[data-page="devices"] .row > div > .trust-status {
+[data-page="devices"] .row > .trust-status {
   grid-column: 3;
   font-size: 0.75rem;
   color: var(--muted);
   padding: 12px 16px;
 }
 /* Col 4: Created via */
-[data-page="devices"] .row > div > .created-via {
+[data-page="devices"] .row > .created-via {
   grid-column: 4;
   font-size: 0.75rem;
   color: var(--muted);
   padding: 12px 16px;
 }
 /* Col 5: Last seen */
-[data-page="devices"] .row > div > .last-seen {
+[data-page="devices"] .row > .last-seen {
   grid-column: 5;
   font-size: 0.75rem;
   color: var(--muted);
