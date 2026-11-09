@@ -27,8 +27,10 @@ test("visitor writes, distinct reports, geography, annual snapshots and bounded 
   // so without pinning it this test only passed on a DB migrated on 2026-10-08, and
   // it also assumes empty tables. This test deletes rows: local databases only.
   const host = new URL(databaseUrl!).hostname;
-  assert.ok(["localhost", "127.0.0.1", "::1", "[::1]"].includes(host),
-    `refusing to reset visitor tables on non-local host "${host}"`);
+  // Local, or a remote host the operator named EXACTLY in ALLOW_REMOTE_TEST_DB (a disposable
+  // branch) - the same explicit opt-in scripts/require-test-db.mjs demands.
+  assert.ok(["localhost", "127.0.0.1", "::1", "[::1]"].includes(host) || process.env.ALLOW_REMOTE_TEST_DB === host,
+    `refusing to reset visitor tables on non-local host "${host}" (set ALLOW_REMOTE_TEST_DB=${host} only for a disposable database)`);
   await db.execute(sql`DELETE FROM visitor_days`);
   await db.execute(sql`DELETE FROM visitor_year_snapshots`);
   await db.execute(sql`UPDATE visitor_analytics_meta SET started_on = '2026-10-08'`);

@@ -22,6 +22,8 @@ import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
 import * as site from "./generated/site";
 import { robotsTxt, sitemapXml, THANK_YOU_HTML } from "./staticAssets";
+import { HTTPException } from "hono/http-exception";
+import { logError } from "./shared/logger";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -43,6 +45,17 @@ export function isOriginAllowed(origin: string, allowedOrigins: string | undefin
 }
 
 export const app = new Hono<{ Bindings: Env }>();
+
+// Last line of defence: any fault no route handled is logged (Cloudflare Workers Logs) with
+// the method, path and cf-ray, and the client gets the same bland 500 as before - no message,
+// stack or query string ever leaves the server.
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
+  let path = "";
+  try { path = new URL(c.req.url).pathname; } catch { /* malformed URL: log without it */ }
+  logError("unhandled_error", err, { method: c.req.method, path, ray: c.req.header("cf-ray") ?? null });
+  return c.text("Internal Server Error", 500);
+});
 
 // §3 Phase 0, step 8, option (b): if Pages and the Worker end up on different
 // subdomains, CORS must be scoped to the exact Pages origin — never '*'.

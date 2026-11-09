@@ -15,6 +15,7 @@ import { ipBlockHashHex } from "./blocks";
 import { logInfo } from "./authLog";
 import { notificationService } from "../services/notificationService";
 import { LOST_EMAIL_MAX_ATTEMPTS, LOST_EMAIL_ALERT_COOLDOWN_HOURS } from "./config";
+import { swallow } from "../shared/logger";
 
 export interface LostEmailOutcome {
   /** Where to send the capped alert, or null (unknown handle, or cooldown). */
@@ -64,7 +65,7 @@ export async function requestLostEmail(
       type: "account_request", title: "Lost-email recovery request",
       body: `A user asked for help recovering access: "${attempted}"`,
       href: "/users", dedupeKey: `account-request:${created[0].id}`,
-    }).catch(() => {});
+    }).catch(swallow("lost_email_best_effort_failed"));
   }
   await logInfo(db, {
     event: "lost_email", status: "success", userId: row.id, usernameAttempted: attempted,

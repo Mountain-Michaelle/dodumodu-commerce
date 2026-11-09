@@ -12,6 +12,7 @@ import { AuthLockedError, AuthServerFaultError } from "./errors";
 import { tierFor } from "./sessions";
 import { isBlocked, vidHashHex, ipBlockHashHex } from "./blocks";
 import { logInfo } from "./authLog";
+import { swallow } from "../shared/logger";
 
 export interface DriftResult { driftCount: number; revoked: boolean; }
 
@@ -97,7 +98,7 @@ export async function deviceStart(
   try {
     reservation = await reserve(db, key, lockTier);
   } catch (e) {
-    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(() => {});
+    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(swallow("devices_best_effort_failed"));
     throw e;
   }
   try {
@@ -127,7 +128,7 @@ export async function deviceStart(
     return { flowToken: token, real: false, tier };
   } catch (e) {
     if (e instanceof AuthLockedError) throw e;
-    await refund(db, reservation).catch(() => {});
+    await refund(db, reservation).catch(swallow("devices_best_effort_failed"));
     throw new AuthServerFaultError(e);
   }
 }

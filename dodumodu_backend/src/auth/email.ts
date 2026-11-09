@@ -3,6 +3,7 @@
 // never waits and never changes with email success. Never log the body/code.
 import type { Context } from "hono";
 import { afterResponse } from "./ctx";
+import { scrub } from "../shared/logger";
 
 export interface EmailProvider {
   send(to: string, subject: string, text: string, idempotencyKey: string): Promise<boolean>;
@@ -17,6 +18,7 @@ export function resendProvider(apiKey: string, from: string): EmailProvider {
     async send(to, subject, text, idempotencyKey): Promise<boolean> {
       const body = JSON.stringify({ from, to, subject, text });
       let lastStatus: number | null = null;
+      let lastDetail = "";
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
@@ -31,8 +33,9 @@ export function resendProvider(apiKey: string, from: string): EmailProvider {
           });
           lastStatus = res.status;
           if (res.ok) return true;
-        } catch {
-          // retry once with the same key, then give up
+          lastDetail = await res.text().catch(() => "");   // Resend says why: unverified domain, bad key, ...
+        } catch (e) {
+          lastDetail = e instanceof Error ? e.name : "send_error";   // retry once with the same key, then give up
         }
       }
       console.error("[auth]", JSON.stringify({
@@ -40,6 +43,8 @@ export function resendProvider(apiKey: string, from: string): EmailProvider {
         operation: "email.send",
         status: lastStatus,
         attempts: 2,
+        from_domain: from.split("@")[1] ?? null,
+        detail: scrub(lastDetail, 200),
       }));
       return false;
     },
@@ -66,8 +71,24 @@ export const captureProvider: EmailProvider = {
   },
 };
 
+/**
+ * No API key configured. This used to be the silent nullProvider, which reported "sent" for
+ * every sign-in code while delivering nothing: a missing/empty RESEND_API_KEY looked exactly
+ * like a working login that never emailed anyone. Now it fails loudly: the login request
+ * answers with a server fault the UI can show, and the log names the cause.
+ */
+export const unconfiguredProvider: EmailProvider = {
+  async send(): Promise<boolean> {
+    console.error("[auth]", JSON.stringify({
+      event: "email_not_configured",
+      detail: "RESEND_API_KEY is empty or missing: no email was sent. Set it in .env / wrangler secrets.",
+    }));
+    return false;
+  },
+};
+
 export function providerFor(apiKey: string | null, from = "auth@example.com"): EmailProvider {
-  return apiKey ? resendProvider(apiKey, from) : nullProvider;
+  return apiKey && apiKey.trim() ? resendProvider(apiKey.trim(), from) : unconfiguredProvider;
 }
 
 /** The provider the routes use: capture in tests, else Resend/null. */

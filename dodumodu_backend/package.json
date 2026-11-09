@@ -21,6 +21,7 @@
     "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "test:db": "tsx --import ./scripts/require-test-db.mjs --test --test-concurrency=1 \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "test:mfa": "tsx --import ./scripts/require-test-db.mjs --test --test-concurrency=1 src/auth/totp.test.ts src/auth/totp-backup.test.ts src/auth/totp-relogin.test.ts src/auth/recovery.test.ts src/auth/device-trust.test.ts src/auth/blocks-flow.test.ts src/auth/sessions3b.test.ts",
+    "db:reset-test": "node scripts/reset-test-db.mjs --yes",
     "test:ui:browser": "node --test src/auth-ui/login.browser.spec.mjs",
     "test:ui": "node --test src/auth-ui/*.test.mjs"
   },

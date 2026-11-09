@@ -35,6 +35,7 @@ const nextIp = () => `10.203.${Math.floor(ipN / 250) + 1}.${(ipN++ % 250) + 1}`;
 type Sent = { to: string; subject: string; text: string; key: string };
 let sent: Sent[] = [];
 let resendMode: "ok" | "hang" | "fail" = "ok";
+let HANG_MS = 3000;
 
 const app = new Hono<{ Bindings: Env }>();
 app.route("/", ordersRoute);
@@ -62,7 +63,7 @@ before(async () => {
     if (url.includes("api.resend.com")) {
       const b = JSON.parse(String(init?.body));
       const key = new Headers(init?.headers).get("Idempotency-Key") ?? "";
-      if (resendMode === "hang") await new Promise((r) => setTimeout(r, 3000));
+      if (resendMode === "hang") await new Promise((r) => setTimeout(r, HANG_MS));
       if (resendMode === "fail") return new Response("{}", { status: 500 });
       sent.push({ to: b.to, subject: b.subject, text: b.text, key });
       return new Response(JSON.stringify({ id: "x" }), { status: 200 });
@@ -71,7 +72,7 @@ before(async () => {
   }) as typeof fetch;
 });
 
-beforeEach(() => { sent = []; resendMode = "ok"; resetOrderMailCache(); });
+beforeEach(() => { sent = []; resendMode = "ok"; HANG_MS = 3000; resetOrderMailCache(); });
 
 after(async () => {
   globalThis.fetch = realFetch;
@@ -117,12 +118,17 @@ test("every order is emailed to ORDER_BACKUP_EMAIL with its details, once, and n
 });
 
 test("email never slows the customer: a hung email provider does not delay or fail the order", async () => {
+  // Relative, not absolute: a remote database makes every order slow by itself. What must hold is
+  // that a provider hanging for 8 s adds (almost) nothing to the same order with a healthy provider.
+  const timed = async () => { const t = Date.now(); const r = await post(body(crypto.randomUUID())); return { r, ms: Date.now() - t }; };
+  resendMode = "ok";
+  const base = await timed();
+  assert.equal(base.r.status, 200);
   resendMode = "hang";
-  const t = Date.now();
-  const res = await post(body(crypto.randomUUID()));
-  const took = Date.now() - t;
-  assert.equal(res.status, 200);
-  assert.ok(took < 2000, `order answered in ${took}ms while Resend was hanging for 3000ms`);
+  HANG_MS = 8000;
+  const hung = await timed();
+  assert.equal(hung.r.status, 200);
+  assert.ok(hung.ms < base.ms + 3000, `healthy ${base.ms}ms vs hung-provider ${hung.ms}ms: the email must not be awaited`);
   await flushOrderMail();
 });
 

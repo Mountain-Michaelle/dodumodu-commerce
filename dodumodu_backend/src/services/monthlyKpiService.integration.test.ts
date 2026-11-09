@@ -13,7 +13,8 @@ import {
 } from "./monthlyKpiService";
 import { adminRoute } from "../routes/admin";
 import { ACCESS_EMAIL_HEADER } from "../auth/adminAuth";
-import { products, orders, orderStatusHistory } from "../schema";
+import { products, orders, orderStatusHistory, spamFlags, monthlyKpiSnapshots } from "../schema";
+import { inArray } from "drizzle-orm";
 import * as spamRepo from "../abuse/spamRepo";
 import type { Env } from "../env";
 
@@ -24,7 +25,8 @@ test("monthly KPI API, aggregation, snapshots and immutable closed month", {
 }, async (t) => {
   registerDbDriver(pgDriver);
   const db = pgDriver(databaseUrl!);
-  t.after(async () => closePools());
+  let cleanup: (() => Promise<void>) | null = null;
+  t.after(async () => { try { await cleanup?.(); } finally { await closePools(); } });   // clean up BEFORE the pool closes
 
   const now = new Date();
   const currentMonth = lagosMonthKey(now);
@@ -38,6 +40,17 @@ test("monthly KPI API, aggregation, snapshots and immutable closed month", {
     description: "Disposable KPI integration product",
     price: 150000,
   }).returning();
+  // The report is GLOBAL (every order in the database), so this test only passes on a database that
+  // holds nothing but its own rows. Remove them afterwards so the next run starts clean.
+  cleanup = async () => {
+    const mine = await db.select({ id: orders.id }).from(orders).where(eq(orders.productId, product.id));
+    const ids = mine.map((r) => r.id);
+    if (ids.length) await db.delete(orderStatusHistory).where(inArray(orderStatusHistory.orderId, ids));
+    await db.delete(spamFlags).where(inArray(spamFlags.sourceOrderId, ids.length ? ids : [-1]));
+    await db.delete(orders).where(eq(orders.productId, product.id));
+    await db.delete(monthlyKpiSnapshots);
+    await db.delete(products).where(eq(products.id, product.id));
+  };
   let sequence = 0;
 
   async function createOrder(input: {
@@ -116,6 +129,11 @@ test("monthly KPI API, aggregation, snapshots and immutable closed month", {
     status: "failed",
     phone: "+2348012345009",
   });
+  // The fixture flags two FIXED numbers and the unique index allows one active flag per number, so
+  // clear them first (a previous run, or a crash, must not make this test fail) and again afterwards.
+  const fixtureFlagPhones = [normalizePhone("+2348012345008")!, normalizePhone("+2348012345009")!];
+  const clearFixtureFlags = () => db.delete(spamFlags).where(inArray(spamFlags.phoneNorm, fixtureFlagPhones));
+  await clearFixtureFlags();
   await spamRepo.insert(db, {
     phoneNorm: normalizePhone("+2348012345008")!,
     sourceOrderId: spamDeliveredId,

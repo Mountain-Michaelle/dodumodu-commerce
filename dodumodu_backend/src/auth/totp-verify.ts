@@ -29,6 +29,7 @@ import {
   TOTP_MAX_FAILS_PER_FLOW,
 } from "./config";
 import { recordDeviceFailure } from "./device-failures";
+import { swallow, swallowNull } from "../shared/logger";
 
 function totpKey(tag: string, ip: string): string {
   return `totp:${tag}:${ip}`;
@@ -79,7 +80,7 @@ async function resumeConsumed(
     sql`SELECT totp_secret_enc AS enc, totp_last_step::text AS last, totp_last_flow::text AS last_flow
           FROM aa_users WHERE id = ${flow.user_id}::uuid`);
   if (!u?.enc || u.last === null || u.last_flow !== flow.id) return null;
-  const secret = await decryptSecret(secrets.totpEncKey, u.enc).catch(() => null);
+  const secret = await decryptSecret(secrets.totpEncKey, u.enc).catch(swallowNull("totp_verify_lookup_failed"));
   if (!secret) return null;
   const step = await totpMatch(secret, normalizeTotpCode(input.code ?? ""), nowMs);
   return step !== null && String(step) === u.last
@@ -100,7 +101,7 @@ export async function verifyTotp(
   if (!flow || flow.user_id === null) throw new AuthRejectError("flow");
   if (flow.stage !== "totp") {
     if (flow.stage === "ready" || flow.stage === "backup_codes") {
-      const again = await resumeConsumed(db, secrets, flow, input, allowBackup, nowMs).catch(() => null);
+      const again = await resumeConsumed(db, secrets, flow, input, allowBackup, nowMs).catch(swallowNull("totp_verify_lookup_failed"));
       if (again) return again;
     }
     throw new AuthRejectError("flow");
@@ -118,7 +119,7 @@ export async function verifyTotp(
     // login; the throttle is a coarser per-IP backstop (spec §4.4b).
     reservation = await reserve(db, key, "anon", CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS);
   } catch (e) {
-    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(() => {});
+    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(swallow("totp_verify_best_effort_failed"));
     throw e;
   }
   try {
@@ -160,11 +161,11 @@ export async function verifyTotp(
         // flow: that is a success, not a wrong code.
         const flowNow = await loadFlow(db, flowToken);
         if (flowNow && (flowNow.stage === "ready" || flowNow.stage === "backup_codes")) {
-          const again = await resumeConsumed(db, secrets, flowNow, input, allowBackup, nowMs).catch(() => null);
+          const again = await resumeConsumed(db, secrets, flowNow, input, allowBackup, nowMs).catch(swallowNull("totp_verify_lookup_failed"));
           if (again) { await clearKeys(db, [key]); return again; }
         }
-        await noteFuse(db, tag).catch(() => {});
-        await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip).catch(() => {});
+        await noteFuse(db, tag).catch(swallow("totp_verify_best_effort_failed"));
+        await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip).catch(swallow("totp_verify_best_effort_failed"));
         throw new AuthRejectError("backup");
       }
       await clearKeys(db, [key]);
@@ -173,13 +174,13 @@ export async function verifyTotp(
 
     const urow = await urowP!;
     if (!urow?.enc || !urow.active) {
-      await noteFuse(db, tag).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("totp_verify_best_effort_failed"));
       // No TOTP enrolled but the enroll window is still open: advance the flow
       // to totp_enroll so the operator can set up their authenticator instead of
       // hitting a dead-end "Invalid or expired code".
       if (urow?.enroll_open) {
-        await refund(db, reservation).catch(() => {});
-        await clearKeys(db, [key]).catch(() => {});
+        await refund(db, reservation).catch(swallow("totp_verify_best_effort_failed"));
+        await clearKeys(db, [key]).catch(swallow("totp_verify_best_effort_failed"));
         await q1(db,
           sql`UPDATE aa_auth_flows SET stage = 'totp_enroll'
               WHERE id = ${flow.id}::uuid AND stage = 'totp' AND expires_at > now()`);
@@ -187,9 +188,9 @@ export async function verifyTotp(
       }
       throw new AuthRejectError("totp");
     }
-    const secret = await decryptSecret(secrets.totpEncKey, urow.enc).catch(() => null);
+    const secret = await decryptSecret(secrets.totpEncKey, urow.enc).catch(swallowNull("totp_verify_lookup_failed"));
     if (!secret) {
-      await refund(db, reservation).catch(() => {});
+      await refund(db, reservation).catch(swallow("totp_verify_best_effort_failed"));
       throw new AuthServerFaultError("totp decrypt");
     }
     const step = await totpMatch(secret, normalizeTotpCode(input.code ?? ""), nowMs);
@@ -204,7 +205,7 @@ export async function verifyTotp(
                      stage = CASE WHEN totp_fails + 1 >= ${TOTP_MAX_FAILS_PER_FLOW} THEN 'dead' ELSE stage END
                WHERE id = ${flow.id}::uuid AND stage = 'totp' AND expires_at > now()
                RETURNING recovery_unlocked, stage`),
-        noteFuse(db, tag).catch(() => {}),
+        noteFuse(db, tag).catch(swallow("totp_verify_best_effort_failed")),
       ]);
       // A new/unrecognised browser is device-blocked on the 3rd failure (the flow is
       // killed there): answer neutrally — recovery is NOT offered to a blocked device.
@@ -266,14 +267,14 @@ export async function verifyTotp(
         // and NOT counted against the recovery counters (spec §4.3).
         throw new AuthRejectError("totp replay");
       }
-      await noteFuse(db, tag).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("totp_verify_best_effort_failed"));
       throw new AuthRejectError("totp");
     }
     await clearKeys(db, [key]);
     return { next: adv.stage, remaining: null, usedBackup: false };
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError || e instanceof AuthRecoverableError) throw e;
-    await refund(db, reservation).catch(() => {});
+    await refund(db, reservation).catch(swallow("totp_verify_best_effort_failed"));
     throw new AuthServerFaultError(e);
   }
 }

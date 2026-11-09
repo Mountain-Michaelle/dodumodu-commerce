@@ -4,6 +4,12 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Logs: keeps console.error output (structured JSON from src/shared/logger.ts) searchable in
+# the Cloudflare dashboard. Server-side only; nothing here is sent to clients.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 # =============================================================================
 # REQUIRED PRODUCTION VARIABLES — replace every FILL-IN placeholder below

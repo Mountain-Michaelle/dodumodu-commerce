@@ -54,6 +54,7 @@ import { setFlowCookie, setSidCookie, setDidCookie, setVidCookie, clearSidCookie
 import { loadFlow } from "./flows";
 import { orderV2Routes } from "../routes/admin/ordersV2";
 import { recordLoginSuccess, recordRateLimited, recordUserCreated, type EventCtx } from "./security-events";
+import { swallow, swallowNull, logError } from "../shared/logger";
 
 type AppEnv = { Bindings: AuthEnv };
 
@@ -115,8 +116,8 @@ async function notifyRateLimited(c: Context<AppEnv>): Promise<void> {
       email = typeof body.email === "string" ? body.email : null;
     }
     await recordRateLimited(s.db, eventCtx(c), email);
-  } catch {
-    /* observing a 429 must never change the 429 */
+  } catch (e) {
+    logError("rate_limit_notification_failed", e);   // observing a 429 must never change the 429
   }
 }
 
@@ -244,7 +245,7 @@ authRoute.post("/request", async (c) => guarded(c, async () => {
     }
   }
   if (out.sendDeniedAlert) {
-    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
     sendInBackground(c as never, provider, out.sendDeniedAlert.to,
       "Sign-in attempt on an unrecognized device",
       "Someone just tried to sign in to your admin account from a device we do not recognize. " +
@@ -263,7 +264,7 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
   const f = await loadFlow(s.db, token);
   if (!f || f.user_id === null) throw new AuthRejectError("flow");
   const secrets = secretsOf(c);
-  const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken, ensureVid(c, s));
+  const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken, ensureVid(c, s), true);
   if (out.sendCode) {
     const { to, code } = out.sendCode;
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
@@ -335,7 +336,7 @@ authRoute.post("/lost-email", async (c) => guarded(c, async () => {
   const secrets = secretsOf(c);
   const out = await requestLostEmail(s.db, secrets.throttleKey, username, s.ctx.ip);
   if (out.alertTo) {
-    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP);
+    const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
     sendInBackground(c as never, provider, out.alertTo,
       "Account recovery request",
       "Someone asked for help recovering access to your account. " +
@@ -435,30 +436,30 @@ authRoute.post("/stepup", async (c) => guarded(c, async () => {
             AND s.acked_at IS NOT NULL AND s.revoked_at IS NULL
             AND bc.code_hash = decode(${bh}, 'hex') AND bc.used_at IS NULL
           RETURNING s.user_id::text AS user_id`);
-      if (!row) { await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("backup"); }
+      if (!row) { await noteFuse(s.db, tag).catch(swallow("routes_best_effort_failed")); throw new AuthRejectError("backup"); }
     } else {
       const urow = await q1<{ enc: string | null; last: number | null; active: boolean }>(s.db,
         sql`SELECT totp_secret_enc AS enc, totp_last_step AS last,
             (totp_enabled_at IS NOT NULL) AS active FROM aa_users WHERE id = ${sess.userId}`);
-      if (!urow?.enc || !urow.active) { await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("totp"); }
-      const secret = await decryptSecret(secrets.totpEncKey, urow.enc).catch(() => null);
+      if (!urow?.enc || !urow.active) { await noteFuse(s.db, tag).catch(swallow("routes_best_effort_failed")); throw new AuthRejectError("totp"); }
+      const secret = await decryptSecret(secrets.totpEncKey, urow.enc).catch(swallowNull("routes_lookup_failed"));
       if (!secret) throw new AuthServerFaultError("totp decrypt");
       const step = await totpMatch(secret, normalizeTotpCode(code ?? ""));
       if (step === null || (urow.last !== null && step <= urow.last)) {
-        await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("totp");
+        await noteFuse(s.db, tag).catch(swallow("routes_best_effort_failed")); throw new AuthRejectError("totp");
       }
       const consumed = await q1<{ id: string }>(s.db,
         sql`UPDATE aa_users SET totp_last_step = ${step}
           WHERE id = ${sess.userId} AND (totp_last_step IS NULL OR totp_last_step < ${step})
           RETURNING id::text AS id`);
-      if (!consumed) { await noteFuse(s.db, tag).catch(() => {}); throw new AuthRejectError("totp"); }
+      if (!consumed) { await noteFuse(s.db, tag).catch(swallow("routes_best_effort_failed")); throw new AuthRejectError("totp"); }
     }
     await grantStepup(s.db, hashHex, sess.tier);
     await clearKeys(s.db, [key]);
     return c.json({ ok: true });
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError) throw e;
-    await refund(s.db, reservation).catch(() => {});
+    await refund(s.db, reservation).catch(swallow("routes_best_effort_failed"));
     throw new AuthServerFaultError(e);
   }
 }));

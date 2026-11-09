@@ -29,7 +29,10 @@ import {
   openTestDb, closePools, testSecrets, makeTag, newVid, cleanupTag, createEnrolledUser, newTotpFlow,
 } from "../auth/mfa-test-kit";
 
-const N = Number(process.env.LOAD_TEST_ORDERS ?? 10000);
+// 10 000 against a local database; a remote database (every query costs a network round trip,
+// ~60 per order) defaults to a smaller crowd that finishes in minutes. LOAD_TEST_ORDERS overrides.
+const isLocalDb = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(new URL(process.env.DATABASE_URL!).hostname);
+const N = Number(process.env.LOAD_TEST_ORDERS ?? (isLocalDb ? 10000 : 150));
 const DUPES = Math.min(500, Math.floor(N / 10));
 const LOGINS = Math.min(200, Math.floor(N / 50));
 const db = openTestDb();
@@ -109,7 +112,7 @@ const orderReq = (i: number, key = keyOf(i)) => app.request("/create-order", {
   }),
 }, env);
 
-test(`${N} simultaneous orders + duplicate retries + admin sign-ins: no crash, no 5xx, no duplicates`, { timeout: 900_000 }, async () => {
+test(`${N} simultaneous orders + duplicate retries + admin sign-ins: no crash, no 5xx, no duplicates`, { timeout: 1_800_000 }, async () => {
   // Staff users + ready flows for the concurrent sign-ins.
   const logins: { token: string; vid: string; ip: string }[] = [];
   for (let i = 0; i < LOGINS; i++) {

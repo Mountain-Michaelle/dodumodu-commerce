@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  providerFor, nullProvider, sendLoginCode, sendBackupUsed,
+  providerFor, nullProvider, unconfiguredProvider, sendLoginCode, sendBackupUsed,
   sendPermChange, sendDeniedAlert, sendNewNetwork, sendDeviceEvent,
   type EmailProvider,
 } from "./email";
@@ -19,10 +19,13 @@ function recordingProvider(): { provider: EmailProvider; sent: Sent[] } {
   return { provider, sent };
 }
 
-test("providerFor returns the null provider when no key, real shape otherwise", () => {
-  assert.equal(providerFor(null), nullProvider);
+test("providerFor: no/blank key is the LOUD unconfigured provider (never a silent success), real shape otherwise", async () => {
+  for (const missing of [null, "", "   "]) assert.equal(providerFor(missing), unconfiguredProvider);
+  assert.equal(await unconfiguredProvider.send("a@b.com", "s", "t", "k"), false, "reports failure, not 'sent'");
+  assert.equal(await nullProvider.send("a@b.com", "s", "t", "k"), true, "the explicit no-op stays available for callers that opt in");
   const p = providerFor("re_test_key");
   assert.equal(typeof p.send, "function");
+  assert.notEqual(p, unconfiguredProvider);
 });
 
 test("login code: body has the code, key is stable per recipient", async () => {
