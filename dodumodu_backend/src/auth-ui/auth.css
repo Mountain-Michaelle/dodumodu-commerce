@@ -172,8 +172,13 @@ body:has(.page-shell) {
   border-radius: 8px;
   font-size: 0.9rem;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
 }
 .btn-ghost:hover { background: rgba(255,255,255,0.05); }
+.btn-ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-danger {
   background: var(--danger);
   color: #fff;
@@ -182,8 +187,13 @@ body:has(.page-shell) {
   border-radius: 8px;
   font-size: 0.9rem;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
 }
 .btn-danger:hover { opacity: 0.9; }
+.btn-danger:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
 .btn-primary {
   background: var(--accent);
   color: #fff;
@@ -193,14 +203,44 @@ body:has(.page-shell) {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
 }
 .btn-primary:hover { opacity: 0.9; }
+.btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-link {
   color: var(--accent);
   text-decoration: none;
   font-size: 0.9rem;
 }
 .btn-link:hover { text-decoration: underline; }
+.btn-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Danger zone — sessions page */
+.danger-zone {
+  margin-top: 24px;
+  padding: 20px 24px;
+  background: #0e1014;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.danger-zone-title {
+  font-size: 1rem;
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
+}
+.danger-zone-subtitle {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 14px;
+}
+.danger-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 
 /* Empty state — shown when JS finds no records */
 #list:empty::before {
@@ -234,6 +274,10 @@ body[data-page="devices"] #list:empty::before { content: "No trusted devices."; 
     width: 100%;
     text-align: center;
     justify-content: center;
+  }
+
+  .danger-actions button {
+    width: 100%;
   }
 
   .table-section { border-radius: 8px; }

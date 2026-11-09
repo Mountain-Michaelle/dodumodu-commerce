@@ -14,8 +14,6 @@
         <p class="page-subtitle">End any session you don't recognize.</p>
       </div>
       <div class="header-actions">
-        <button class="btn-ghost" id="revoke-others" type="button">Sign out everywhere else</button>
-        <button class="btn-danger" id="logout" type="button">Sign out</button>
         <a href="/admin/sign-in/" class="btn-link">Back</a>
       </div>
     </header>
@@ -28,6 +26,15 @@
         <div class="th">Actions</div>
       </div>
       <div class="table-body" id="list"><span class="muted">Loading…</span></div>
+    </section>
+
+    <section class="danger-zone">
+      <h2 class="danger-zone-title">Danger zone</h2>
+      <p class="danger-zone-subtitle">Irreversible actions that affect all sessions.</p>
+      <div class="danger-actions">
+        <button class="btn-ghost" id="revoke-others" type="button">Sign out everywhere else</button>
+        <button class="btn-danger" id="logout" type="button">Sign out</button>
+      </div>
     </section>
 
     <p class="note" id="note" hidden></p>
