@@ -24,6 +24,9 @@ const cfg = (over: Partial<AbuseConfig> = {}): AbuseConfig =>
 registerDbDriver(pgDriver);
 const db: any = live ? createDb(url as string) : null;
 
+// The orders reference a product; a database that does not happen to hold product 1 (a real
+// one, with only your own ids) must not break these. Each run owns a throwaway product.
+let productId = 0;
 let seq = 0;
 const uniq = () => `t${Date.now().toString(36)}${(seq++).toString(36)}`;
 
@@ -45,7 +48,7 @@ async function seed(opts: { device?: string | null; ip?: string | null; phone: s
       reference, status, created_from_ip, device_id, client_kind, created_at
     ) VALUES (
       ${`p6-${uniq()}`}, 'BURST TEST', ${opts.phone}, ${opts.phone},
-      ${opts.phone}, '1 Test Road, Lagos', 'Lagos', 1, 'free', 'today', false,
+      ${opts.phone}, '1 Test Road, Lagos', 'Lagos', ${productId}, 'free', 'today', false,
       'cod', 1, 100, 100, 0, 0, 100, 'NGN', ${`p6-${uniq().toLowerCase()}`},
       'confirmed_cod', ${opts.ip ?? null}, ${opts.device ?? null}, 'browser',
       now() - make_interval(secs => ${opts.ageSeconds ?? 0})
@@ -56,10 +59,15 @@ async function seed(opts: { device?: string | null; ip?: string | null; phone: s
 before(async () => {
   if (!live) return;
   await db.execute(sql`DELETE FROM orders WHERE customer_name = 'BURST TEST'`);
+  const rows = await db.execute(sql`
+    INSERT INTO products (slug, name, description, price)
+    VALUES (${`burst-fixture-${Date.now().toString(36)}`}, 'Burst fixture', 'x', 100000) RETURNING id`);
+  productId = ((rows as unknown as { rows?: { id: number }[] }).rows ?? (rows as unknown as { id: number }[]))[0].id;
 });
 after(async () => {
   if (!live) return;
   await db.execute(sql`DELETE FROM orders WHERE customer_name = 'BURST TEST'`);
+  if (productId) await db.execute(sql`DELETE FROM products WHERE id = ${productId}`);
 });
 
 // ---------------------------------------------------------------------------

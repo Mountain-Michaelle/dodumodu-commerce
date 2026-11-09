@@ -23,6 +23,10 @@ import { AuthRejectError } from "./errors";
 const databaseUrl = process.env.DATABASE_URL;
 const tag = `sess3b-${Date.now().toString(36)}`;
 const A = { ip: "10.94.1.1", prefix: "10.94.1", country: "NG", ua: "itest" };
+// One physical browser always carries the same __Host-vid cookie across logins (the
+// route mints it on flow creation). Re-logins in the same 30s TOTP step from the same
+// browser must keep working; only a DIFFERENT browser replaying a used step is refused.
+const BROWSER_VID = `vid-${tag}`;
 
 function secrets(): EntrySecrets & { totpEncKey: Uint8Array } {
   return {
@@ -65,7 +69,7 @@ async function firstLogin(db: Db, s: ReturnType<typeof secrets>, email: string):
 
 /** Email-path login to 'ready' for an ALREADY enrolled user. Returns the flow token. */
 async function loginToReady(db: Db, s: ReturnType<typeof secrets>, email: string): Promise<string> {
-  const r = await requestCode(db, s, email, A, null);
+  const r = await requestCode(db, s, email, A, null, BROWSER_VID);
   assert.ok(r.sendCode, "requestCode always issues a code (forceNew)");
   await verifyCode(db, s, r.flowToken, r.sendCode.code, A.ip);
   const secRow = await q1<{ e: string }>(db,

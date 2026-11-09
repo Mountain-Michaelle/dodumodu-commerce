@@ -15,6 +15,7 @@ import { emailTag } from "./keys";
 import { reserve, noteFuse, refund, clearKeys } from "./throttle";
 import { AuthRejectError, AuthLockedError, AuthServerFaultError } from "./errors";
 import { loadFlow, type VerifySecrets, type Stage } from "./flows";
+import { swallow, swallowNull } from "../shared/logger";
 
 const ISSUER = "dodumodu";
 
@@ -95,24 +96,24 @@ export async function totpEnrollConfirm(
   try {
     reservation = await reserve(db, key, "anon");
   } catch (e) {
-    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(() => {});
+    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(swallow("totp_best_effort_failed"));
     throw e;
   }
   try {
     const prow = await q1<{ pending_totp_enc: string | null }>(db,
       sql`SELECT pending_totp_enc FROM aa_auth_flows WHERE id = ${flow.id}`);
     if (!prow?.pending_totp_enc) {
-      await noteFuse(db, tag).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("totp_best_effort_failed"));
       throw new AuthRejectError("totp");
     }
-    const secret = await decryptSecret(secrets.totpEncKey, prow.pending_totp_enc).catch(() => null);
+    const secret = await decryptSecret(secrets.totpEncKey, prow.pending_totp_enc).catch(swallowNull("totp_lookup_failed"));
     if (!secret) {
-      await refund(db, reservation).catch(() => {});
+      await refund(db, reservation).catch(swallow("totp_best_effort_failed"));
       throw new AuthServerFaultError("totp decrypt");
     }
     const step = await totpMatch(secret, normalizeTotpCode(code), nowMs);
     if (step === null) {
-      await noteFuse(db, tag).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("totp_best_effort_failed"));
       throw new AuthRejectError("totp");
     }
     const { codes, hashes } = await genBackupCodes();
@@ -154,14 +155,14 @@ export async function totpEnrollConfirm(
         SELECT (SELECT stage FROM adv) AS stage, EXISTS (SELECT 1 FROM ns) AS has_codes
          WHERE EXISTS (SELECT 1 FROM adv)`);
     if (!row) {
-      await noteFuse(db, tag).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("totp_best_effort_failed"));
       throw new AuthRejectError("totp");
     }
     await clearKeys(db, [key]);
     return { next: row.stage, backupCodes: codes };
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError) throw e;
-    await refund(db, reservation).catch(() => {});
+    await refund(db, reservation).catch(swallow("totp_best_effort_failed"));
     throw new AuthServerFaultError(e);
   }
 }

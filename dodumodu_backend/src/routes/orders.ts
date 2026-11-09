@@ -7,6 +7,7 @@ import { orderService, ProductNotFoundError, PackageNotFoundError, InvalidQuanti
 import type { OrderRow } from "../data/ordersRepo";
 import { CodNotAvailableError } from "../services/codPolicyService";
 import { sendInBackground, sendOrderBackup, sendOrderFailureAlert } from "../services/orderBackupMailer";
+import { swallow } from "../shared/logger";
 
 export const ordersRoute = new Hono<{ Bindings: Env; Variables: { parsedBody: unknown; prefetchedOrder?: OrderRow | null } }>();
 
@@ -121,7 +122,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     // for this address, recorded from the order the server actually created.
     created = true;
     // Bookkeeping must never turn a saved order into a failure for the customer.
-    await noteOrderOutcome(c, "created", { status: order.status, id: order.id }).catch(() => {});
+    await noteOrderOutcome(c, "created", { status: order.status, id: order.id }).catch(swallow("orders_best_effort_failed"));
     // Never echo back any price-related field the client sent - every field
     // below is the value the server computed, so the thank-you page can show
     // an accurate breakdown without recomputing anything itself.

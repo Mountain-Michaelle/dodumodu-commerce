@@ -25,6 +25,8 @@ const cfg = (over: Partial<AbuseConfig> = {}): AbuseConfig =>
 registerDbDriver(pgDriver);
 const db: any = live ? createDb(url as string) : null;
 
+// Each run owns a throwaway product, so the suite works on a database that does not hold id 1.
+let productId = 0;
 let seq = 0;
 const uniq = () => `a${Date.now().toString(36)}${(seq++).toString(36)}`;
 
@@ -43,7 +45,7 @@ async function seed(device: string, phone: string) {
       reference, status, created_from_ip, device_id, client_kind, created_at
     ) VALUES (
       ${`p6-${uniq()}`}, 'ADMISSION TEST', ${phone}, ${phone},
-      ${phone}, '1 Test Road, Lagos', 'Lagos', 1, 'free', 'today', false,
+      ${phone}, '1 Test Road, Lagos', 'Lagos', ${productId}, 'free', 'today', false,
       'cod', 1, 100, 100, 0, 0, 100, 'NGN', ${`p6-${uniq().toLowerCase()}`},
       'confirmed_cod', null, ${device}, 'browser', now()
     )
@@ -59,11 +61,16 @@ before(async () => {
   if (!live) return;
   await db.execute(sql`DELETE FROM orders WHERE customer_name = 'ADMISSION TEST'`);
   await db.execute(sql`DELETE FROM moderation_blocks WHERE scope = 'device' AND value LIKE 'adm-%'`);
+  const rows = await db.execute(sql`
+    INSERT INTO products (slug, name, description, price)
+    VALUES (${`admission-fixture-${Date.now().toString(36)}`}, 'Admission fixture', 'x', 100000) RETURNING id`);
+  productId = ((rows as unknown as { rows?: { id: number }[] }).rows ?? (rows as unknown as { id: number }[]))[0].id;
 });
 after(async () => {
   if (!live) return;
   await db.execute(sql`DELETE FROM orders WHERE customer_name = 'ADMISSION TEST'`);
   await db.execute(sql`DELETE FROM moderation_blocks WHERE scope = 'device' AND value LIKE 'adm-%'`);
+  if (productId) await db.execute(sql`DELETE FROM products WHERE id = ${productId}`);
 });
 
 // ---------------------------------------------------------------------------

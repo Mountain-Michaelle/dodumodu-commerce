@@ -21,26 +21,29 @@ export interface NotificationInput {
 }
 
 export const notificationService = {
+  /**
+   * Notify the people who should hear about an event. ONE statement (no per-user loop),
+   * so it costs one round trip however many admins exist.
+   * Recipients: the PRIMARY account when one is flagged and active (test/secondary
+   * accounts are then never notified); otherwise every active admin/staff, as before.
+   */
   async createForAdmins(db: Db, input: NotificationInput): Promise<number> {
-    const users = await q<{ id: string }>(db, sql`
-      SELECT id::text AS id FROM aa_users
-      WHERE is_active = true AND role IN ('admin', 'staff')
-    `);
-    if (users.length === 0) return 0;
-
     const dedupeKey = input.dedupeKey ?? `notification:${crypto.randomUUID()}`;
-    let created = 0;
-    for (const user of users) {
-      const rows = await q<{ id: string }>(db, sql`
-        INSERT INTO admin_notifications
-          (recipient_user_id, type, title, body, href, dedupe_key)
-        VALUES (${user.id}::uuid, ${input.type}, ${input.title}, ${input.body ?? ""},
-          ${input.href ?? null}, ${dedupeKey})
-        ON CONFLICT (recipient_user_id, dedupe_key) DO NOTHING
-        RETURNING id::text AS id`);
-      created += rows.length;
-    }
-    return created;
+    const rows = await q<{ id: string }>(db, sql`
+      WITH p AS (
+        SELECT id FROM aa_users WHERE is_primary AND is_active AND role = 'admin'
+      ), r AS (
+        SELECT id FROM p
+        UNION ALL
+        SELECT id FROM aa_users
+         WHERE is_active AND role IN ('admin', 'staff') AND NOT EXISTS (SELECT 1 FROM p)
+      )
+      INSERT INTO admin_notifications (recipient_user_id, type, title, body, href, dedupe_key)
+      SELECT r.id, ${input.type}, ${input.title}, ${input.body ?? ""}, ${input.href ?? null}, ${dedupeKey}
+        FROM r
+      ON CONFLICT (recipient_user_id, dedupe_key) DO NOTHING
+      RETURNING id::text AS id`);
+    return rows.length;
   },
 
   async list(db: Db, userId: string, limit = 50): Promise<AdminNotification[]> {

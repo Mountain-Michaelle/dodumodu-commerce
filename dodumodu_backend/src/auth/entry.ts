@@ -21,6 +21,7 @@ import { AuthLockedError, AuthServerFaultError } from "./errors";
 import { issueChallenge, deriveChallengeCode } from "./challenge";
 import { isBlocked, vidHashHex, ipBlockHashHex, type ActiveBlock } from "./blocks";
 import { logInfo } from "./authLog";
+import { swallow, swallowNull } from "../shared/logger";
 
 export interface RequestCtx {
   ip: string; prefix: string; country: string | null; ua: string;
@@ -87,6 +88,8 @@ export interface EntrySecrets { otpKey: Uint8Array; throttleKey: Uint8Array; }
 export async function requestCode(
   db: Db, secrets: EntrySecrets, rawEmail: unknown, ctx: RequestCtx,
   deviceToken: string | null, vid: string | null = null,
+  /** true for POST /auth/resend: keep the live code and honour the cooldown/max (same code re-sent). */
+  resend = false,
 ): Promise<RequestOutcome> {
   const email = normalizeEmail(rawEmail);
   const probe = email ?? `unknown:${randomToken()}`;
@@ -116,7 +119,7 @@ export async function requestCode(
   let early: Resolved | null = null;
   let earlyStrict = false;
   if (email && deviceHashHex === null) {
-    early = await resolveUser(db, email, null).catch(() => null);
+    early = await resolveUser(db, email, null).catch(swallowNull("entry_lookup_failed"));
     earlyStrict = early !== null && early.is_active &&
       (early.has_totp || early.enroll_open) && !early.recognized;
   }
@@ -124,7 +127,7 @@ export async function requestCode(
   try {
     reservation = await reserve(db, key, earlyStrict ? "strict" : "anon");
   } catch (e) {
-    if (e instanceof AuthLockedError && email) await noteFuse(db, tag).catch(() => {});
+    if (e instanceof AuthLockedError && email) await noteFuse(db, tag).catch(swallow("entry_best_effort_failed"));
     throw e;
   }
   try {
@@ -165,14 +168,14 @@ export async function requestCode(
       const friction = await noteFuse(db, tag).catch(() => false);
       return { flowToken, sendCode: null, sendDeniedAlert: null, friction };
     }
-    const ch = await issueChallenge(db, found.user_id, secrets.otpKey, true);
+    const ch = await issueChallenge(db, found.user_id, secrets.otpKey, !resend);
     const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash, trusted);
     if (!ch.sendNow) return { flowToken, sendCode: null, sendDeniedAlert: null, friction: false };
     const code = await deriveChallengeCode(secrets.otpKey, found.user_id, ch.nonceHex);
     return { flowToken, sendCode: { to: email!, code }, sendDeniedAlert: null, friction: false };
   } catch (e) {
     if (e instanceof AuthLockedError) throw e;
-    await refund(db, reservation).catch(() => {});
+    await refund(db, reservation).catch(swallow("entry_best_effort_failed"));
     throw new AuthServerFaultError(e, {
       code: "AUTH_DATABASE_REQUEST_FAILED",
       stage: "authentication.request",

@@ -3,6 +3,7 @@ import type { Db } from "../db";
 import { randomToken } from "./crypto";
 import { BLOCK_IP_TTL_HOURS, DEVICE_AUTH_MAX_FAILURES } from "./config";
 import { createBlock, ipBlockHashHex } from "./blocks";
+import { logError } from "../shared/logger";
 
 export interface DeviceFailureResult {
   failures: number;
@@ -63,8 +64,9 @@ export async function recordDeviceFailure(
         expiresAt: new Date(Date.now() + BLOCK_IP_TTL_HOURS * 3600_000),
       });
     }
-  } catch {
+  } catch (e) {
     // The flow/dead-state path below remains authoritative if block persistence fails.
+    logError("device_block_persist_failed", e);
   }
   await q1(db,
     sql`UPDATE aa_auth_flows SET stage = 'dead'

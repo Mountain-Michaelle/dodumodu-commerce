@@ -18,6 +18,7 @@ import type { Env } from "../env";
 import type { Db } from "../db";
 import { q1, sql } from "../auth/sql";
 import { resendProvider, fromForEnv } from "../auth/email";
+import { swallow } from "../shared/logger";
 
 export type OrderPayload = Record<string, unknown>;
 export interface OrderMailMeta { ip: string | null; clientKind: string | null; }
@@ -40,7 +41,7 @@ export async function flushOrderMail(): Promise<void> {
 
 /** Run a send without delaying the response: waitUntil on the Worker, detached on Node. */
 export function sendInBackground(c: Context, p: Promise<unknown>): void {
-  const tracked = p.catch(() => {}).finally(() => pending.delete(tracked));
+  const tracked = p.catch(swallow("orderBackupMailer_best_effort_failed")).finally(() => pending.delete(tracked));
   pending.add(tracked);
   try {
     const ctx = (c as Context & { executionCtx?: { waitUntil?: (x: Promise<unknown>) => void } }).executionCtx;

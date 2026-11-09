@@ -7,6 +7,7 @@
 // deployed config).
 import type { Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
+import { swallow } from "../shared/logger";
 
 export interface ReqCtx {
   ip: string;
@@ -32,7 +33,7 @@ export async function afterResponse(c: Context, p: Promise<unknown>): Promise<vo
     ctx = null;
   }
   if (ctx?.waitUntil) {
-    ctx.waitUntil(p.catch(() => {}));
+    ctx.waitUntil(p.catch(swallow("ctx_best_effort_failed")));
     return;
   }
   try {

@@ -12,6 +12,7 @@ import type { OrderInput } from "../validation/orderSchema";
 import { normalizePhone } from "../shared/normalizePhone";
 import { notificationService } from "./notificationService";
 import { assignmentRepo } from "../data/assignmentRepo";
+import { logError } from "../shared/logger";
 
 export class ProductNotFoundError extends Error {}
 export class PackageNotFoundError extends Error {}
@@ -87,7 +88,8 @@ export const orderService = {
       if (existing.paymentMethod === "pay_now" && existing.status === "awaiting_payment") {
         try {
           checkoutUrl = await paymentService.createCheckout(env, existing);
-        } catch {
+        } catch (e) {
+          logError("payment_checkout_failed", e, { reference: existing.reference });
           throw new PaymentUnavailableError("Pay now is not available at the moment. Please choose Pay on delivery instead.");
         }
       }
@@ -147,7 +149,8 @@ export const orderService = {
     if (input.paymentMethod === "pay_now") {
       try {
         checkoutUrl = await paymentService.createCheckout(env, { reference, amount, currency: "NGN" });
-      } catch {
+      } catch (e) {
+        logError("payment_checkout_failed", e, { reference });
         throw new PaymentUnavailableError("Pay now is not available at the moment. Please choose Pay on delivery instead.");
       }
     }

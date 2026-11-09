@@ -57,6 +57,7 @@ import {
   ADMIN_QR_LOGO_MJS,
   ADMIN_CONSOLE_ASSETS,
 } from "../generated/adminPages";
+import { logError } from "../shared/logger";
 
 // The admin surface. Three kinds of route live here and the distinction is the
 // point of the file:
@@ -254,11 +255,7 @@ function adminError(err: unknown) {
     return Response.json({ error: { code: "FORBIDDEN", message: "You do not have permission to do that" } }, { status: 403 });
   }
 
-  console.error(JSON.stringify({
-    event: "admin_unhandled_error",
-    name: code,
-    message: err instanceof Error ? err.message : String(err),
-  }));
+  logError("admin_unhandled_error", err);
   return Response.json(
     { error: { code: "INTERNAL_ERROR", message: "Something went wrong on our side. Nothing was changed." } },
     { status: 500 },
@@ -736,7 +733,8 @@ async function verifyPublicMarkers(
         continue;
       }
       html = await res.text();
-    } catch {
+    } catch (e) {
+      logError("publish_verify_fetch_failed", e, { slug });
       failures.push(`/${slug}/: fetch failed`);
       continue;
     }

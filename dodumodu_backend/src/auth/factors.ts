@@ -10,6 +10,7 @@ import { AuthRejectError, AuthLockedError, AuthServerFaultError } from "./errors
 import { loadFlow, type VerifySecrets, type Stage } from "./flows";
 import { CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS } from "./config";
 import { clearDeviceFailures, recordDeviceFailure } from "./device-failures";
+import { swallow } from "../shared/logger";
 
 /**
  * POST /auth/code {code}. Real codes only verify on REAL flows (user_id NOT
@@ -27,12 +28,12 @@ export async function verifyCode(
   try {
     reservation = await reserve(db, key, "anon", CODE_VERIFY_THRESHOLD, CODE_VERIFY_DECAY_SECS);
   } catch (e) {
-    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(() => {});
+    if (e instanceof AuthLockedError) await noteFuse(db, tag).catch(swallow("factors_best_effort_failed"));
     throw e;
   }
   try {
     if (flow.user_id === null) {
-      await noteFuse(db, tag).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("factors_best_effort_failed"));
       throw new AuthRejectError("code");
     }
     const macHex = toHex(await codeMac(secrets.otpKey, flow.user_id, code));
@@ -54,8 +55,8 @@ export async function verifyCode(
          WHERE f.id = ${flow.id} AND f.stage = 'otp'
         RETURNING f.stage`);
     if (!row) {
-      await noteFuse(db, tag).catch(() => {});
-      await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip).catch(() => {});
+      await noteFuse(db, tag).catch(swallow("factors_best_effort_failed"));
+      await recordDeviceFailure(db, secrets.throttleKey, flow.id, ip).catch(swallow("factors_best_effort_failed"));
       throw new AuthRejectError("code");
     }
     await clearKeys(db, [key]);
@@ -63,7 +64,7 @@ export async function verifyCode(
     return { next: row.stage };
   } catch (e) {
     if (e instanceof AuthRejectError || e instanceof AuthLockedError) throw e;
-    await refund(db, reservation).catch(() => {});
+    await refund(db, reservation).catch(swallow("factors_best_effort_failed"));
     throw new AuthServerFaultError(e);
   }
 }
