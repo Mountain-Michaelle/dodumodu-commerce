@@ -19,9 +19,38 @@ async function load() {
     const left = document.createElement("div");
     const when = document.createElement("div"); when.className = "label";
     when.textContent = new Date(s.last_seen_at).toLocaleString();
+    const uaText = s.ua || "Unknown device";
+    const displayText = uaText.length > 30 ? uaText.slice(0, 30) + "..." : uaText;
     const ua = document.createElement("div"); ua.className = "small";
-    ua.textContent = s.ua || "Unknown device"; // textContent, never innerHTML
-    left.appendChild(when); left.appendChild(ua);
+    ua.textContent = displayText; // textContent, never innerHTML
+    ua.title = uaText;
+
+    const deviceCell = document.createElement("div");
+    deviceCell.style.display = "flex";
+    deviceCell.style.alignItems = "center";
+    deviceCell.style.gap = "8px";
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn-copy";
+    copyBtn.title = "Copy device";
+    copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+    copyBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(uaText);
+        copyBtn.classList.add("copied");
+        setTimeout(() => copyBtn.classList.remove("copied"), 1500);
+      } catch {
+        copyBtn.classList.add("copy-error");
+        setTimeout(() => copyBtn.classList.remove("copy-error"), 1500);
+      }
+    });
+
+    deviceCell.appendChild(ua);
+    deviceCell.appendChild(copyBtn);
+    left.appendChild(when);
+    left.appendChild(deviceCell);
     row.appendChild(left);
     if (!s.current) {
       const btn = document.createElement("button");

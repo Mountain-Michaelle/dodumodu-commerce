@@ -14,14 +14,19 @@
         <p class="page-subtitle">Admins only. Revoke a device to end its sessions at once.</p>
       </div>
       <div class="header-actions">
-        <button class="btn-primary" id="invite" type="button">Add a device</button>
-        <a href="/admin/sign-in/" class="btn-link">Back</a>
+        <button class="btn-primary" id="invite" type="button" aria-label="Add a device">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <a href="/admin/" class="btn-link" aria-label="Back to admin console">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </a>
       </div>
     </header>
 
     <section class="table-section">
       <div class="table-head">
         <div class="th">Device</div>
+        <div class="th">Identifier</div>
         <div class="th">Trust Status</div>
         <div class="th">Created Via</div>
         <div class="th">Last Seen</div>

@@ -3,10 +3,15 @@
   --bg: #0f1115;
   --card: #171a21;
   --fg: #e7e9ee;
-  --muted: #9aa3b2;
-  --accent: #4f7cff;
-  --danger: #ff6b6b;
-  --ok: #35c48a;
+  --muted: #8a93a1;
+  --accent: #17494d;
+  --accent-hover: #1f5e66;
+  --accent-soft: rgba(23, 73, 77, 0.15);
+  --orange: #f59e0b;
+  --orange-hover: #d97706;
+  --danger: #ea580c;
+  --danger-soft: rgba(234, 88, 12, 0.15);
+  --ok: #10b981;
   --border: #2a2f3a;
 }
 * { box-sizing: border-box; }
@@ -27,9 +32,9 @@ button { margin-top: 16px; width: 100%; padding: 12px 14px; border: 0; border-ra
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 button.ghost { background: transparent; border: 1px solid var(--border); color: var(--fg); }
 .note { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 0.9rem; }
-.note.error { background: rgba(255,107,107,0.12); color: var(--danger); }
-.note.ok { background: rgba(53,196,138,0.12); color: var(--ok); }
-.note.warn { background: rgba(255,200,80,0.12); color: #ffc850; }
+.note.error { background: var(--danger-soft); color: var(--danger); }
+.note.ok { background: rgba(16, 185, 129, 0.15); color: var(--ok); }
+.note.warn { background: rgba(245, 158, 11, 0.15); color: var(--orange); }
 .hint { margin: 10px 0 0; }
 .links { margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap; }
 .links a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
@@ -48,12 +53,14 @@ button.danger { background: var(--danger); }
 
 /* ===== Session & Device Management Page Redesign ===== */
 
+/* Base overrides for page-shell pages only — login page untouched */
 body:has(.page-shell) {
   display: block;
   align-items: normal;
   justify-content: normal;
   min-height: auto;
   padding: 24px 16px;
+  background: var(--bg);
 }
 
 .page-shell {
@@ -64,29 +71,114 @@ body:has(.page-shell) {
   gap: 24px;
 }
 
+/* .small = 12px equivalent (0.75rem) on these pages */
+.page-shell .small { font-size: 0.75rem; }
+
 /* Page header */
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
 }
+.header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .header-info h1 {
-  font-size: 1.5rem;
-  margin: 0 0 4px;
+  font-size: 1.25rem;
+  margin: 0;
   letter-spacing: -0.01em;
 }
 .header-info .page-subtitle {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   margin: 0;
 }
 .header-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
 }
+
+/* --- Buttons (desktop: content width, left aligned) --- */
+.btn-ghost,
+.btn-danger,
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  gap: 6px;
+  width: auto;
+  min-width: auto;
+  white-space: nowrap;
+}
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 7px 12px;
+  font-weight: 500;
+}
+.btn-ghost:hover { background: var(--accent-soft); }
+.btn-ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border: 0;
+  padding: 7px 12px;
+  font-weight: 600;
+}
+.btn-danger:hover { opacity: 0.9; }
+.btn-danger:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+.btn-primary {
+  background: var(--orange);
+  color: #fff;
+  border: 0;
+  padding: 7px 14px;
+  font-weight: 600;
+}
+.btn-primary:hover { background: var(--orange-hover); }
+.btn-primary:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+
+.btn-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-link:hover { text-decoration: underline; }
+.btn-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Tiny copy / icon buttons inside table cells */
+.btn-copy {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 8px;
+  border-radius: 6px;
+}
+.btn-copy:hover { background: var(--accent-soft); color: var(--fg); }
+.btn-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-copy.copied { color: var(--ok); }
+.btn-copy.copied:hover { color: var(--ok); background: rgba(16, 185, 129, 0.15); }
+.btn-copy.copy-error { color: var(--danger); }
+.btn-copy.copy-error:hover { color: var(--danger); background: var(--danger-soft); }
 
 /* Table section */
 .table-section {
@@ -96,55 +188,76 @@ body:has(.page-shell) {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
+
+/* Table head — proper column headers */
 .table-head {
   display: grid;
-  grid-template-columns: 2fr 1fr auto;
-  gap: 16px;
-  padding: 12px 16px;
+  gap: 0;
+  padding: 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: var(--muted);
   background: #0e1014;
 }
 .th {
+  padding: 11px 16px;
   white-space: nowrap;
 }
+
+/* Table body — horizontal overflow on narrow screens so nothing compresses */
 .table-body {
   display: flex;
   flex-direction: column;
+  overflow-x: auto;
+  min-width: 0;
 }
 
-/* Table rows — JS creates .row divs; we style them as table rows */
+/* Table rows — JS creates .row divs; we map them to grid columns */
 .row {
   display: grid;
-  grid-template-columns: 2fr 1fr auto;
-  gap: 16px;
   align-items: center;
-  padding: 12px 16px;
+  padding: 0;
   border-bottom: 1px solid var(--border);
+  min-width: 700px; /* ensures horizontal scroll on small screens */
 }
 .row:last-child { border-bottom: 0; }
-.row > div { display: contents; }
+.row:hover { background: var(--accent-soft); }
 
 /* Promote JS-created children into grid columns */
-.row > div > .small { grid-column: 1; font-size: 0.9rem; color: var(--fg); overflow-wrap: break-word; }
-.row > div > .label { grid-column: 2; font-size: 0.85rem; color: var(--muted); }
-.row > div > div:first-child { grid-column: 1; font-size: 0.9rem; color: var(--fg); overflow-wrap: break-word; }
-.row > button.danger { grid-column: 3; }
-.row > span.small { grid-column: 3; }
+.row > div { display: contents; }
 
-.row:hover { background: rgba(79, 124, 255, 0.04); }
-
-/* Status indicators */
-.row > span.small {
+/* ===== Sessions page columns ===== */
+/* Col 1: Device / Browser (truncated in JS + copy btn) */
+[data-page="sessions"] .row > div > .small {
+  grid-column: 1;
+  font-size: 0.875rem;
+  color: var(--fg);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 12px 16px;
+}
+/* Col 2: Last Activity */
+[data-page="sessions"] .row > div > .label {
+  grid-column: 2;
+  font-size: 0.875rem;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 12px 16px;
+}
+/* Col 3: Status badge ("This device") */
+[data-page="sessions"] .row > span.small {
+  grid-column: 3;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
@@ -152,6 +265,73 @@ body:has(.page-shell) {
   background: rgba(53, 196, 138, 0.12);
   color: var(--ok);
 }
+/* Col 4: Actions (End button) */
+[data-page="sessions"] .row > button.danger {
+  grid-column: 4;
+  padding: 7px 14px;
+}
+
+/* ===== Devices page columns ===== */
+/* Col 1: Device name */
+[data-page="devices"] .row > div > .label:first-child {
+  grid-column: 1;
+  font-size: 0.875rem;
+  color: var(--fg);
+  padding: 12px 16px;
+}
+/* Col 2: Device identifier (truncated + copy btn) */
+[data-page="devices"] .row > div > .device-id {
+  grid-column: 2;
+  font-size: 0.875rem;
+  color: var(--fg);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 12px 16px;
+}
+/* Col 3: Trust status */
+[data-page="devices"] .row > div > .trust-status {
+  grid-column: 3;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 12px 16px;
+}
+/* Col 4: Created via */
+[data-page="devices"] .row > div > .created-via {
+  grid-column: 4;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 12px 16px;
+}
+/* Col 5: Last seen */
+[data-page="devices"] .row > div > .last-seen {
+  grid-column: 5;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 12px 16px;
+}
+/* Col 6: Actions (Revoke button) */
+[data-page="devices"] .row > button.danger {
+  grid-column: 6;
+  padding: 7px 14px;
+}
+
+/* ===== Header grids per page ===== */
+[data-page="sessions"] .table-head {
+  grid-template-columns: 3fr 1.5fr auto auto;
+}
+[data-page="sessions"] .table-head .th:nth-child(1) { padding-left: 16px; }
+[data-page="sessions"] .table-head .th:nth-child(2) { text-align: left; }
+[data-page="sessions"] .table-head .th:nth-child(3) { text-align: left; }
+[data-page="sessions"] .table-head .th:nth-child(4) { text-align: left; padding-right: 16px; }
+
+[data-page="devices"] .table-head {
+  grid-template-columns: 2fr 2fr auto auto auto auto;
+}
+[data-page="devices"] .table-head .th:nth-child(1) { padding-left: 16px; }
+[data-page="devices"] .table-head .th:nth-child(6) { text-align: left; padding-right: 16px; }
 
 /* Note & invite box */
 .note { margin-top: 16px; }
@@ -163,68 +343,14 @@ body:has(.page-shell) {
   font-size: 0.9rem;
 }
 
-/* Buttons — page-specific variants (JS IDs unchanged) */
-.btn-ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--fg);
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 140px;
-}
-.btn-ghost:hover { background: rgba(255,255,255,0.05); }
-.btn-ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.btn-danger {
-  background: var(--danger);
-  color: #fff;
-  border: 0;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 140px;
-}
-.btn-danger:hover { opacity: 0.9; }
-.btn-danger:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-  border: 0;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 140px;
-}
-.btn-primary:hover { opacity: 0.9; }
-.btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.btn-link {
-  color: var(--accent);
-  text-decoration: none;
-  font-size: 0.9rem;
-}
-.btn-link:hover { text-decoration: underline; }
-.btn-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* Danger zone — sessions page */
+/* Danger zone (Vercel style) */
 .danger-zone {
-  margin-top: 24px;
+  margin-top: 8px;
   padding: 20px 24px;
   background: #0e1014;
   border: 1px solid var(--border);
   border-radius: 10px;
+  border-left: 3px solid var(--danger);
 }
 .danger-zone-title {
   font-size: 1rem;
@@ -233,28 +359,30 @@ body:has(.page-shell) {
 }
 .danger-zone-subtitle {
   color: var(--muted);
-  font-size: 0.85rem;
-  margin: 0 0 14px;
+  font-size: 0.875rem;
+  margin: 0 0 16px;
+  line-height: 1.5;
 }
 .danger-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: flex-start;
 }
 
-/* Empty state — shown when JS finds no records */
-#list:empty::before {
-  display: block;
-  padding: 40px 24px;
-  text-align: center;
-  color: var(--muted);
+/* Desktop: danger buttons content width, left aligned */
+@media (min-width: 641px) {
+  .danger-actions {
+    justify-content: flex-start;
+  }
+  .danger-actions button {
+    width: auto;
+    min-width: auto;
+  }
 }
-body[data-page="sessions"] #list:empty::before { content: "No active sessions."; }
-body[data-page="devices"] #list:empty::before { content: "No trusted devices."; }
 
-/* Responsive — mobile */
+/* Mobile: danger buttons full width, margin auto, not stretched */
 @media (max-width: 640px) {
-  .table-head { display: none; }
   body:has(.page-shell) { padding: 16px 12px; }
 
   .page-shell { gap: 16px; }
@@ -267,6 +395,7 @@ body[data-page="devices"] #list:empty::before { content: "No trusted devices."; 
   .header-info h1 { font-size: 1.25rem; }
   .header-actions {
     flex-direction: column;
+    align-items: stretch;
     width: 100%;
   }
   .header-actions button,
@@ -276,42 +405,50 @@ body[data-page="devices"] #list:empty::before { content: "No trusted devices."; 
     justify-content: center;
   }
 
+  .danger-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
   .danger-actions button {
     width: 100%;
+    max-width: 260px;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .table-section { border-radius: 8px; }
 
   .row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    padding: 14px 16px;
+    padding: 12px 16px;
   }
-  .row > div { display: block; }
-  .row > div > .small { grid-column: auto; }
-  .row > div > .label { grid-column: auto; }
-  .row > div > div:first-child { grid-column: auto; }
-  .row > button.danger { grid-column: auto; }
-  .row > span.small { grid-column: auto; }
 
-  .row > div > * + * { margin-top: 6px; }
   .row > button.danger {
-    width: 100%;
-    padding: 10px 14px;
+    min-width: auto;
+    padding: 7px 14px;
   }
+
   .row > span.small {
-    width: 100%;
-    justify-content: center;
+    padding: 3px 8px;
+    margin-top: 0;
   }
 
   .row:hover { background: transparent; }
 }
 
-/* Responsive — tablet */
+/* Tablet */
 @media (min-width: 641px) and (max-width: 1024px) {
   .page-shell { max-width: 100%; padding: 0 16px; }
-  .table-head { grid-template-columns: 2fr 1fr auto; }
 }
+
+/* Empty state — shown when JS finds no records */
+#list:empty::before {
+  display: block;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+body[data-page="sessions"] #list:empty::before { content: "No active sessions."; }
+body[data-page="devices"] #list:empty::before { content: "No trusted devices."; }
 
 /* TOTP enrolment QR panel */
 .qr-panel { margin: 16px 0 10px; text-align: center; }
