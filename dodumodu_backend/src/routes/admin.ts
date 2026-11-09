@@ -24,7 +24,7 @@ import { paymentRulesRepo } from "../data/paymentRulesRepo";
 import { codPolicyService } from "../services/codPolicyService";
 import { orderCrmService } from "../services/orderCrmService";
 import {
-  resolvePrincipal, ACCESS_EMAIL_HEADER, PERMISSIONS, type Principal,
+  resolvePrincipal, ACCESS_EMAIL_HEADER, PERMISSIONS, type Principal, ForbiddenError,
   UnauthorizedError,
 } from "../auth/adminAuth";
 import { errorShape } from "../shared/httpError";
@@ -58,6 +58,9 @@ import {
   ADMIN_CONSOLE_ASSETS,
 } from "../generated/adminPages";
 import { logError } from "../shared/logger";
+import { loadSession } from "../auth/middleware";
+import { getSidToken } from "../auth/ctx";
+import { adminAuthEnabled } from "../auth/config";
 
 // The admin surface. Three kinds of route live here and the distinction is the
 // point of the file:
@@ -79,6 +82,13 @@ import { logError } from "../shared/logger";
 // shared error types, and this is the single place those become a status and a
 // body shape - so no route can invent its own error format, and no stack trace
 // can reach a browser.
+
+/** A write authenticated by a cookie must come from this very site (CSRF). Reads are always fine. */
+function isSameOriginWrite(method: string, origin: string | undefined, host: string | undefined): boolean {
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
+  if (!origin || !host) return false;
+  try { return new URL(origin).host === host; } catch { return false; }
+}
 
 export const adminRoute = new Hono<{ Bindings: Env; Variables: { principal: Principal; authType?: string } }>();
 
@@ -140,8 +150,28 @@ adminRoute.use("*", async (c, next) => {
       c.set("authType", "build-secret");
       principal = { email: "ci@deploy", permissions: [] } as Principal;
     } else {
-      principal = resolvePrincipal(c.req.header(ACCESS_EMAIL_HEADER), c.env.ADMIN_OPERATORS);
-      c.set("authType", "access");
+      // Who is asking. Two sources, and only one is believed per deployment:
+      //  * Cloudflare Access: the identity header is trusted ONLY when admin-auth v2 is off (legacy
+      //    deployments behind Access) or TRUST_ACCESS_HEADER=1 says Access really is in front. Without
+      //    that, any visitor could send the header themselves and be an administrator.
+      //  * An admin-auth v2 session (__Host-sid): the sign-in this deployment actually uses.
+      const v2 = adminAuthEnabled(c.env as never);
+      const accessTrusted = !v2 || c.env.TRUST_ACCESS_HEADER === "1";
+      const accessEmail = accessTrusted ? c.req.header(ACCESS_EMAIL_HEADER) : undefined;
+      if (accessEmail || !v2) {
+        principal = resolvePrincipal(accessEmail, c.env.ADMIN_OPERATORS);
+        c.set("authType", "access");
+      } else {
+        if (!getSidToken(c as never)) throw new UnauthorizedError("no_session");   // anonymous: no database work
+        const sess = await loadSession(c as never);
+        if (!sess) throw new UnauthorizedError("no_session");
+        if (sess.role !== "admin") throw new ForbiddenError(PERMISSIONS.ordersRead);   // staff use /admin-v2, which scopes rows
+        if (!isSameOriginWrite(c.req.method, c.req.header("origin"), c.req.header("host"))) {
+          throw new ForbiddenError(PERMISSIONS.ordersWrite);                          // cookie-authenticated writes must come from this site
+        }
+        principal = resolvePrincipal(sess.email, c.env.ADMIN_OPERATORS);
+        c.set("authType", "session");
+      }
     }
     c.set("principal", principal);
 
