@@ -107,6 +107,27 @@ test("an existing trusted device is untouched when ANOTHER browser logs in", asy
   assert.equal((await lookupSession(db, decodeURIComponent(still.sid!)))!.tier, "normal");
 });
 
+test("migration 0026 not applied yet: login still works (device registered under an allowed type, loudly logged)", async () => {
+  await q(db, sql`ALTER TABLE aa_admin_devices DROP CONSTRAINT IF EXISTS aa_admin_devices_created_via_check`);
+  await q(db, sql`ALTER TABLE aa_admin_devices ADD CONSTRAINT aa_admin_devices_created_via_check
+    CHECK (created_via IN ('first_login','invite','admin_invite','operator')) NOT VALID`);   // NOT VALID: earlier tests' rows stay
+  try {
+    const u = await admin("nomig");
+    const log = capture("error");
+    let r;
+    try { r = await login(u); } finally { log.stop(); }
+    assert.equal(r.res.status, 200, r.body);
+    assert.ok(r.sid && r.did);
+    assert.equal((await lookupSession(db, decodeURIComponent(r.sid!)))!.tier, "strict");
+    assert.deepEqual((await devices(u.id)).map((d) => d.created_via), ["operator"]);
+    assert.ok(log.lines.some((l) => l.includes("migration_0026_not_applied")), "the missing migration is visible in the logs");
+  } finally {
+    await q(db, sql`ALTER TABLE aa_admin_devices DROP CONSTRAINT IF EXISTS aa_admin_devices_created_via_check`);
+    await q(db, sql`ALTER TABLE aa_admin_devices ADD CONSTRAINT aa_admin_devices_created_via_check
+      CHECK (created_via IN ('first_login','invite','admin_invite','operator','new_browser'))`);
+  }
+});
+
 test("a forged device cookie is never honoured: it is replaced like any unknown browser", async () => {
   const u = await admin("forged");
   const r = await login(u, "; __Host-did=forged-value");

@@ -2,7 +2,7 @@
 import { q1, sql } from "./sql";
 import type { Db } from "../db";
 import { SESSION_ABSOLUTE_SECS, SESSION_ABSOLUTE_SECS_STRICT, DEVICE_TTL_SECS, MAX_ACTIVE_DEVICES } from "./config";
-import { logWarn, swallow } from "../shared/logger";
+import { logWarn, logError, swallow } from "../shared/logger";
 import { randomToken } from "./crypto";
 import { tokenHashHex } from "./keys";
 import { AuthRejectError } from "./errors";
@@ -36,7 +36,7 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
   const absSecs = a.tier === "strict" ? SESSION_ABSOLUTE_SECS_STRICT : SESSION_ABSOLUTE_SECS;
   const sessionToken = randomToken();
   const sessionHashHex = await tokenHashHex(sessionToken);
-  const row = await q1<{ user_id: string; device_issued: boolean; new_browser: boolean }>(db,
+  const run = (createdVia: string) => q1<{ user_id: string; device_issued: boolean; new_browser: boolean }>(db,
     sql`WITH f AS (
        UPDATE aa_auth_flows SET stage = 'done'
         WHERE id = ${flow.id} AND stage = 'ready' AND via <> 'resume' AND expires_at > now()
@@ -97,7 +97,7 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
       adhoc AS (
        INSERT INTO aa_admin_devices
          (user_id, token_hash, status, label, created_via, expires_at, last_ip, last_ip_prefix, last_country)
-       SELECT u.user_id, decode(${fallbackHashHex}, 'hex'), 'active', left(${a.ua}, 120), 'new_browser',
+       SELECT u.user_id, decode(${fallbackHashHex}, 'hex'), 'active', left(${a.ua}, 120), ${createdVia}::text,
          now() + (${DEVICE_TTL_SECS}::int * interval '1 second'),
          ${a.ip}, ${a.prefix}, ${a.country}
          FROM u
@@ -117,6 +117,18 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
       RETURNING user_id::text AS user_id,
         (SELECT id FROM newdev) IS NOT NULL AS device_issued,
         (SELECT id FROM adhoc) IS NOT NULL AS new_browser`);
+  let row;
+  try {
+    row = await run("new_browser");
+  } catch (e) {
+    // Deploy-order safety: if migration 0026 has not been applied yet the database still rejects
+    // 'new_browser'. Never lock a correctly authenticated admin out over that: register the device
+    // under an already-allowed type and say so in the log, so the missing migration is visible.
+    const err = e as { code?: string; message?: string };
+    if (err?.code !== "23514" && !String(err?.message).includes("created_via_check")) throw e;
+    logError("migration_0026_not_applied", e);
+    row = await run("operator");
+  }
   if (!row) {
     // The code was right but no session could be issued: the flow was consumed by a concurrent
     // duplicate, or the account is no longer an active, enrolled admin.
