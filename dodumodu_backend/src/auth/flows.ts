@@ -10,6 +10,7 @@ export type Stage =
 export interface FlowRow {
   id: string; stage: Stage; user_id: string | null; email: string;
   via: string; vid_hash: string | null; // hex HMAC of the __Host-vid, set at creation
+  trusted: boolean;                      // created by a recognized (cookie-matched) device
 }
 
 export interface VerifySecrets { otpKey: Uint8Array; throttleKey: Uint8Array; }
@@ -19,7 +20,7 @@ export async function loadFlow(db: Db, flowToken: string): Promise<FlowRow | nul
   const hashHex = await tokenHashHex(flowToken);
   return q1<FlowRow>(db,
     sql`SELECT id::text AS id, stage, user_id::text AS user_id, email, via,
-          encode(vid_hash, 'hex') AS vid_hash
+          encode(vid_hash, 'hex') AS vid_hash, trusted
       FROM aa_auth_flows
       WHERE token_hash = decode(${hashHex}, 'hex') AND expires_at > now()`);
 }
