@@ -54,6 +54,17 @@ export function logError(event: string, err?: unknown, fields: LogFields = {}): 
   }
 }
 
+/** Expected-but-worth-seeing events (e.g. a 401 and WHY). Same scrubbing, level "warn". */
+export function logWarn(event: string, fields: LogFields = {}): void {
+  try {
+    const flat: Record<string, Primitive> = {};
+    for (const [k, v] of Object.entries(fields)) flat[k] = typeof v === "string" ? scrub(v, 200) : v;
+    console.warn(JSON.stringify({ level: "warn", event, ...flat }));
+  } catch {
+    /* logging must never break the request */
+  }
+}
+
 /** `.catch(swallow("event"))`: best-effort work that must not fail the caller, but must not be silent. */
 export function swallow(event: string, fields: LogFields = {}): (err: unknown) => void {
   return (err) => logError(event, err, fields);
