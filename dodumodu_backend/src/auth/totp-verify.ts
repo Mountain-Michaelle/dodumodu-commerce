@@ -108,7 +108,8 @@ export async function verifyTotp(
   }
   const userId = flow.user_id;
   const tag = await emailTag(secrets.throttleKey, flow.email);
-  const key = totpKey(tag, ip);
+  // A recognized (trusted) browser has its own bucket, so a stranger on the same network can't spend it.
+  const key = flow.trusted && flow.vid_hash ? totpKey(tag, `trusted:${flow.vid_hash.slice(0, 32)}`) : totpKey(tag, ip);
   // Latency: the user-row read is independent of the throttle reservation, so they
   // run in parallel (one network round trip saved on every login).
   const urowP = input.backupCode === undefined ? loadUserFactor(db, userId) : null;

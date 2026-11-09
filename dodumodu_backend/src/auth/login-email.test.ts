@@ -106,8 +106,9 @@ test("an inactive account gets the same 202 and NO email", async () => {
 test("typing the email again issues a NEW code (old one dies); /resend inside the cooldown sends nothing extra", async () => {
   const u = await createEnrolledUser(db, s, `${tag}-again@example.com`);
   const ip = nextIp();
-  const r1 = await post("/auth/request", { email: u.email }, ip);
-  const r2 = await post("/auth/request", { email: u.email }, ip);
+  const browser = `__Host-vid=${newVid()}`;                       // one browser: it keeps its vid cookie
+  const r1 = await post("/auth/request", { email: u.email }, ip, browser);
+  const r2 = await post("/auth/request", { email: u.email }, ip, browser);
   assert.equal(r2.status, 202);
   assert.equal(mails.length, 2, "a fresh request is a fresh email");
   const [c1, c2] = [codeIn(mails[0]), codeIn(mails[1])];
@@ -121,6 +122,7 @@ test("typing the email again issues a NEW code (old one dies); /resend inside th
   mails = [];
   const rq = await post("/auth/request", { email: v.email }, ip);
   assert.equal(mails.length, 1);
+  // no vid cookie is sent on the resend: it still continues THIS flow's code (the flow remembers its browser)
   const rs = await post("/auth/resend", {}, ip, cookieOf(rq, "__Host-aaf"));
   assert.equal(rs.status, 202);
   assert.equal(mails.length, 1, "inside the 45 s cooldown no second email goes out");

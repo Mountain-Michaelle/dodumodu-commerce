@@ -24,6 +24,11 @@ export const strictKey = (stage: string, tag: string, deviceId: string, prefix: 
   `${stage}:${tag}:dev:${deviceId}:${prefix}`;
 export const fuseTag = (tag: string): string => `fuse:${tag}`;
 export const sendEmailKey = (tag: string): string => `send:${tag}`;
+/** Per-BROWSER send allowance (slot = the browser's vid, or the network for a cookie-less client). */
+export const sendSlotKey = (tag: string, slot: string): string => `send:${tag}:slot:${slot}`;
+/** Throttle bucket for a RECOGNIZED trusted browser: separate from the shared email+IP pair, so a stranger
+ *  on the same network (NAT / mobile carrier) cannot spend or lock it. */
+export const trustedPairKey = (tag: string, vidHash: string): string => `otp:${tag}:trusted:${vidHash.slice(0, 32)}`;
 export const sendIpKey = (tag: string, ip: string): string => `send:${tag}:${ip}`;
 
 /** SHA-256 hex of an opaque token (flow / session / device / invite / reset). */

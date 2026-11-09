@@ -12,10 +12,10 @@
 // (best-effort) timing: no registration endpoint exists (spec §4).
 import { q, q1, sql } from "./sql";
 import type { Db } from "../db";
-import { OTP_SENDS_PER_HOUR, OTP_SENDS_PER_HOUR_IP, SEND_CAP_WINDOW,
+import { OTP_SENDS_PER_HOUR, OTP_SENDS_PER_HOUR_GLOBAL, OTP_SENDS_PER_HOUR_IP, SEND_CAP_WINDOW,
   FLOW_TTL_SECS, DENIED_ALERT_COOLDOWN_HOURS } from "./config";
 import { normalizeEmail, randomToken } from "./crypto";
-import { emailTag, pairKey, sendEmailKey, sendIpKey, tokenHashHex } from "./keys";
+import { emailTag, pairKey, trustedPairKey, sendSlotKey, sendEmailKey, sendIpKey, tokenHashHex } from "./keys";
 import { reserve, noteFuse, refund, sendCap } from "./throttle";
 import { AuthLockedError, AuthServerFaultError } from "./errors";
 import { issueChallenge, deriveChallengeCode } from "./challenge";
@@ -90,19 +90,31 @@ export async function requestCode(
   deviceToken: string | null, vid: string | null = null,
   /** true for POST /auth/resend: keep the live code and honour the cooldown/max (same code re-sent). */
   resend = false,
+  /** /auth/resend continues THIS flow's code: the slot its browser was given, even if the cookie was lost. */
+  slotOverride: string | null = null,
 ): Promise<RequestOutcome> {
   const email = normalizeEmail(rawEmail);
   const probe = email ?? `unknown:${randomToken()}`;
   const tag = await emailTag(secrets.throttleKey, email ?? probe);
-  const key = pairKey(tag, ctx.ip);
-  // Block lookup first (indexed; a blocked client burns no counters): a live
-  // device block on the __Host-vid or ip block on the network. The response is
-  // the same dummy-flow 202 as unknown (spec §4.5).
   const vidHash = vid ? await vidHashHex(secrets.throttleKey, vid) : null;
   const netHash = await ipBlockHashHex(secrets.throttleKey, ctx.ip);
+  const deviceHashHex = deviceToken ? await tokenHashHex(deviceToken) : null;
+  // One browser's identity for caps and challenges: its vid, or the network for a cookie-less client.
+  const slot = slotOverride ?? (vidHash ? `v:${vidHash}` : `i:${netHash}`);
+  // Who is this, in one round trip (also the early recognition used for the throttle tier below).
+  const early: Resolved | null = email
+    ? await resolveUser(db, email, deviceHashHex).catch(swallowNull("entry_lookup_failed"))
+    : null;
+  // A RECOGNIZED browser (its own __Host-did matches an active/pending device of this user) is the
+  // trusted one. Nothing a stranger does from another network, browser or the same shared network may
+  // lock it out: it skips network blocks and uses its own throttle/send buckets (below).
+  const recognizedBrowser = deviceHashHex !== null && early !== null && early.is_active && early.recognized;
+  // Block lookup first (indexed; a blocked client burns no counters): a live device block on the
+  // __Host-vid, or an ip block on the network (which a recognized browser is exempt from). The response
+  // is the same dummy-flow 202 as unknown (spec §4.5).
   const block: ActiveBlock | null =
     (vidHash ? await isBlocked(db, "device", vidHash) : null) ??
-    (await isBlocked(db, "ip", netHash));
+    (recognizedBrowser ? null : await isBlocked(db, "ip", netHash));
   if (block) {
     const flowToken = await createFlow(db, email ?? probe, null, ctx, vidHash);
     await logInfo(db, {
@@ -111,18 +123,12 @@ export async function requestCode(
     });
     return { flowToken, sendCode: null, sendDeniedAlert: null, friction: false };
   }
-  // Early recognition: an EXISTING user's email arriving from a NEW device
-  // (no matching __Host-did) reserves the pair key at the STRICT tier —
-  // thr=3 / 15-min steps — instead of anon. Unknown emails stay anon; the
-  // pair shape binds email+IP in both cases (R-NOLOCK-1).
-  const deviceHashHex = deviceToken ? await tokenHashHex(deviceToken) : null;
-  let early: Resolved | null = null;
-  let earlyStrict = false;
-  if (email && deviceHashHex === null) {
-    early = await resolveUser(db, email, null).catch(swallowNull("entry_lookup_failed"));
-    earlyStrict = early !== null && early.is_active &&
-      (early.has_totp || early.enroll_open) && !early.recognized;
-  }
+  // An EXISTING user's email arriving from a NEW device (no matching __Host-did) reserves the pair key
+  // at the STRICT tier - thr=3 / 15-min steps - instead of anon. Unknown emails stay anon; the pair
+  // shape binds email+IP in both cases (R-NOLOCK-1). A recognized browser gets its OWN bucket.
+  const earlyStrict = deviceHashHex === null && early !== null && early.is_active &&
+    (early.has_totp || early.enroll_open) && !early.recognized;
+  const key = recognizedBrowser && vidHash ? trustedPairKey(tag, vidHash) : pairKey(tag, ctx.ip);
   let reservation;
   try {
     reservation = await reserve(db, key, earlyStrict ? "strict" : "anon");
@@ -131,11 +137,7 @@ export async function requestCode(
     throw e;
   }
   try {
-    // Reuse the early recognition when the caller sent no device cookie;
-    // otherwise resolve with the cookie (cookie-match = recognized).
-    const found = early !== null || deviceHashHex === null
-      ? early ?? (email ? await resolveUser(db, email, null) : null)
-      : email ? await resolveUser(db, email, deviceHashHex) : null;
+    const found = early ?? (email ? await resolveUser(db, email, deviceHashHex) : null);
     // REAL requires an enrolled authenticator OR an open enrollment window: a
     // user with neither cannot complete any v2 login (spec §5.1/M9), so they
     // take the identical dummy path — no email, no oracle.
@@ -161,14 +163,18 @@ export async function requestCode(
     // throttling. No cookie / a cookie that matches nothing = a new browser:
     // allowed in, but strict (3rd failure device-blocks it until an admin lifts).
     const trusted = deviceHashHex !== null && found.recognized;
-    const emailCap = await sendCap(db, sendEmailKey(tag), OTP_SENDS_PER_HOUR, SEND_CAP_WINDOW);
-    const ipCap = await sendCap(db, sendIpKey(tag, ctx.ip), OTP_SENDS_PER_HOUR_IP, SEND_CAP_WINDOW);
-    if (!emailCap || !ipCap) {
+    // Send allowances. Per BROWSER first (a stranger's requests can never spend the real user's), then the
+    // shared limits that exist to stop inbox flooding: a high all-browsers backstop and the per-network
+    // cap. A trusted (recognized) browser is exempt from the shared ones.
+    const slotCap = await sendCap(db, sendSlotKey(tag, slot), OTP_SENDS_PER_HOUR, SEND_CAP_WINDOW);
+    const emailCap = trusted || await sendCap(db, sendEmailKey(tag), OTP_SENDS_PER_HOUR_GLOBAL, SEND_CAP_WINDOW);
+    const ipCap = trusted || await sendCap(db, sendIpKey(tag, ctx.ip), OTP_SENDS_PER_HOUR_IP, SEND_CAP_WINDOW);
+    if (!slotCap || !emailCap || !ipCap) {
       const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash, trusted);
       const friction = await noteFuse(db, tag).catch(() => false);
       return { flowToken, sendCode: null, sendDeniedAlert: null, friction };
     }
-    const ch = await issueChallenge(db, found.user_id, secrets.otpKey, !resend);
+    const ch = await issueChallenge(db, found.user_id, secrets.otpKey, !resend, slot);
     const flowToken = await createFlow(db, email!, found.user_id, ctx, vidHash, trusted);
     if (!ch.sendNow) return { flowToken, sendCode: null, sendDeniedAlert: null, friction: false };
     const code = await deriveChallengeCode(secrets.otpKey, found.user_id, ch.nonceHex);

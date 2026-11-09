@@ -271,7 +271,8 @@ authRoute.post("/resend", async (c) => guarded(c, async () => {
   const f = await loadFlow(s.db, token);
   if (!f || f.user_id === null) throw new AuthRejectError("flow");
   const secrets = secretsOf(c);
-  const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken, ensureVid(c, s), true);
+  const out = await requestCode(s.db, secrets, f.email, s.ctx, s.deviceToken, ensureVid(c, s), true,
+    f.vid_hash ? `v:${f.vid_hash}` : null);
   if (out.sendCode) {
     const { to, code } = out.sendCode;
     const provider = providerForEnv(secrets.resendApiKey, (c.env as { ALLOW_TEST_IP?: string }).ALLOW_TEST_IP, fromForEnv(c.env));
