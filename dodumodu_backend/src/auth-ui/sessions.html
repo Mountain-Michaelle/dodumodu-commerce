@@ -14,7 +14,9 @@
         <p class="page-subtitle">End any session you don't recognize.</p>
       </div>
       <div class="header-actions">
-        <a href="/admin/sign-in/" class="btn-link">Back</a>
+        <a href="/admin/" class="btn-link" aria-label="Back to admin console">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </a>
       </div>
     </header>
 
@@ -30,7 +32,7 @@
 
     <section class="danger-zone">
       <h2 class="danger-zone-title">Danger zone</h2>
-      <p class="danger-zone-subtitle">Irreversible actions that affect all sessions.</p>
+      <p class="danger-zone-subtitle">Irreversible actions that affect all your sessions at once.</p>
       <div class="danger-actions">
         <button class="btn-ghost" id="revoke-others" type="button">Sign out everywhere else</button>
         <button class="btn-danger" id="logout" type="button">Sign out</button>

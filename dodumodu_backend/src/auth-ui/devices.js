@@ -20,10 +20,41 @@ async function load() {
     const left = document.createElement("div");
     const label = document.createElement("div");
     label.textContent = d.label || "This device"; // textContent only
-    const meta = document.createElement("div"); meta.className = "label";
-    meta.textContent = `${d.status} · ${d.created_via} · ${new Date(d.last_seen_at).toLocaleString()}`;
-    left.appendChild(label); left.appendChild(meta);
+    left.appendChild(label);
     row.appendChild(left);
+
+    // Col 2: Device identifier (truncated) + copy button
+    const idText = d.id || "";
+    const idDisplay = idText.length > 30 ? idText.slice(0, 30) + "..." : idText;
+    const deviceId = document.createElement("span"); deviceId.className = "device-id";
+    deviceId.textContent = idDisplay; deviceId.title = idText;
+    row.appendChild(deviceId);
+
+    const idCopyBtn = document.createElement("button");
+    idCopyBtn.type = "button";
+    idCopyBtn.className = "btn-copy";
+    idCopyBtn.title = "Copy device identifier";
+    idCopyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+    idCopyBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(idText);
+        idCopyBtn.classList.add("copied");
+        setTimeout(() => idCopyBtn.classList.remove("copied"), 1500);
+      } catch {
+        idCopyBtn.classList.add("copy-error");
+        setTimeout(() => idCopyBtn.classList.remove("copy-error"), 1500);
+      }
+    });
+    row.appendChild(idCopyBtn);
+
+    // Cols 3-5: Meta split into separate columns
+    const meta = document.createElement("div"); meta.className = "label";
+    const status = document.createElement("span"); status.className = "trust-status"; status.textContent = d.status;
+    const via = document.createElement("span"); via.className = "created-via"; via.textContent = d.created_via;
+    const seen = document.createElement("span"); seen.className = "last-seen"; seen.textContent = new Date(d.last_seen_at).toLocaleString();
+    meta.appendChild(status); meta.appendChild(via); meta.appendChild(seen);
+    row.appendChild(meta);
     if (d.status !== "revoked") {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "danger small-btn"; btn.textContent = "Revoke";
