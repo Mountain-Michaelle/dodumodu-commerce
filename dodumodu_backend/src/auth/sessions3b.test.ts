@@ -1,9 +1,10 @@
 // Sessions part 3b: EMAIL-path admin re-login binds the presented __Host-did.
 // The one-time first-device window (device_window_until) is spent by setup, so
 // every later email flow carries device_id NULL — the finish hash-matches the
-// browser's device cookie instead (Appendix F4 exception). Without a cookie,
-// with a forged one, the finish still rejects neutrally, and this path never
-// issues a second device.
+// browser's device cookie instead (Appendix F4 exception). With the real cookie no second
+// device is issued. WITHOUT a cookie (cleared, forged, new browser) the user is NOT locked
+// out: both factors passed, so they get a STRICT session and the browser is registered as a
+// 'new_browser' device (see session-denied.test.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerDbDriver } from "../db";
@@ -18,7 +19,6 @@ import { finishAdminSession } from "./sessions-admin";
 import { lookupSession } from "./session-lookup";
 import { loadKey, normalizeEmail, hotp, decryptSecret } from "./crypto";
 import { tokenHashHex } from "./keys";
-import { AuthRejectError } from "./errors";
 
 const databaseUrl = process.env.DATABASE_URL;
 const tag = `sess3b-${Date.now().toString(36)}`;
@@ -107,17 +107,25 @@ test("sessions part 3b: email-path admin re-login binds the presented __Host-did
      WHERE u.email = ${email} AND d.status = 'active'`);
   assert.ok(dev?.id, "the first-login device is active");
 
-  // 1) Re-login with NO device cookie -> still rejected (the original bug).
+  // 1) Re-login with NO device cookie -> NOT locked out: strict session + a new_browser device.
   const fNo = await loginToReady(db, s, email);
-  await assert.rejects(
-    finishAdminSession(db, { flowToken: fNo, ...A, tier: "normal" }),
-    AuthRejectError);
+  const noCookie = await finishAdminSession(db, { flowToken: fNo, ...A, tier: "normal" });
+  assert.ok(noCookie.deviceToken, "a fresh device cookie is issued to the cookie-less browser");
+  const sNo = await lookupSession(db, noCookie.sessionToken);
+  assert.ok(sNo, "the session resolves");
+  assert.equal(sNo.tier, "strict", "an unrecognised browser gets the strict tier");
+  assert.notEqual(sNo.deviceId, dev.id);
 
-  // 2) A forged cookie hash-matches nothing -> still rejected (attack guarantee).
+  // 2) A forged cookie hash-matches nothing -> same as no cookie (it is just a new browser).
   const fBad = await loginToReady(db, s, email);
-  await assert.rejects(
-    finishAdminSession(db, { flowToken: fBad, ...A, tier: "normal", deviceToken: "forged-device-token" }),
-    AuthRejectError);
+  const forged = await finishAdminSession(db,
+    { flowToken: fBad, ...A, tier: "normal", deviceToken: "forged-device-token" });
+  assert.ok(forged.deviceToken && forged.deviceToken !== "forged-device-token", "the forged value is replaced, never honoured");
+  assert.equal((await lookupSession(db, forged.sessionToken))!.tier, "strict");
+  const before = (await q<{ c: number }>(db, sql`
+    SELECT count(*)::int AS c FROM aa_admin_devices d JOIN aa_users u ON u.id = d.user_id
+     WHERE u.email = ${email}`))[0].c;
+  assert.equal(before, 3, "first_login device + two new_browser devices");
 
   // 3) The real cookie binds the existing device -> session, no second device.
   const fOk = await loginToReady(db, s, email);
@@ -132,5 +140,5 @@ test("sessions part 3b: email-path admin re-login binds the presented __Host-did
   const n = await q<{ c: number }>(db, sql`
     SELECT count(*)::int AS c FROM aa_admin_devices d JOIN aa_users u ON u.id = d.user_id
      WHERE u.email = ${email}`);
-  assert.equal(n[0].c, 1, "still exactly one device");
+  assert.equal(n[0].c, before, "the real cookie adds no device");
 });

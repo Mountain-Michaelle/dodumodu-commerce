@@ -1,18 +1,22 @@
-// "Invalid or expired code" AFTER a correct email code + authenticator code.
-// Cause pinned here: an ADMIN session must be bound to a registered device. A browser with no
-// device cookie, while the one-time first-device window is closed, gets the neutral 401 on
-// POST /auth/session. The client body stays neutral; the SERVER LOG (Workers Logs) now says why.
-//   * window closed + no device cookie -> 401, neutral body, log carries the reason
-//   * window open -> 200 and the device cookie is issued (the browser is registered)
-//   * that same browser later (cookie sent) -> 200; a DIFFERENT browser -> 401 again
-//   * the operator remedy (re-open the window) lets the new browser in, once
-//   * every neutral 401 on the auth routes is logged with its audit reason, never sent to the client
+// Lost or cleared cookies must never lock a correctly authenticated admin out.
+// Real incident: email code + authenticator code accepted, then POST /auth/session answered the
+// neutral 401 because the browser held no registered device (cookie cleared / new site address)
+// and the one-time first-device window was closed.
+// Rule now: both factors passed => the user gets in. A browser with no registered device
+//   * receives a STRICT session (shorter life, stricter step-up) and a fresh device cookie,
+//   * is registered as an active device with created_via = 'new_browser' (visible + revocable),
+//   * is logged server-side, and a registered browser keeps its normal session and adds no device,
+//   * is capped: only the newest MAX_ACTIVE_DEVICES stay active, so clearing cookies repeatedly
+//     can't grow the table (retired devices' sessions end with them).
+// A flow that is NOT at the 'ready' stage is still refused (neutral 401, reason logged).
 // Live DB; fails fast without DATABASE_URL and refuses non-local databases.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { authRoute } from "./routes";
-import { q, sql } from "./sql";
+import { q, q1, sql } from "./sql";
+import { lookupSession } from "./session-lookup";
+import { MAX_ACTIVE_DEVICES } from "./config";
 import {
   openTestDb, closePools, testSecrets, makeTag, newVid, cleanupTag, createEnrolledUser, newTotpFlow,
 } from "./mfa-test-kit";
@@ -33,73 +37,105 @@ after(async () => { await cleanupTag(db, tag); await closePools(); });
 let n = 0;
 const ip = () => `10.98.${Math.floor(n / 250) + 1}.${(n++ % 250) + 1}`;
 
-function capture() {
+function capture(method: "warn" | "error" = "warn") {
   const lines: string[] = [];
-  const w = console.warn;
-  console.warn = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-  return { lines, stop: () => { console.warn = w; } };
+  const orig = console[method];
+  console[method] = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  return { lines, stop: () => { console[method] = orig; } };
 }
 
-async function readySession(userId: string, email: string, extraCookies = "") {
+async function login(u: { id: string; email: string }, cookies = "", stage = "ready") {
   const vid = newVid(), addr = ip();
-  const f = await newTotpFlow(db, s, { id: userId, email }, { vid, stage: "ready" });
+  const f = await newTotpFlow(db, s, u, { vid, stage });
   const log = capture();
   try {
     const res = await app.request("http://localhost/auth/session", {
       method: "POST",
       headers: { "content-type": "application/json", host: "localhost", origin: "http://localhost",
-        "cf-connecting-ip": addr, "x-test-ip": addr, "user-agent": "sessden", cookie: `__Host-aaf=${f.token}; __Host-vid=${vid}${extraCookies}` },
+        "cf-connecting-ip": addr, "x-test-ip": addr, "user-agent": "sessden", cookie: `__Host-aaf=${f.token}; __Host-vid=${vid}${cookies}` },
       body: "{}",
     }, env);
-    return { res, body: await res.text(), log: log.lines, setCookie: res.headers.get("set-cookie") ?? "" };
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    return {
+      res, body: await res.text(), log: log.lines, setCookie,
+      sid: /__Host-sid=([^;]+)/.exec(setCookie)?.[1], did: /__Host-did=([^;]+)/.exec(setCookie)?.[1],
+    };
   } finally { log.stop(); }
 }
 
-const setWindow = (id: string, open: boolean) =>
-  q(db, sql`UPDATE aa_users SET device_window_until = ${open ? sql`now() + interval '1 hour'` : sql`NULL`} WHERE id = ${id}::uuid`);
+const admin = async (label: string, window = false) => {
+  const u = await createEnrolledUser(db, s, `${tag}-${label}@example.com`, { role: "admin" });
+  await q(db, sql`UPDATE aa_users SET device_window_until = ${window ? sql`now() + interval '1 hour'` : sql`NULL`} WHERE id = ${u.id}::uuid`);
+  return u;
+};
+const devices = (id: string) => q<{ status: string; created_via: string }>(db,
+  sql`SELECT status, created_via FROM aa_admin_devices WHERE user_id = ${id}::uuid ORDER BY created_at`);
 
-test("admin, no device cookie, window closed: neutral 401 to the client, precise reason in the server log", async () => {
-  const u = await createEnrolledUser(db, s, `${tag}-a@example.com`, { role: "admin" });
-  await setWindow(u.id, false);
-  const r = await readySession(u.id, u.email);
+test("lost cookie, window closed: NOT locked out - strict session, new device cookie, device registered", async () => {
+  const u = await admin("lost");
+  const r = await login(u);
+  assert.equal(r.res.status, 200, r.body);
+  assert.deepEqual(JSON.parse(r.body), { ok: true });
+  assert.ok(r.sid && r.did, "session cookie and a fresh device cookie are issued");
+  const sess = await lookupSession(db, decodeURIComponent(r.sid!));
+  assert.ok(sess, "the session works for admin routes");
+  assert.equal(sess.tier, "strict");
+  assert.deepEqual(await devices(u.id), [{ status: "active", created_via: "new_browser" }]);
+  assert.ok(r.log.some((l) => l.includes("new_browser_device_registered")), "recorded server-side");
+});
+
+test("the browser then logs in normally with its new cookie: no extra device, normal tier", async () => {
+  const u = await admin("again");
+  const first = await login(u);
+  const again = await login(u, `; __Host-did=${first.did}`);
+  assert.equal(again.res.status, 200);
+  assert.equal(again.did, undefined, "a known browser is not issued another device");
+  assert.equal((await devices(u.id)).length, 1);
+  const sess = await lookupSession(db, decodeURIComponent(again.sid!));
+  assert.equal(sess!.tier, "normal");
+});
+
+test("an existing trusted device is untouched when ANOTHER browser logs in", async () => {
+  const u = await admin("two", true);
+  const trusted = await login(u);                                   // first-device claim
+  assert.equal((await lookupSession(db, decodeURIComponent(trusted.sid!)))!.tier, "normal");
+  const other = await login(u);                                     // no cookie, window spent
+  assert.equal(other.res.status, 200);
+  assert.equal((await lookupSession(db, decodeURIComponent(other.sid!)))!.tier, "strict");
+  assert.deepEqual((await devices(u.id)).map((d) => d.created_via), ["first_login", "new_browser"]);
+  const still = await login(u, `; __Host-did=${trusted.did}`);      // the trusted browser still gets a NORMAL session
+  assert.equal((await lookupSession(db, decodeURIComponent(still.sid!)))!.tier, "normal");
+});
+
+test("a forged device cookie is never honoured: it is replaced like any unknown browser", async () => {
+  const u = await admin("forged");
+  const r = await login(u, "; __Host-did=forged-value");
+  assert.equal(r.res.status, 200);
+  assert.ok(r.did && r.did !== "forged-value");
+  assert.equal((await lookupSession(db, decodeURIComponent(r.sid!)))!.tier, "strict");
+});
+
+test(`clearing cookies over and over is capped at ${MAX_ACTIVE_DEVICES} active devices`, async () => {
+  const u = await admin("cap");
+  for (let i = 0; i < MAX_ACTIVE_DEVICES + 3; i++) assert.equal((await login(u)).res.status, 200);
+  const rows = await devices(u.id);
+  assert.equal(rows.filter((d) => d.status === "active").length, MAX_ACTIVE_DEVICES);
+  assert.equal(rows.filter((d) => d.status === "revoked").length, 3, "the oldest were retired");
+});
+
+test("a flow that is not at the ready stage is still refused: neutral 401, reason in the log only", async () => {
+  const u = await admin("early");
+  const r = await login(u, "", "totp");
   assert.equal(r.res.status, 401);
   assert.deepEqual(JSON.parse(r.body), { error: "Invalid or expired code" });
-  assert.doesNotMatch(r.body, /device|window/i, "the client learns nothing about devices");
-  const log = r.log.find((l) => l.includes("auth_rejected"));
-  assert.ok(log, "the rejection is logged");
-  assert.match(log!, /no_registered_device\(cookie=0,window=0,active_devices=0\)/);
-  assert.match(log!, /\/auth\/session/);
-  assert.doesNotMatch(log!, new RegExp(u.email.replace(/[.+]/g, "\\$&")), "no email in the log");
+  const line = r.log.find((l) => l.includes("auth_rejected"));
+  assert.ok(line);
+  assert.match(line!, /"reason":"flow"/);
+  assert.doesNotMatch(line!, new RegExp(u.email.replace(/[.+]/g, "\\$&")));
+  assert.equal(await q1(db, sql`SELECT 1 FROM aa_admin_devices WHERE user_id = ${u.id}::uuid`), null, "no device was created");
 });
 
-test("window open: the browser is registered (device cookie issued); it then logs in again, a DIFFERENT browser does not", async () => {
-  const u = await createEnrolledUser(db, s, `${tag}-b@example.com`, { role: "admin" });
-  await setWindow(u.id, true);
-  const first = await readySession(u.id, u.email);
-  assert.equal(first.res.status, 200, first.body);
-  const did = /__Host-did=([^;]+)/.exec(first.setCookie)?.[1];
-  assert.ok(did, "the first-device claim issues __Host-did");
-
-  const same = await readySession(u.id, u.email, `; __Host-did=${did}`);
-  assert.equal(same.res.status, 200, "the registered browser keeps working");
-
-  const other = await readySession(u.id, u.email);                 // a second browser: no cookie, window now spent
-  assert.equal(other.res.status, 401);
-  assert.match(other.log.find((l) => l.includes("auth_rejected")) ?? "", /cookie=0,window=0,active_devices=1/);
-});
-
-test("operator remedy: re-opening the first-device window lets the new browser in, exactly once", async () => {
-  const u = await createEnrolledUser(db, s, `${tag}-c@example.com`, { role: "admin" });
-  await setWindow(u.id, false);
-  assert.equal((await readySession(u.id, u.email)).res.status, 401);
-  await setWindow(u.id, true);                                      // UPDATE aa_users SET device_window_until = now() + interval '1 hour' WHERE email = ...
-  const ok = await readySession(u.id, u.email);
-  assert.equal(ok.res.status, 200, ok.body);
-  assert.match(ok.setCookie, /__Host-did=/);
-  assert.equal((await readySession(u.id, u.email)).res.status, 401, "the window was consumed by that one login");
-});
-
-test("every neutral 401 on the auth routes is logged with its audit reason and nothing else reaches the client", async () => {
+test("every neutral 401 on the auth routes is logged with its audit reason, never sent to the client", async () => {
   const log = capture();
   let res: Response; let body: string;
   try {
@@ -113,7 +149,7 @@ test("every neutral 401 on the auth routes is logged with its audit reason and n
   assert.equal(res.status, 401);
   assert.deepEqual(JSON.parse(body), { error: "Invalid or expired code" });
   const line = log.lines.find((l) => l.includes("auth_rejected"));
-  assert.ok(line, "logged");
+  assert.ok(line);
   assert.match(line!, /"reason":"flow"/);
   assert.match(line!, /"path":"\/auth\/totp"/);
 });
