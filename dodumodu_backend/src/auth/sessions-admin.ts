@@ -101,6 +101,15 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
       WHERE EXISTS (SELECT 1 FROM ok_dev) OR EXISTS (SELECT 1 FROM newdev)
       RETURNING user_id::text AS user_id,
         (SELECT id FROM newdev) IS NOT NULL AS device_issued`);
-  if (!row) throw new AuthRejectError("flow");
+  if (!row) {
+    // No session was issued although the code was right: an admin session must be bound to a
+    // registered device (first-device window, device cookie, or a device flow). Record which
+    // of those was missing so the neutral 401 is diagnosable server-side.
+    const d = await q1<{ devices: number }>(db,
+      sql`SELECT count(*)::int AS devices FROM aa_admin_devices
+           WHERE user_id = ${flow.user_id}::uuid AND status = 'active' AND expires_at > now()`).catch(() => null);
+    throw new AuthRejectError(
+      `no_registered_device(cookie=${a.deviceToken ? 1 : 0},window=${urow?.window_open ? 1 : 0},active_devices=${d?.devices ?? "?"})`);
+  }
   return { sessionToken, deviceToken: row.device_issued ? claimToken : null };
 }

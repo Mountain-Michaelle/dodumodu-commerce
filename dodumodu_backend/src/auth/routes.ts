@@ -54,7 +54,7 @@ import { setFlowCookie, setSidCookie, setDidCookie, setVidCookie, clearSidCookie
 import { loadFlow } from "./flows";
 import { orderV2Routes } from "../routes/admin/ordersV2";
 import { recordLoginSuccess, recordRateLimited, recordUserCreated, type EventCtx } from "./security-events";
-import { swallow, swallowNull, logError } from "../shared/logger";
+import { swallow, swallowNull, logError, logWarn } from "../shared/logger";
 
 type AppEnv = { Bindings: AuthEnv };
 
@@ -91,6 +91,13 @@ async function guarded(c: Context<AppEnv>, fn: () => Promise<Response>): Promise
     return await fn();
   } catch (e) {
     if (e instanceof AuthLockedError) await afterResponse(c, notifyRateLimited(c));
+    // The client only ever sees the neutral 401; the server log says WHY (reason is an audit
+    // code, never user data), so "Invalid or expired code" is diagnosable in Workers Logs.
+    if (e instanceof AuthRejectError) {
+      let path = "";
+      try { path = new URL(c.req.url).pathname; } catch { /* log without it */ }
+      logWarn("auth_rejected", { path, reason: e.reason, ray: c.req.header("cf-ray") ?? null });
+    }
     return mapError(c, e);
   }
 }

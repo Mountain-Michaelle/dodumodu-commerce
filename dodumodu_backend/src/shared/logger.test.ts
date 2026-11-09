@@ -71,3 +71,19 @@ test("swallow logs the failure and resolves the chain; swallowNull also yields n
   assert.match(seen[0], /db down/);
   assert.match(seen[1], /decrypt_failed/);
 });
+
+test("logWarn writes a scrubbed level=warn line and never throws", async () => {
+  const { logWarn } = await import("./logger");
+  const seen: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => { seen.push(a.map(String).join(" ")); };
+  try {
+    logWarn("auth_rejected", { reason: "x for someone@example.com", n: 1 });
+    console.warn = () => { throw new Error("broken"); };
+    assert.doesNotThrow(() => logWarn("x"));
+  } finally { console.warn = orig; }
+  const o = JSON.parse(seen[0]);
+  assert.equal(o.level, "warn");
+  assert.equal(o.event, "auth_rejected");
+  assert.ok(!seen[0].includes("someone@example.com"));
+});
