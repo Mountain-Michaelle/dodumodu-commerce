@@ -133,3 +133,8 @@ export const ALL_V2_PERMS: readonly string[] = Object.values(PERMISSIONS);
 export function isV2Perm(p: string): p is V2Permission {
   return (ALL_V2_PERMS as readonly string[]).includes(p);
 }
+
+/** Active devices kept per admin. A cookie-less browser registers a new device; beyond this the
+ *  least-recently-seen ones are retired (their sessions end with them), so clearing cookies
+ *  repeatedly can never grow the table without bound. */
+export const MAX_ACTIVE_DEVICES = 10;

@@ -1,7 +1,8 @@
 // Admin session finish — Appendix F4 (active / pending->active / first claim).
 import { q1, sql } from "./sql";
 import type { Db } from "../db";
-import { SESSION_ABSOLUTE_SECS, SESSION_ABSOLUTE_SECS_STRICT, DEVICE_TTL_SECS } from "./config";
+import { SESSION_ABSOLUTE_SECS, SESSION_ABSOLUTE_SECS_STRICT, DEVICE_TTL_SECS, MAX_ACTIVE_DEVICES } from "./config";
+import { logWarn, swallow } from "../shared/logger";
 import { randomToken } from "./crypto";
 import { tokenHashHex } from "./keys";
 import { AuthRejectError } from "./errors";
@@ -28,10 +29,14 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
   const byoMatch = byoHashHex === null
     ? sql`false`
     : sql`d.token_hash = decode(${byoHashHex}, 'hex')`;
+  // Fallback for a browser with no registered device (cleared cookies, new browser, new site
+  // address): both factors already passed, so it is let in on a STRICT session and registered.
+  const fallbackToken = randomToken();
+  const fallbackHashHex = await tokenHashHex(fallbackToken);
   const absSecs = a.tier === "strict" ? SESSION_ABSOLUTE_SECS_STRICT : SESSION_ABSOLUTE_SECS;
   const sessionToken = randomToken();
   const sessionHashHex = await tokenHashHex(sessionToken);
-  const row = await q1<{ user_id: string; device_issued: boolean }>(db,
+  const row = await q1<{ user_id: string; device_issued: boolean; new_browser: boolean }>(db,
     sql`WITH f AS (
        UPDATE aa_auth_flows SET stage = 'done'
         WHERE id = ${flow.id} AND stage = 'ready' AND via <> 'resume' AND expires_at > now()
@@ -88,28 +93,45 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
          now() + (${DEVICE_TTL_SECS}::int * interval '1 second'),
          ${a.ip}, ${a.prefix}, ${a.country}
          FROM claim
+       RETURNING id),
+      adhoc AS (
+       INSERT INTO aa_admin_devices
+         (user_id, token_hash, status, label, created_via, expires_at, last_ip, last_ip_prefix, last_country)
+       SELECT u.user_id, decode(${fallbackHashHex}, 'hex'), 'active', left(${a.ua}, 120), 'new_browser',
+         now() + (${DEVICE_TTL_SECS}::int * interval '1 second'),
+         ${a.ip}, ${a.prefix}, ${a.country}
+         FROM u
+        WHERE NOT EXISTS (SELECT 1 FROM ok_dev) AND NOT EXISTS (SELECT 1 FROM newdev)
        RETURNING id)
       INSERT INTO aa_sessions
         (id_hash, user_id, session_version, absolute_expires_at, ip, ua,
          device_id, login_via, ip_prefix, country, tier)
       SELECT decode(${sessionHashHex}, 'hex'), u.user_id, u.session_version,
-        now() + (${absSecs}::int * interval '1 second'),
+        now() + ((CASE WHEN EXISTS (SELECT 1 FROM adhoc) THEN ${SESSION_ABSOLUTE_SECS_STRICT}::int ELSE ${absSecs}::int END) * interval '1 second'),
         ${a.ip}, left(${a.ua}, 120),
-        COALESCE((SELECT id FROM ok_dev LIMIT 1), (SELECT id FROM newdev)),
-        u.via, ${a.prefix}, ${a.country}, ${a.tier}
+        COALESCE((SELECT id FROM ok_dev LIMIT 1), (SELECT id FROM newdev), (SELECT id FROM adhoc)),
+        u.via, ${a.prefix}, ${a.country},
+        CASE WHEN EXISTS (SELECT 1 FROM adhoc) THEN 'strict' ELSE ${a.tier}::text END
        FROM u
-      WHERE EXISTS (SELECT 1 FROM ok_dev) OR EXISTS (SELECT 1 FROM newdev)
+      WHERE EXISTS (SELECT 1 FROM ok_dev) OR EXISTS (SELECT 1 FROM newdev) OR EXISTS (SELECT 1 FROM adhoc)
       RETURNING user_id::text AS user_id,
-        (SELECT id FROM newdev) IS NOT NULL AS device_issued`);
+        (SELECT id FROM newdev) IS NOT NULL AS device_issued,
+        (SELECT id FROM adhoc) IS NOT NULL AS new_browser`);
   if (!row) {
-    // No session was issued although the code was right: an admin session must be bound to a
-    // registered device (first-device window, device cookie, or a device flow). Record which
-    // of those was missing so the neutral 401 is diagnosable server-side.
-    const d = await q1<{ devices: number }>(db,
-      sql`SELECT count(*)::int AS devices FROM aa_admin_devices
-           WHERE user_id = ${flow.user_id}::uuid AND status = 'active' AND expires_at > now()`).catch(() => null);
-    throw new AuthRejectError(
-      `no_registered_device(cookie=${a.deviceToken ? 1 : 0},window=${urow?.window_open ? 1 : 0},active_devices=${d?.devices ?? "?"})`);
+    // The code was right but no session could be issued: the flow was consumed by a concurrent
+    // duplicate, or the account is no longer an active, enrolled admin.
+    throw new AuthRejectError("session_not_issued");
+  }
+  if (row.new_browser) {
+    logWarn("new_browser_device_registered", { tier: "strict" });
+    // Keep the newest MAX_ACTIVE_DEVICES; retire the rest (their sessions end with them).
+    await q1(db, sql`UPDATE aa_admin_devices SET status = 'revoked', revoked_at = now()
+      WHERE user_id = ${flow.user_id}::uuid AND status = 'active'
+        AND id NOT IN (SELECT id FROM aa_admin_devices
+          WHERE user_id = ${flow.user_id}::uuid AND status = 'active' AND expires_at > now()
+          ORDER BY last_seen_at DESC NULLS LAST, created_at DESC LIMIT ${MAX_ACTIVE_DEVICES})`)
+      .catch(swallow("device_prune_failed"));
+    return { sessionToken, deviceToken: fallbackToken };
   }
   return { sessionToken, deviceToken: row.device_issued ? claimToken : null };
 }
