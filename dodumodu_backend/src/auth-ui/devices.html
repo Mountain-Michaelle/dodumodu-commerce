@@ -3,18 +3,33 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Trusted devices</title>
+  <title>Trusted Devices</title>
   <link rel="stylesheet" href="/auth-ui/auth.css" />
 </head>
 <body>
-  <main class="card">
-    <h1>Trusted devices</h1>
-    <p class="muted small">Admins only. Revoke a device to end its sessions at once.</p>
-    <div id="list" class="once"><span class="muted">Loading…</span></div>
-    <div class="links" style="margin-top:16px">
-      <button class="small-btn" id="invite" type="button">Add a device</button>
-      <a href="/admin/sign-in/">Back</a>
-    </div>
+  <main class="page-shell" data-page="devices">
+    <header class="page-header">
+      <div class="header-info">
+        <h1>Trusted Devices</h1>
+        <p class="page-subtitle">Admins only. Revoke a device to end its sessions at once.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn-primary" id="invite" type="button">Add a device</button>
+        <a href="/admin/sign-in/" class="btn-link">Back</a>
+      </div>
+    </header>
+
+    <section class="table-section">
+      <div class="table-head">
+        <div class="th">Device</div>
+        <div class="th">Trust Status</div>
+        <div class="th">Created Via</div>
+        <div class="th">Last Seen</div>
+        <div class="th">Actions</div>
+      </div>
+      <div class="table-body" id="list"><span class="muted">Loading…</span></div>
+    </section>
+
     <div id="invite-box" class="once" hidden></div>
     <p class="note" id="note" hidden></p>
   </main>

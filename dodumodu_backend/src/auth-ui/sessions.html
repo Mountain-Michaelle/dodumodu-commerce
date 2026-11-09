@@ -3,19 +3,33 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Your sessions</title>
+  <title>Sessions</title>
   <link rel="stylesheet" href="/auth-ui/auth.css" />
 </head>
 <body>
-  <main class="card">
-    <h1>Your sessions</h1>
-    <p class="muted small">End any session you don't recognize.</p>
-    <div id="list" class="once"><span class="muted">Loading…</span></div>
-    <div class="links" style="margin-top:16px">
-      <button class="ghost small-btn" id="revoke-others" type="button">Sign out everywhere else</button>
-      <button class="ghost small-btn" id="logout" type="button">Sign out</button>
-      <a href="/admin/sign-in/">Back</a>
-    </div>
+  <main class="page-shell" data-page="sessions">
+    <header class="page-header">
+      <div class="header-info">
+        <h1>Sessions</h1>
+        <p class="page-subtitle">End any session you don't recognize.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn-ghost" id="revoke-others" type="button">Sign out everywhere else</button>
+        <button class="btn-danger" id="logout" type="button">Sign out</button>
+        <a href="/admin/sign-in/" class="btn-link">Back</a>
+      </div>
+    </header>
+
+    <section class="table-section">
+      <div class="table-head">
+        <div class="th">Device / Browser</div>
+        <div class="th">Last Activity</div>
+        <div class="th">Status</div>
+        <div class="th">Actions</div>
+      </div>
+      <div class="table-body" id="list"><span class="muted">Loading…</span></div>
+    </section>
+
     <p class="note" id="note" hidden></p>
   </main>
   <script src="/auth-ui/sessions.js" defer></script>
