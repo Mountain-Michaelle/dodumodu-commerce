@@ -264,7 +264,7 @@ p:last-child { margin-bottom: 0; }
 /* Unread count badge — targets the Notifications nav link alone; no effect on other links. */
 .live-notification .nav-badge {
   position: absolute;
-  top: -25%;
+  top: 50%;
   right: 5%;
   transform: translateY(-50%);
   display: inline-flex;
