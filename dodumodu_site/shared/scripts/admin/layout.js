@@ -68,7 +68,7 @@ export function buildShell({ root, onNavigate, identity }) {
           onclick: (event) => { event.preventDefault(); onNavigate(item.id); },
         });
         navLinks.set(item.id, link);
-        return el("li", {}, link);
+        return el("li", { class: item.id === "notifications" ? "live-notification" : undefined }, link);
       })))));
 
   const crumb = el("div", { class: "breadcrumb" });

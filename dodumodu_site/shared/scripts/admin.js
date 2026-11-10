@@ -184,7 +184,7 @@ function watchPermsVersion() {
 }
 
 /** Topbar bell with the unread attention count. Fail-open: never blocks boot. */
-async function refreshBell() {
+export async function refreshBell() {
   try {
     const data = await v2api.get("/notifications");
     if (!data || typeof data.unread !== "number") return;
