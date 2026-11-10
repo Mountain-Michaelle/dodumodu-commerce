@@ -3,6 +3,7 @@
 // ADMIN_BASE (/admin). Every route is behind flagGate (404 when off) and
 // originGuard for unsafe methods. Errors map to neutral 401 / 429 {retry_after}
 // / 503 {retry:true} / 403 so real, unknown and denied look identical.
+import { legacyPermissionsForRole } from "./adminAuth";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Db } from "../db";
@@ -499,6 +500,7 @@ authRoute.get("/me", async (c) => guarded(c, async () => {
   void s;
   return c.json({
     email: sess.email, role: sess.role, perms: sess.perms,
+    permissions: legacyPermissionsForRole(sess.role),   // legacy keys the console gates its Add/Upload controls on
     stepup_ok: sess.stepupOk, tier: sess.tier,
     device: { trusted: sess.deviceId !== null },
   });
