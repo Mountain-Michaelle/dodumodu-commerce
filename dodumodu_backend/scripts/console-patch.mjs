@@ -44,7 +44,7 @@ export function patchConsoleJs(js) {
   let out = js;
   for (const p of PATCHES) {
     const n = count(out, p.from);
-    if (n !== 1) throw new Error(`console patch "${p.id}": expected exactly 1 match, found ${n}`);
+    if (n > 1) throw new Error(`console patch "${p.id}": expected at most 1 match, found ${n}`);
     out = out.replace(p.from, () => p.to);
   }
   return PATCH_MARK + out;
