@@ -21,9 +21,14 @@ export async function listUsers(db: Db, opts: { role?: string; active?: string; 
   if (opts.active === "false") conds.push(`u.is_active = false`);
   const term = (opts.q || "").trim().slice(0, 80);
   // where is allow-list built above (role/active literals only), never raw input.
-  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+  // Always a WHERE (TRUE when unfiltered) so the search clause below can never appear without one.
+  const where = "WHERE TRUE" + conds.map((c) => ` AND ${c}`).join("");
+  const lit = term.replace(/[\\%_]/g, (m) => "\\" + m);          // the term is matched literally
   const search = term
-    ? sql`AND (u.email ILIKE ${"%" + term + "%"} OR u.username ILIKE ${"%" + term + "%"})`
+    ? sql`AND (u.email ILIKE ${"%" + lit + "%"} OR u.username ILIKE ${"%" + lit + "%"}
+        OR COALESCE(u.first_name,'') ILIKE ${"%" + lit + "%"} OR COALESCE(u.last_name,'') ILIKE ${"%" + lit + "%"}
+        OR (COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) ILIKE ${"%" + lit + "%"}
+        OR u.id::text ILIKE ${lit + "%"})`
     : sql``;
   const rows = await q<UserRow>(db, sql`
     SELECT u.id::text AS id, u.email, u.username,

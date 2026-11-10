@@ -14,30 +14,37 @@
         <p class="page-subtitle">Admins only. Revoke a device to end its sessions at once.</p>
       </div>
       <div class="header-actions">
-        <button class="btn-primary" id="invite" type="button" aria-label="Add a device">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
-        <a href="/admin/" class="btn-link" aria-label="Back to admin console">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-        </a>
+        <button class="btn-primary" id="invite" type="button">+ Add a device</button>
+        <a href="/admin/" class="btn-link" aria-label="Back to admin console">&larr; Back to console</a>
       </div>
     </header>
 
-    <section class="table-section">
-      <div class="table-head">
-        <div class="th">Device</div>
-        <div class="th">Identifier</div>
-        <div class="th">Trust Status</div>
-        <div class="th">Created Via</div>
-        <div class="th">Last Seen</div>
-        <div class="th">Actions</div>
-      </div>
-      <div class="table-body" id="list"><span class="muted">Loading…</span></div>
-    </section>
+    <div class="toolbar">
+      <input class="search" id="search" type="search" placeholder="Search user, email, user ID, device ID, name, IP…" aria-label="Search devices" autocomplete="off" />
+      <span class="muted small" id="count" aria-live="polite"></span>
+    </div>
 
     <div id="invite-box" class="once" hidden></div>
     <p class="note" id="note" hidden></p>
+
+    <section class="table-section">
+      <div class="table-scroll">
+        <div class="table-inner">
+          <div class="table-head" role="row">
+            <div class="th">User</div>
+            <div class="th">Device</div>
+            <div class="th">Trust status</div>
+            <div class="th">Created via</div>
+            <div class="th">Last seen</div>
+            <div class="th right">Actions</div>
+          </div>
+          <div class="table-body" id="list" aria-live="polite"><div class="state">Loading…</div></div>
+        </div>
+      </div>
+      <div class="pager" id="pager" hidden></div>
+    </section>
   </main>
+  <script src="/auth-ui/admin-ui.js" defer></script>
   <script src="/auth-ui/devices.js" defer></script>
 </body>
 </html>

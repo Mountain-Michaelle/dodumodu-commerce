@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Add this device</title>
+  <link rel="stylesheet" href="/auth-ui/auth.css" />
+</head>
+<body>
+  <main class="card" data-page="device-accept">
+    <h1>Add this device</h1>
+    <p class="muted" id="intro">An administrator invited this browser to sign in to the admin console. Only continue if you expected this.</p>
+    <button id="accept" type="button" class="btn-primary-block">Trust this browser</button>
+    <p class="note" id="note" hidden></p>
+    <div class="links"><a id="continue" href="/admin/sign-in/" hidden>Continue to sign in</a></div>
+  </main>
+  <script src="/auth-ui/device-accept.js" defer></script>
+</body>
+</html>

@@ -11,6 +11,7 @@ import { catalogRoute } from "./routes/catalog";
 import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
+import { PUBLIC_ORIGIN_HEADER } from "./auth/public-origin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
 import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml } from "./config/adminBase";
 import { loadSession } from "./auth/middleware";
@@ -126,6 +127,8 @@ app.route("/", visitorRetentionRoute);
 // which would steal arbitrary single-segment paths such as product slugs).
 app.use("*", adminNamespaceDispatcher);
 
+const ADMIN_PAGE_PATHS = new Set(["/users", "/users/", "/devices", "/devices/", "/sessions", "/sessions/"]);
+
 async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Next) {
   const path = c.req.path;
   const active = adminBasePath({
@@ -138,9 +141,14 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
     const url = "http://localhost" + rest + new URL(c.req.url).search;
     const raw = c.req.raw;
     const method = raw.method;
+    // The sub-requests below are rebuilt on http://localhost, so the real public origin is passed on in
+    // an internal header. Any client-sent copy is dropped first: it can never be forged from outside.
+    const fwdHeaders = new Headers(raw.headers);
+    fwdHeaders.delete(PUBLIC_ORIGIN_HEADER);
+    fwdHeaders.set(PUBLIC_ORIGIN_HEADER, new URL(c.req.url).origin);
     const init: RequestInit & { duplex?: "half" } = {
       method,
-      headers: raw.headers,
+      headers: fwdHeaders,
       duplex: "half",
     };
     if (method !== "GET" && method !== "HEAD") {
@@ -183,6 +191,16 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
         }
       }
       return c.redirect(`${active}/sign-in/`, 302);
+    }
+    // The admin PAGES (users / devices / sessions): a browser navigating there without a valid session is sent to
+    // sign-in (and brought back afterwards), not shown a raw 401 body. With a valid session nothing changes: the
+    // page's own role check still decides (a staff session gets the page's 403, never a redirect loop).
+    if (adminAuthEnabled(c.env as never) && c.req.method === "GET" && ADMIN_PAGE_PATHS.has(rest)) {
+      let ok = false;
+      if (getSidToken(c as never)) {
+        try { ok = !!(await loadSession(c as never)); } catch { ok = false; }
+      }
+      if (!ok) return c.redirect(`${active}/sign-in/?next=${encodeURIComponent(active + (rest.endsWith("/") ? rest : rest + "/"))}`, 302);
     }
     // Do NOT gate any /admin/* path on a v2 session here. V1's PUBLIC_PATHS
     // exemption (sign-in page + assets) lives in adminRoute.use("*") and must

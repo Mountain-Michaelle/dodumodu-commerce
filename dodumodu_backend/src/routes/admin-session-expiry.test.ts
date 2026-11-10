@@ -374,43 +374,16 @@ test("custom namespace sign-in page is 200 with malformed cookie", async () => {
 /* 401 vs 403 distinction                                             */
 /* ------------------------------------------------------------------ */
 
-test("403 does not trigger sign-in redirect in frontend (sessions.js)", async () => {
+test("only a lost session (401) sends the page to sign-in; 403 never does, in the shared helper and every page", async () => {
   const fs = await import("node:fs/promises");
-  const sessionsJs = await fs.readFile("src/auth-ui/sessions.js", "utf8");
-  assert.ok(
-    !sessionsJs.includes("res.status === 401 || res.status === 403"),
-    "sessions.js must not redirect on 403",
-  );
-  assert.ok(
-    sessionsJs.includes("if (res.status === 401)"),
-    "sessions.js must redirect on 401",
-  );
-});
-
-test("403 does not trigger sign-in redirect in frontend (devices.js)", async () => {
-  const fs = await import("node:fs/promises");
-  const devicesJs = await fs.readFile("src/auth-ui/devices.js", "utf8");
-  assert.ok(
-    !devicesJs.includes("res.status === 401 || res.status === 403"),
-    "devices.js must not redirect on 403",
-  );
-  assert.ok(
-    devicesJs.includes("if (res.status === 401)"),
-    "devices.js must redirect on 401",
-  );
-});
-
-test("403 does not trigger sign-in redirect in frontend (users.js)", async () => {
-  const fs = await import("node:fs/promises");
-  const usersJs = await fs.readFile("src/auth-ui/users.js", "utf8");
-  assert.ok(
-    !usersJs.includes("response.status === 401 || response.status === 403"),
-    "users.js must not redirect on 403",
-  );
-  assert.ok(
-    usersJs.includes("if (response.status === 401)"),
-    "users.js must redirect on 401",
-  );
+  const helper = await fs.readFile("src/auth-ui/admin-ui.js", "utf8");
+  assert.ok(helper.includes("if (res.status === 401)"), "admin-ui.js must redirect on 401");
+  assert.ok(!/status === 401 \|\| [a-z.]*status === 403/.test(helper), "admin-ui.js must not redirect on 403");
+  for (const f of ["sessions.js", "devices.js", "users.js"]) {
+    const js = await fs.readFile(`src/auth-ui/${f}`, "utf8");
+    assert.ok(!/status === 401 \|\| [a-z.]*status === 403/.test(js), `${f} must not redirect on 403`);
+    assert.ok(!/location\.href\s*=/.test(js.replace(/\/\/.*$/gm, "")) || f === "users.js", `${f} sends people to sign-in only through the helper`);
+  }
 });
 
 /* ------------------------------------------------------------------ */

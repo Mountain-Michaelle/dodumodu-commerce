@@ -53,6 +53,9 @@ import {
   ADMIN_DEVICES_JS,
   ADMIN_USERS_HTML,
   ADMIN_USERS_JS,
+  ADMIN_UI_JS,
+  ADMIN_DEVICE_ACCEPT_HTML,
+  ADMIN_DEVICE_ACCEPT_JS,
   ADMIN_QR_JS,
   ADMIN_QR_LOGO_MJS,
   ADMIN_CONSOLE_ASSETS,
@@ -103,6 +106,10 @@ const PUBLIC_PATHS = [
   "/assets/sessions.js",
   "/assets/devices.js",
   "/assets/users.js",
+  "/assets/device-accept.js",
+  "/assets/admin-ui.js",
+  "/device/accept",
+  "/device/accept/",
   "/assets/qr.js",
   "/assets/qr-logo.mjs",
 ];
@@ -193,20 +200,27 @@ adminRoute.use("*", async (c, next) => {
 // These are registered AFTER the middleware so the middleware runs first, but
 // the PUBLIC_PATHS check above lets them through without auth.
 // Explicit Content-Type headers ensure test assertions pass consistently.
-adminRoute.get("/sign-in", (c) => {
+// An administrator who already has a valid session must not be shown the sign-in page again: send them to
+// the console. Same rule the console root uses to send an unauthenticated visitor here (admin session only),
+// so the two redirects can never chase each other. Any failure just shows the sign-in page.
+async function signInPage(c: Context<{ Bindings: Env }>) {
   const active = adminBasePath({
     ENVIRONMENT: c.env.ENVIRONMENT,
     ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
   });
+  if (adminAuthEnabled(c.env as never) && getSidToken(c as never)) {
+    try {
+      const session = await loadSession(c as never);
+      if (session && session.role === "admin") return c.redirect(`${active ?? "/admin"}/`, 302);
+    } catch (e) {
+      logError("sign_in_session_check_failed", e);
+    }
+  }
+  c.header("Cache-Control", "no-store");
   return c.html(active ? rewriteAdminHtml(ADMIN_LOGIN_HTML, active) : ADMIN_LOGIN_HTML, 200);
-});
-adminRoute.get("/sign-in/", (c) => {
-  const active = adminBasePath({
-    ENVIRONMENT: c.env.ENVIRONMENT,
-    ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH,
-  });
-  return c.html(active ? rewriteAdminHtml(ADMIN_LOGIN_HTML, active) : ADMIN_LOGIN_HTML, 200);
-});
+}
+adminRoute.get("/sign-in", (c) => signInPage(c as never));
+adminRoute.get("/sign-in/", (c) => signInPage(c as never));
 adminRoute.get("/assets/auth.css", (c) => {
   c.header("Content-Type", "text/css; charset=utf-8");
   return c.body(ADMIN_AUTH_CSS, 200);
@@ -227,6 +241,23 @@ adminRoute.get("/assets/users.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(namespaceJs(ADMIN_USERS_JS, c.env), 200);
 });
+adminRoute.get("/assets/admin-ui.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  return c.body(namespaceJs(ADMIN_UI_JS, c.env), 200);
+});
+adminRoute.get("/assets/device-accept.js", (c) => {
+  c.header("Content-Type", "text/javascript; charset=utf-8");
+  c.header("Cache-Control", "no-store");
+  return c.body(namespaceJs(ADMIN_DEVICE_ACCEPT_JS, c.env), 200);
+});
+// Invite page: static, public, redeems nothing on GET (the button POSTs; the token rides in the #fragment).
+const deviceAcceptPage = (c: { env: Env; html: (h: string, s: 200) => Response; header: (k: string, v: string) => void }) => {
+  c.header("Cache-Control", "no-store");
+  c.header("Referrer-Policy", "no-referrer");
+  return c.html(namespaceHtml(ADMIN_DEVICE_ACCEPT_HTML, c.env), 200);
+};
+adminRoute.get("/device/accept", (c) => deviceAcceptPage(c as never));
+adminRoute.get("/device/accept/", (c) => deviceAcceptPage(c as never));
 adminRoute.get("/assets/qr.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(ADMIN_QR_JS, 200);

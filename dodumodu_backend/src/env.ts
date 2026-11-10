@@ -120,6 +120,8 @@ export type Env = {
    * Otherwise the Access identity header is ignored, because without Access anyone can forge it.
    */
   TRUST_ACCESS_HEADER?: string;
+  /** Public origin for links we hand out (device invites), e.g. https://shop.example.com. Optional: defaults to the platform-reported request origin. */
+  ADMIN_PUBLIC_ORIGIN?: string;
 
   // admin-auth v2 (feature flag "0"/"1"; additive only, existing routes untouched)
   ADMIN_AUTH_V2: string;

@@ -84,14 +84,56 @@ test("user management UI covers create, roles and permissions", () => {
   assert.match(js, /body: JSON\.stringify\(\{ role:/, "exposes role changes");
 });
 
-test("device and session management UI calls their real mutation endpoints", () => {
+test("device and session management UI calls their real endpoints", () => {
   const devices = read("devices.js");
   const sessions = read("sessions.js");
-  assert.match(devices, /\$\{ADMIN_BASE\}\/admin-v2\/devices/, "loads devices from the admin namespace");
+  const users = read("users.js");
+  assert.match(devices, /UI\.api\(`\/admin-v2\/devices\?\$\{p\}`\)/, "loads devices (all users, server-side search + paging)");
+  assert.match(devices, /scope: "all"/, "asks for the all-owners view");
+  assert.match(devices, /\/admin-v2\/users\/\$\{encodeURIComponent\(d\.user_id\)\}\/devices\/\$\{encodeURIComponent\(d\.id\)\}/, "revokes the right device of the right user");
   assert.match(devices, /method: "DELETE"/, "revokes a device");
-  assert.match(devices, /\/devices\/invite/, "creates a device invite");
-  assert.match(sessions, /\$\{ADMIN_BASE\}\/auth\/sessions/, "loads sessions from the auth namespace");
+  assert.match(devices, /\/admin-v2\/devices\/invite/, "creates a device invite");
+  assert.match(sessions, /UI\.api\("\/auth\/sessions"\)/, "loads my sessions from the auth namespace");
+  assert.match(sessions, /\/admin-v2\/sessions\?/, "loads every user's sessions (admin)");
   assert.match(sessions, /\/auth\/sessions\/revoke-others/, "revokes other sessions");
   assert.match(sessions, /method: "DELETE"/, "revokes an individual session");
-  assert.match(sessions, /response\.ok/, "reports mutation failures instead of falsely succeeding");
+  assert.match(sessions, /res\.ok/, "reports mutation failures instead of falsely succeeding");
+  assert.match(users, /\/admin-v2\/users\?\$\{p\}/, "users list is searched and paged by the server");
+  assert.match(users, /\/admin-v2\/users\/\$\{encodeURIComponent\(userId\)\}\/sessions\//, "user panels use the per-user session routes");
+});
+
+test("every management page loads the shared helper first", () => {
+  for (const f of ["sessions", "devices", "users"]) {
+    const html = read(`${f}.html`);
+    const ui = html.indexOf('src="/auth-ui/admin-ui.js"'), page = html.indexOf(`src="/auth-ui/${f}.js"`);
+    assert.ok(ui > -1 && page > ui, `${f}.html must load admin-ui.js before ${f}.js`);
+  }
+});
+
+test("no hard-coded hosts and no innerHTML with server data in the UI scripts", () => {
+  for (const f of ["admin-ui.js", "sessions.js", "devices.js", "users.js", "device-accept.js", "auth.js"]) {
+    const js = read(f);
+    assert.doesNotMatch(js, /localhost|127\.0\.0\.1|workers\.dev/, `${f} must not hard-code a host`);
+  }
+  for (const f of ["sessions.js", "devices.js", "users.js", "device-accept.js"]) {
+    assert.doesNotMatch(read(f), /innerHTML/, `${f} must build the DOM with textContent only`);
+  }
+  // the one allowed innerHTML is the constant copy icon
+  const ui = read("admin-ui.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.equal((ui.match(/innerHTML/g) || []).length, 1);
+  assert.match(ui, /b\.innerHTML = COPY_ICON/);
+});
+
+test("scrollbars are hidden without disabling scrolling", () => {
+  const css = read("auth.css");
+  assert.match(css, /\.table-scroll::-webkit-scrollbar \{ display: none/);
+  assert.match(css, /scrollbar-width: none/);
+  assert.match(css, /\.table-scroll \{ overflow-x: auto/);
+  assert.doesNotMatch(css.slice(css.indexOf(".table-scroll")), /\.table-scroll[^}]*overflow:\s*hidden/, "scrolling must stay enabled");
+});
+
+test("header and rows share one column template", () => {
+  const css = read("auth.css");
+  assert.match(css, /\.table-head, \.table-body \.row \{ display: grid; grid-template-columns: var\(--cols\)/);
+  for (const page of ["sessions", "devices", "users"]) assert.match(css, new RegExp(`\\[data-page="${page}"\\]\\s+\\{ --cols:`));
 });
