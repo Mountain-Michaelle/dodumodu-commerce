@@ -72,10 +72,10 @@ try {
 
   for (const [index, [r2Key, title, description]] of TESTIMONIALS.entries()) {
     await client.query(
-      `INSERT INTO testimonials (r2_key, title, description, display_order)
-       SELECT $1, $2, $3, $4
+      `INSERT INTO testimonials (product_id, kind, r2_key, title, description, display_order)
+       SELECT $5, 'review', $1, $2, $3, $4
        WHERE NOT EXISTS (SELECT 1 FROM testimonials WHERE r2_key = $1)`,
-      [r2Key, title, description, index],
+      [r2Key, title, description, index, product.id],
     );
   }
 

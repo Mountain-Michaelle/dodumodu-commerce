@@ -6,9 +6,9 @@
 // the real code offline, not to re-create Cloudflare. When the real binding is
 // missing locally, the symptom should be a clear error, never a silent
 // difference in behaviour between the two environments.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { resolveWithinRoot } from "./mediaPath";
+import { contentTypeFor, resolveMediaPath, resolveWithinRoot } from "./mediaPath";
 
 /**
  * The tripwire. These shims exist for local development; a production
@@ -117,11 +117,24 @@ export function localBucket(root: string): R2Bucket {
       writeFileSync(target, await toBytes(body as ReadableStream | ArrayBuffer));
       return { key };
     },
+    // Used by the Worker-style GET /media/* route in app.ts. Returns null for a
+    // missing key (R2 semantics) so the route answers 404 instead of throwing.
+    // resolveMediaPath is the read-path guard: lexical containment, regular
+    // files only, and a symlink pointing out of the root counts as missing.
+    async get(key: string): Promise<unknown> {
+      const target = resolveMediaPath(base, key);
+      if (!target) return null;
+      return {
+        key,
+        body: new Uint8Array(readFileSync(target)),
+        httpMetadata: { contentType: contentTypeFor(target) },
+      };
+    },
     async delete(key: string): Promise<void> {
       rmSync(targetFor(key), { force: true });
     },
   };
 
-  // R2Bucket is a large interface; only put/delete are called (r2Client.ts).
+  // R2Bucket is a large interface; only get/put/delete are called (app.ts, r2Client.ts).
   return shim as unknown as R2Bucket;
 }
