@@ -2,6 +2,7 @@ import { el, mount, formatDateTime } from "../dom.js";
 import { v2api } from "../api.js";
 import { statusBadge, toast, toastError, confirmDialog, errorState } from "../ui.js";
 import { withStepUpRetry } from "../access.js";
+import { refreshBell } from "../../admin.js";
 
 export function notificationsView({ shell }) {
   const host = el("div");
@@ -82,6 +83,7 @@ export function notificationsView({ shell }) {
     try {
       await v2api.patch(`/notifications/${id}/read`, {});
       toast("Notification marked as read.", "success");
+      await refreshBell();
       load();
     } catch (err) { toastError(err); }
   }
@@ -90,13 +92,14 @@ export function notificationsView({ shell }) {
     try {
       await v2api.post("/notifications/read-all", {});
       toast("All notifications marked as read.", "success");
+      await refreshBell();
       load();
     } catch (err) { toastError(err); }
   }
 
   async function openNotification(notification) {
     if (!notification.readAt) {
-      try { await v2api.patch(`/notifications/${notification.id}/read`, {}); } catch (err) { toastError(err); }
+      try { await v2api.patch(`/notifications/${notification.id}/read`, {}); await refreshBell(); } catch (err) { toastError(err); }
     }
     if (!notification.href) return load();
     const order = /^\/orders\/(\d+)/.exec(notification.href);

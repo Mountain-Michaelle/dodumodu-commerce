@@ -258,6 +258,33 @@ p:last-child { margin-bottom: 0; }
   box-shadow: inset 2px 0 0 var(--primary);
 }
 
+/* Positioning context so the badge sits absolute inside the notification row only. */
+.live-notification { position: relative; }
+
+/* Unread count badge — targets the Notifications nav link alone; no effect on other links. */
+.live-notification .nav-badge {
+  position: absolute;
+  top: -25%;
+  right: 5%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: .2rem;
+  background: var(--danger);      /* #b42318 — attractive, high-contrast */
+  color: #ffff00;                  /* #fff — readable on red */
+  font-size: .68rem;
+  font-weight: 600;
+  border-radius: 999px;
+  line-height: 1;
+  z-index: 1;
+}
+
+/* Keep link text from colliding with the absolutely-placed badge. */
+.live-notification .nav-link { padding-right: 1.75rem; }
+
 .nav-scrim { display: none; }
 
 .main {
@@ -1016,6 +1043,8 @@ p:last-child { margin-bottom: 0; }
   .action-menu-trigger { min-height: 2.375rem; padding: .375rem .625rem; }
   .action-menu-item { padding: .625rem .5rem; font-size: 0.9375rem; }
   .nav-link { padding: .625rem .5rem; font-size: 0.9375rem; }
+  .live-notification .nav-link { padding-right: 1.5rem; }
+  .live-notification .nav-badge { right: 4px; font-size: .625rem; }
   .table th, .table td { padding: .5rem; }
   .overlay { padding: 0; }
   .modal, .dialog { max-width: 100%; min-height: 100%; border-radius: 0; }
