@@ -12,6 +12,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createHash } from 'node:crypto'
+import { patchConsoleJs } from './console-patch.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const backendRoot = resolve(__dirname, '..')
@@ -52,6 +54,22 @@ if (existsSync(join(adminDistDir, 'index.html'))) {
   console.warn('site build not found: kept the console shell + assets from the existing generated file')
 } else {
   throw new Error('No site build (dodumodu_site/dist/admin) and no previous generated file to reuse')
+}
+
+// Fixes for the console bundle (see scripts/console-patch.mjs). Applied to the JS asset on every build; when the
+// content changes the asset gets a new hashed name so browsers and the edge never serve the unpatched copy.
+{
+  const jsName = Object.keys(consoleAssets).find((n) => /\.min\.js$/.test(n))
+  if (jsName) {
+    const patched = patchConsoleJs(consoleAssets[jsName])
+    if (patched !== consoleAssets[jsName]) {
+      const hash = createHash('sha1').update(patched).digest('hex').slice(0, 8)
+      const newName = jsName.replace(/^(admin\.)[^.]+(\.min\.js)$/, `$1${hash}$2`)
+      delete consoleAssets[jsName]
+      consoleAssets[newName] = patched
+      consoleHtml = consoleHtml.split(jsName).join(newName)
+    }
+  }
 }
 
 const out =
