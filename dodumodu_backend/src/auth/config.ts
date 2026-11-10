@@ -141,3 +141,9 @@ export function isV2Perm(p: string): p is V2Permission {
  *  least-recently-seen ones are retired (their sessions end with them), so clearing cookies
  *  repeatedly can never grow the table without bound. */
 export const MAX_ACTIVE_DEVICES = 10;
+
+// Device invites: abuse limits (per hour) and admin list paging.
+export const INVITE_CREATE_PER_HOUR = 20;       // per administrator
+export const INVITE_ACCEPT_PER_HOUR_IP = 20;    // per network, valid or not
+export const ADMIN_LIST_DEFAULT_LIMIT = 25;
+export const ADMIN_LIST_MAX_LIMIT = 100;

@@ -1,7 +1,8 @@
 "use strict";
 
-const $ = (id) => document.getElementById(id);
-const BASE = window.ADMIN_BASE_PATH || "/admin";
+const UI = window.AdminUI;
+const $ = UI.$;
+const BASE = UI.BASE;
 const USERS_API = `${BASE}/admin-v2/users`;
 
 function note(kind, text) {
@@ -21,7 +22,7 @@ function panelNote(panel, kind, text) {
 
 async function stepUp(action) {
   let response = await action();
-  if (response.status !== 403) return response;
+  if (!response || response.status !== 403) return response;
   const code = prompt("Re-enter your authenticator code:");
   if (!code) return response;
   const step = await fetch(`${BASE}/auth/stepup`, {
@@ -52,104 +53,100 @@ function shortSid(sid) {
   return s.length > 8 ? s.slice(0, 4) + "…" + s.slice(-4) : s;
 }
 
-function rowFor(user) {
-  const row = document.createElement("div");
-  row.className = "row";
-  const info = document.createElement("div");
-  const name = document.createElement("div");
-  name.textContent = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || user.email;
-  const meta = document.createElement("div");
-  meta.className = "label";
-  meta.textContent = `${user.email} · ${user.role} · ${user.isActive ? "active" : "inactive"} · ${user.enrolled ? "TOTP enrolled" : "TOTP pending"}`;
-  info.append(name, meta);
-  row.appendChild(info);
+function userCell(user) {
+  const wrap = document.createElement("div");
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "";
+  if (name) { const n = UI.el("div", "cell-main", name); n.title = name; wrap.appendChild(n); }
+  wrap.appendChild(UI.copyLine(user.email, "email", name ? "cell-sub" : "cell-main"));
+  wrap.appendChild(UI.copyLine(user.id, "user ID", "mono"));
+  return wrap;
+}
 
-  const actions = document.createElement("div");
-  actions.className = "links";
+function rowFor(user) {
+  const row = UI.el("div", "row"); row.setAttribute("role", "row");
+  row.appendChild(UI.cell("User", userCell(user)));
+
   const role = document.createElement("select");
   role.setAttribute("aria-label", `Role for ${user.email}`);
-  for (const value of ["admin", "general", "mono"]) {
+  const values = ["admin", "general", "mono"];
+  if (!values.includes(user.role)) values.push(user.role);           // never show a wrong role for a legacy value
+  for (const value of values) {
     const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    option.selected = user.role === value;
+    option.value = value; option.textContent = value; option.selected = user.role === value;
     role.appendChild(option);
   }
   role.addEventListener("change", async () => {
+    role.disabled = true;
     const response = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(user.id)}`, {
       method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: role.value }),
     }));
     if (response.ok) { note("ok", "Role updated."); load(); }
-    else note("error", errorMessage(response));
+    else { role.disabled = false; role.value = user.role; note("error", errorMessage(response)); }
   });
-  actions.appendChild(role);
+  row.appendChild(UI.cell("Role", role));
+  row.appendChild(UI.cell("Status", UI.badge(user.isActive ? "Active" : "Inactive", user.isActive ? "ok" : "bad")));
+  row.appendChild(UI.cell("Authenticator", UI.badge(user.enrolled ? "Enrolled" : "Pending", user.enrolled ? "ok" : "warn")));
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "small-btn";
-  toggle.textContent = user.isActive ? "Deactivate" : "Activate";
-  toggle.addEventListener("click", async () => {
+  const actions = UI.el("div", "cell cell-actions right");
+  actions.style.flexWrap = "wrap";
+  const add = (label, cls, handler) => {
+    const b = UI.el("button", cls + " btn-sm", label); b.type = "button";
+    b.addEventListener("click", () => UI.busy(b, () => handler(b))); actions.appendChild(b); return b;
+  };
+  if (user.role !== "admin") add("Permissions", "btn-ghost", async () => openAccess(user));
+  add("Sessions", "btn-ghost", async () => openSessions(user));
+  add("Devices", "btn-ghost", async () => openDevices(user));
+  if (user.role === "admin") add("Add device", "btn-ghost", async () => inviteFor(user));
+  add(user.isActive ? "Deactivate" : "Activate", user.isActive ? "btn-danger" : "btn-ghost", async () => {
+    if (user.isActive && !confirm(`Deactivate ${user.email}? They will be signed out and cannot sign in.`)) return;
     const response = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(user.id)}`, {
-      method: "PATCH",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_active: !user.isActive }),
     }));
-    if (response.ok) { note("ok", "User updated."); load(); }
-    else note("error", errorMessage(response));
+    if (response.ok) { note("ok", "User updated."); load(); } else note("error", errorMessage(response));
   });
-  actions.appendChild(toggle);
-
-  if (user.role !== "admin") {
-    const access = document.createElement("button");
-    access.type = "button";
-    access.className = "ghost small-btn";
-    access.textContent = "Permissions";
-    access.addEventListener("click", () => openAccess(user));
-    actions.appendChild(access);
-  }
-
-  const sessionsBtn = document.createElement("button");
-  sessionsBtn.type = "button";
-  sessionsBtn.className = "ghost small-btn";
-  sessionsBtn.textContent = "Sessions";
-  sessionsBtn.addEventListener("click", () => openSessions(user));
-  actions.appendChild(sessionsBtn);
-
-  const devicesBtn = document.createElement("button");
-  devicesBtn.type = "button";
-  devicesBtn.className = "ghost small-btn";
-  devicesBtn.textContent = "Devices";
-  devicesBtn.addEventListener("click", () => openDevices(user));
-  actions.appendChild(devicesBtn);
-
   row.appendChild(actions);
   return row;
 }
 
+// Server-side search + paging: the list is never trimmed to what happens to be loaded.
+const view = { q: "", role: "", offset: 0, limit: 25, total: 0, reqId: 0 };
+
 async function load() {
-  const response = await fetch(USERS_API, { credentials: "same-origin" });
-  if (response.status === 401) {
-    location.href = `${BASE}/sign-in/`;
-    return;
-  }
-  if (!response.ok) {
-    $("list").textContent = "Could not load users.";
-    return;
-  }
+  const my = ++view.reqId, list = $("list");
+  if (!list.children.length) list.replaceChildren(UI.stateBox("", "Loading…"));
+  const p = new URLSearchParams({ limit: String(view.limit), offset: String(view.offset) });
+  if (view.q) p.set("q", view.q);
+  if (view.role) p.set("role", view.role);
+  const response = await UI.api(`/admin-v2/users?${p}`);
+  if (my !== view.reqId) return;
+  if (!response) { list.replaceChildren(UI.stateBox("error", "Could not reach the server. Check your connection.")); return; }
+  if (response.status === 403) { list.replaceChildren(UI.stateBox("error", "You do not have permission to view users.")); $("pager").hidden = true; return; }
+  if (!response.ok) { list.replaceChildren(UI.stateBox("error", "Could not load users.")); return; }
   const data = await response.json();
-  users = data.users || [];
-  const list = $("list");
-  const query = $("search").value.trim().toLowerCase();
-  const roleFilter = $("role-filter").value;
-  const filtered = users.filter((user) =>
-    (!roleFilter || user.role === roleFilter) &&
-    (!query || [user.email, user.username, user.firstName, user.lastName].join(" ").toLowerCase().includes(query)));
-  list.replaceChildren(...filtered.map(rowFor));
-  if (filtered.length === 0) {
-    list.textContent = "No users found.";
+  users = Array.isArray(data.users) ? data.users : [];
+  view.total = Number(data.total) || 0;
+  $("count").textContent = `${view.total} user${view.total === 1 ? "" : "s"}`;
+  if (users.length === 0 && view.offset > 0) { view.offset = 0; return load(); }   // page vanished (deletes/filters)
+  list.replaceChildren(...(users.length ? users.map(rowFor)
+    : [UI.stateBox("", view.q || view.role ? "No users match your search." : "No users yet.")]));
+  UI.renderPager($("pager"), view, (o) => { view.offset = o; load(); });
+}
+
+/** Single-use link that lets ANOTHER administrator add a new browser (bound to that user on the server). */
+async function inviteFor(user) {
+  const res = await stepUp(() => UI.api(`/admin-v2/users/${encodeURIComponent(user.id)}/device-invite`, { method: "POST" }));
+  const box = $("user-invite-box");
+  if (!res || !res.ok) {
+    note("error", res && res.status === 403 ? "Fresh administrator verification is required." : res && res.status === 429 ? "Too many invites. Try again later." : "Could not create an invite for that user.");
+    return;
   }
+  const { invite_url } = await res.json();
+  box.replaceChildren(UI.el("div", "small", `Send this single-use link to ${user.email} (expires in 15 minutes). Whoever opens it first can add a device for that account:`));
+  const line = UI.el("div", "invite-line"); const a = UI.el("a", "", invite_url); a.href = invite_url; a.rel = "noopener noreferrer";
+  line.append(a, UI.copyButton(invite_url, "invite link")); box.appendChild(line); box.hidden = false;
+  note("", "");
 }
 
 async function loadRegistry() {
@@ -227,8 +224,8 @@ $("access-form").addEventListener("submit", async (event) => {
   if (response.ok) { note("ok", "Permissions updated."); panel.hidden = true; load(); }
   else note("error", errorMessage(response));
 });
-$("search").addEventListener("input", load);
-$("role-filter").addEventListener("change", load);
+$("search").addEventListener("input", UI.debounce(() => { view.q = $("search").value.trim(); view.offset = 0; load(); }, 250));
+$("role-filter").addEventListener("change", () => { view.role = $("role-filter").value; view.offset = 0; load(); });
 
 // --- Sessions panel ---
 
@@ -300,7 +297,7 @@ async function revokeSession(userId, sid, button) {
   if (!confirm("Revoke this session? The user will be signed out on that device.")) return;
   button.disabled = true; const reqId = ++sessionsRequestId;
   try {
-    const res = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE", credentials: "same-origin" }));
+    const res = await stepUp(() => UI.api(`/admin-v2/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" }));
     if (reqId !== sessionsRequestId) return;
     if (res.ok) { panelNote("sessions", "ok", "Session revoked."); await openSessions({ id: userId, email: selectedUserEmail, role: "" }); }
     else { button.disabled = false; panelNote("sessions", "error", "Could not revoke that session."); }
@@ -311,7 +308,7 @@ async function revokeAllSessions(userId, button) {
   if (!confirm("Revoke ALL sessions for this user? Every active session will be ended and the user will be signed out everywhere.")) return;
   button.disabled = true; const reqId = ++sessionsRequestId;
   try {
-    const res = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(userId)}/sessions/revoke-all`, { method: "POST", credentials: "same-origin" }));
+    const res = await stepUp(() => UI.api(`/admin-v2/users/${encodeURIComponent(userId)}/sessions/revoke-all`, { method: "POST" }));
     if (reqId !== sessionsRequestId) return;
     if (res.ok) { const data = await res.json(); panelNote("sessions", "ok", (data.revoked || 0) + " session" + (data.revoked === 1 ? "" : "s") + " revoked."); await openSessions({ id: userId, email: selectedUserEmail, role: "" }); }
     else { button.disabled = false; panelNote("sessions", "error", "Could not revoke sessions."); }
@@ -366,7 +363,7 @@ async function revokeDevice(userId, deviceId, button) {
   if (!confirm("Revoke this device? All sessions on that device will be ended and the device will no longer be trusted.")) return;
   button.disabled = true; const reqId = ++devicesRequestId;
   try {
-    const res = await stepUp(() => fetch(`${USERS_API}/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE", credentials: "same-origin" }));
+    const res = await stepUp(() => UI.api(`/admin-v2/users/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE" }));
     if (reqId !== devicesRequestId) return;
     if (res.ok) { panelNote("devices", "ok", "Device revoked."); await openDevices({ id: userId, email: selectedUserEmail, role: "" }); }
     else { button.disabled = false; panelNote("devices", "error", "Could not revoke that device."); }
@@ -427,7 +424,6 @@ $("sessions-close").addEventListener("click", closePanels);
 $("devices-close").addEventListener("click", closePanels);
 $("sessions-revoke-all").addEventListener("click", () => { if (selectedUserId) revokeAllSessions(selectedUserId, $("sessions-revoke-all")); });
 
-const _origLoad = load;
-load = async function () { closePanels(); await _origLoad(); };
+UI.refreshOnFocus(load);
 
 Promise.all([loadRegistry(), load(), loadRequests()]);

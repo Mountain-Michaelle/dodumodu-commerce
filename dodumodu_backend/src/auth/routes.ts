@@ -12,6 +12,9 @@ import type { AuthEnv } from "./middleware";
 import { flagGate, originGuard, authInit, guard,
   requireSession, requireAdmin, requireStepUp, securityHeaders } from "./middleware";
 import { loadAuthSecrets } from "./secrets";
+import { INVITE_CREATE_PER_HOUR, INVITE_ACCEPT_PER_HOUR_IP, SEND_CAP_WINDOW } from "./config";
+import { listSessionsAdmin, listDevicesAdmin, revokeSessionOfUser, deviceBelongsTo, UUID_RE } from "./admin-lists";
+import { inviteLink, PUBLIC_ORIGIN_HEADER } from "./public-origin";
 import { FLOW_TTL_SECS, FLOW_STEP_RESUME_SECS, DEVICE_TTL_SECS, SESSION_ABSOLUTE_SECS, VID_TTL_SECS, isV2Perm } from "./config";
 
 /** Mask an email for the status endpoint (o***@e*** shape). Never leaks full address. */
@@ -41,11 +44,12 @@ import { listUsers, getUserDetail, registryPayload, listAuthLog, listBlocksAdmin
 import { notificationService } from "../services/notificationService";
 import { liftBlock } from "./blocks";
 import { grantStepup, listSessions,
-  revokeSession, revokeOtherSessions, createUser, grantPerm, revokePerm, patchUser,
+  revokeSession, revokeOtherSessions, revokeAllSessions, createUser, grantPerm, revokePerm, patchUser,
   deactivateUser, adminResetTotp, forceLogout, regenerateBackupCodes, replaceGrants, setPrimaryUser } from "./admin-ops";
 import { tokenHashHex, emailTag } from "./keys";
+import { ipBlockHashHex } from "./blocks";
 import { q, q1, sql } from "./sql";
-import { reserve, noteFuse, refund, clearKeys } from "./throttle";
+import { reserve, noteFuse, refund, clearKeys, sendCap } from "./throttle";
 import { sha256, toHex, decryptSecret, totpMatch, randomToken } from "./crypto";
 import { providerForEnv, sendLoginCode, sendInBackground, testMailbox, fromForEnv } from "./email";
 import { authCorrelationId, authFailureDiagnostic, logAuthFailure } from "./diagnostics";
@@ -129,7 +133,23 @@ async function notifyRateLimited(c: Context<AppEnv>): Promise<void> {
 }
 
 const secretsOf = (c: Context<AppEnv>) => loadAuthSecrets(c.env);
-const origin = (c: Context<AppEnv>) => new URL(c.req.url).origin;
+/** Origin the platform reported for THIS request (the dispatcher sets it after stripping any client copy). */
+const requestOrigin = (c: Context<AppEnv>) => c.req.header(PUBLIC_ORIGIN_HEADER) ?? new URL(c.req.url).origin;
+/** Invite link on the trusted origin + admin base path; a misconfigured origin is a server fault, never a bad link. */
+function inviteUrl(c: Context<AppEnv>, token: string): string {
+  const url = inviteLink(c.env as never, requestOrigin(c), token);
+  if (!url) throw new AuthServerFaultError(undefined, { code: "INVITE_ORIGIN", stage: "invite", category: "configuration" });
+  return url;
+}
+/** Network key for rate limits: a keyed hash, never the raw address. */
+async function ipKeyOf(c: Context<AppEnv>): Promise<string> {
+  const s = authInit(c);
+  return ipBlockHashHex(loadAuthSecrets(c.env).throttleKey, s.ctx.ip);
+}
+/** Cap invite actions per hour. Over the cap = 429, nothing else changes. */
+async function inviteCap(db: Db, key: string, limit: number): Promise<void> {
+  if (!(await sendCap(db, key, limit, SEND_CAP_WINDOW))) throw new AuthLockedError(3600);
+}
 const json = async <T>(c: Context<AppEnv>): Promise<Partial<T>> =>
   (await c.req.json().catch(() => ({}))) as Partial<T>;
 
@@ -501,7 +521,7 @@ authRoute.get("/sessions", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireSession(c);
   const hashHex = await tokenHashHex(s.sessionToken!);
-  return c.json({ sessions: await listSessions(s.db, sess.userId, hashHex) });
+  return c.json({ user: { id: sess.userId, email: sess.email, role: sess.role }, sessions: await listSessions(s.db, sess.userId, hashHex) });
 }));
 
 // DELETE /auth/sessions/:sid -> end one of my sessions.
@@ -532,7 +552,19 @@ authRoute.post("/backup-codes/regenerate", async (c) => guarded(c, async () => {
 // POST /auth/device/accept/:token -> registers a pending device (sets __Host-did).
 authRoute.post("/device/accept/:token", async (c) => guarded(c, async () => {
   const s = authInit(c);
+  await inviteCap(s.db, `invite:accept:${await ipKeyOf(c)}`, INVITE_ACCEPT_PER_HOUR_IP);
   const out = await acceptDeviceInvite(s.db, c.req.param("token") ?? "", s.ctx.ua);
+  setDidCookie(c as never, out.deviceToken, DEVICE_TTL_SECS);
+  return c.json({ ok: true, device_id: out.deviceId });
+}));
+
+// POST /auth/device/accept {token} -> same, with the token in the BODY so it never reaches a URL log.
+// The invite page reads the token from the link's #fragment and posts it here.
+authRoute.post("/device/accept", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await inviteCap(s.db, `invite:accept:${await ipKeyOf(c)}`, INVITE_ACCEPT_PER_HOUR_IP);
+  const body = await json<{ token: string }>(c);
+  const out = await acceptDeviceInvite(s.db, typeof body.token === "string" ? body.token.slice(0, 200) : "", s.ctx.ua);
   setDidCookie(c as never, out.deviceToken, DEVICE_TTL_SECS);
   return c.json({ ok: true, device_id: out.deviceId });
 }));
@@ -543,15 +575,23 @@ authRoute.post("/device/accept/:token", async (c) => guarded(c, async () => {
 adminRoute.get("/devices", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireAdmin(c);
-  return c.json({ devices: await listDevices(s.db, sess.userId) });
+  const qp = c.req.query();
+  if (qp.scope === "all") {            // every administrator's devices, with owner, searched + paged on the server
+    return c.json(await listDevicesAdmin(s.db, {
+      q: qp.q, userId: qp.user_id,
+      limit: qp.limit ? Number(qp.limit) : undefined, offset: qp.offset ? Number(qp.offset) : undefined,
+    }));
+  }
+  return c.json({ user: { id: sess.userId, email: sess.email, role: sess.role }, devices: await listDevices(s.db, sess.userId) });
 }));
 
 // POST /admin/devices/invite -> single-use link for me (needs step-up).
 adminRoute.post("/devices/invite", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireStepUp(c);
+  await inviteCap(s.db, `invite:create:${sess.userId}`, INVITE_CREATE_PER_HOUR);
   const token = await createDeviceInvite(s.db, sess.userId, sess.userId);
-  return c.json({ ok: true, invite_url: `${origin(c)}/auth/device/accept/${token}` });
+  return c.json({ ok: true, invite_url: inviteUrl(c, token) });
 }));
 
 // POST /admin/users/:id/device-invite -> invite for another admin (not self).
@@ -562,8 +602,9 @@ adminRoute.post("/users/:id/device-invite", async (c) => guarded(c, async () => 
   if (!target || target.role !== "admin" || target.id === sess.userId) {
     throw new AuthRejectError("user");
   }
+  await inviteCap(s.db, `invite:create:${sess.userId}`, INVITE_CREATE_PER_HOUR);
   const token = await createDeviceInvite(s.db, target.id, sess.userId);
-  return c.json({ ok: true, invite_url: `${origin(c)}/auth/device/accept/${token}` });
+  return c.json({ ok: true, invite_url: inviteUrl(c, token) });
 }));
 
 // DELETE /admin/devices/:id -> revoke (refuses my last active device).
@@ -571,6 +612,72 @@ adminRoute.delete("/devices/:id", async (c) => guarded(c, async () => {
   const s = authInit(c);
   const sess = await requireStepUp(c);
   await revokeDevice(s.db, c.req.param("id") ?? "", sess.userId, false);
+  return c.json({ ok: true });
+}));
+
+// ---- administrator views of sessions / devices (all users, owner shown, server-side search + paging) ----
+const pageOpts = (qp: Record<string, string>) => ({
+  q: qp.q, userId: qp.user_id,
+  limit: qp.limit ? Number(qp.limit) : undefined, offset: qp.offset ? Number(qp.offset) : undefined,
+});
+
+// GET /admin-v2/sessions?q=&user_id=&limit=&offset= -> live sessions of every user (admin only).
+adminRoute.get("/sessions", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await requireAdmin(c);
+  return c.json(await listSessionsAdmin(s.db, pageOpts(c.req.query()), await tokenHashHex(s.sessionToken!)));
+}));
+
+// GET /admin-v2/users/:id/sessions and /devices -> one user's, for the users page panels (admin only).
+adminRoute.get("/users/:id/sessions", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await requireAdmin(c);
+  const id = c.req.param("id") ?? "";
+  if (!UUID_RE.test(id)) throw new AuthRejectError("user");
+  return c.json(await listSessionsAdmin(s.db, { ...pageOpts(c.req.query()), userId: id }, await tokenHashHex(s.sessionToken!)));
+}));
+adminRoute.get("/users/:id/devices", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  await requireAdmin(c);
+  const id = c.req.param("id") ?? "";
+  if (!UUID_RE.test(id)) throw new AuthRejectError("user");
+  return c.json(await listDevicesAdmin(s.db, { ...pageOpts(c.req.query()), userId: id }));
+}));
+
+// DELETE /admin-v2/users/:id/sessions/:sid -> end one session of that user (step-up). Your own current
+// session is refused here: signing yourself out is /auth/logout.
+adminRoute.delete("/users/:id/sessions/:sid", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireStepUp(c);
+  const sid = c.req.param("sid") ?? "";
+  if (sid === sess.sid) throw new AuthForbiddenError("Use sign out for your own session");
+  await revokeSessionOfUser(s.db, c.req.param("id") ?? "", sid);
+  logWarn("admin_session_revoked", { by: sess.userId, user: c.req.param("id") ?? "" });
+  return c.json({ ok: true });
+}));
+
+// POST /admin-v2/users/:id/sessions/revoke-all -> end every session of that user (step-up). For yourself it
+// keeps the session you are using.
+adminRoute.post("/users/:id/sessions/revoke-all", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireStepUp(c);
+  const id = c.req.param("id") ?? "";
+  if (!UUID_RE.test(id)) throw new AuthRejectError("user");
+  const n = id === sess.userId
+    ? await revokeOtherSessions(s.db, id, await tokenHashHex(s.sessionToken!))
+    : await revokeAllSessions(s.db, id);
+  logWarn("admin_sessions_revoked", { by: sess.userId, user: id, count: n });
+  return c.json({ ok: true, revoked: n });
+}));
+
+// DELETE /admin-v2/users/:id/devices/:deviceId -> untrust one of that user's devices (step-up); its sessions end.
+adminRoute.delete("/users/:id/devices/:deviceId", async (c) => guarded(c, async () => {
+  const s = authInit(c);
+  const sess = await requireStepUp(c);
+  const id = c.req.param("id") ?? "", deviceId = c.req.param("deviceId") ?? "";
+  if (!(await deviceBelongsTo(s.db, id, deviceId))) throw new AuthRejectError("device");
+  await revokeDevice(s.db, deviceId, id, id !== sess.userId);
+  logWarn("admin_device_revoked", { by: sess.userId, user: id, device: deviceId });
   return c.json({ ok: true });
 }));
 

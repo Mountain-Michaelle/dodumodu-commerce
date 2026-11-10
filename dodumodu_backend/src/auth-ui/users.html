@@ -7,76 +7,109 @@
   <link rel="stylesheet" href="/auth-ui/auth.css">
 </head>
 <body>
-  <main class="card">
-    <h1>Administrative users</h1>
-    <div class="links">
-      <a href="/admin/">Back</a>
-    </div>
+  <main class="page-shell" data-page="users">
+    <header class="page-header">
+      <div class="header-info">
+        <h1>Administrative users</h1>
+        <p class="page-subtitle">Create accounts, set roles and permissions, and review each user's sessions and devices.</p>
+      </div>
+      <div class="header-actions">
+        <a href="/admin/" class="btn-link" aria-label="Back to admin console">&larr; Back to console</a>
+      </div>
+    </header>
+
     <!-- Lost-email recovery requests (people who typed their username on the login page) -->
-    <section id="requests-panel" class="once" hidden>
-      <div class="links">
+    <section id="requests-panel" class="panel" hidden>
+      <div class="panel-head">
         <h2>Lost-email requests</h2>
-        <button class="ghost small-btn" id="requests-refresh" type="button">Refresh</button>
+        <button class="btn-ghost btn-sm" id="requests-refresh" type="button">Refresh</button>
       </div>
       <p class="muted small">Contact the person through details you already hold, then mark the request resolved.</p>
       <div id="requests-list" class="once"></div>
       <p class="note" id="requests-note" hidden></p>
     </section>
-    <form id="create-form" class="user-create">
-      <label for="create-email">Email</label>
-      <input id="create-email" type="email" autocomplete="email" required />
-      <label for="create-role">Role</label>
-      <select id="create-role">
-        <option value="general">General staff</option>
-        <option value="mono">Mono staff</option>
-        <option value="admin">Administrator</option>
-      </select>
-      <button class="small-btn" id="create-user" type="submit">Create user</button>
-    </form>
-    <div class="links user-filters">
-      <input id="search" type="search" placeholder="Search users" aria-label="Search users" />
+
+    <section class="panel">
+      <form id="create-form" class="user-create">
+        <div>
+          <label for="create-email">Email</label>
+          <input id="create-email" type="email" autocomplete="email" required />
+        </div>
+        <div>
+          <label for="create-role">Role</label>
+          <select id="create-role">
+            <option value="general">General staff</option>
+            <option value="mono">Mono staff</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="create-user" type="submit">Create user</button>
+      </form>
+    </section>
+
+    <div class="toolbar user-filters">
+      <input class="search" id="search" type="search" placeholder="Search name, email, username…" aria-label="Search users" autocomplete="off" />
       <select id="role-filter" aria-label="Filter by role">
         <option value="">All roles</option>
         <option value="admin">Administrators</option>
         <option value="general">General staff</option>
         <option value="mono">Mono staff</option>
       </select>
+      <span class="muted small" id="count" aria-live="polite"></span>
     </div>
-    <div id="list" class="once"><span class="muted">Loading…</span></div>
-    <section id="access-panel" class="once" hidden>
-      <div class="links">
+
+    <p class="note" id="note" hidden></p>
+    <div id="user-invite-box" class="once" hidden></div>
+
+    <section class="table-section">
+      <div class="table-scroll">
+        <div class="table-inner">
+          <div class="table-head" role="row">
+            <div class="th">User</div>
+            <div class="th">Role</div>
+            <div class="th">Status</div>
+            <div class="th">Authenticator</div>
+            <div class="th right">Actions</div>
+          </div>
+          <div class="table-body" id="list" aria-live="polite"><div class="state">Loading…</div></div>
+        </div>
+      </div>
+      <div class="pager" id="pager" hidden></div>
+    </section>
+
+    <section id="access-panel" class="panel" hidden>
+      <div class="panel-head">
         <h2 id="access-user"></h2>
-        <button class="ghost small-btn" id="access-close" type="button">Close</button>
+        <button class="btn-ghost btn-sm" id="access-close" type="button">Close</button>
       </div>
       <p class="muted small">Changes replace the user's explicit grants. Role defaults and admin-only restrictions are enforced by the server.</p>
       <form id="access-form">
         <div id="permission-list"></div>
-        <button class="small-btn" type="submit">Save permissions</button>
+        <button class="btn-primary" type="submit">Save permissions</button>
       </form>
     </section>
-    <p class="note" id="note" hidden></p>
 
     <!-- Sessions panel (loaded on demand for the selected user) -->
-    <section id="sessions-panel" class="once" hidden>
-      <div class="links">
+    <section id="sessions-panel" class="panel" hidden>
+      <div class="panel-head">
         <h2 id="sessions-user"></h2>
-        <button class="ghost small-btn" id="sessions-close" type="button">Close</button>
+        <button class="btn-ghost btn-sm" id="sessions-close" type="button">Close</button>
       </div>
       <p class="muted small" id="sessions-desc">Authentication sessions for <span id="sessions-user-email"></span>.</p>
       <div id="sessions-loading" class="once" hidden><span class="muted">Loading sessions…</span></div>
       <div id="sessions-list" class="once"></div>
       <div id="sessions-empty" class="once" hidden><p class="muted small">No active sessions.</p></div>
-      <div id="sessions-actions" class="links" style="margin-top:12px">
-        <button class="danger small-btn" id="sessions-revoke-all" type="button">Revoke all sessions</button>
+      <div id="sessions-actions" class="links">
+        <button class="btn-danger btn-sm" id="sessions-revoke-all" type="button">Revoke all sessions</button>
       </div>
       <p class="note" id="sessions-note" hidden></p>
     </section>
 
     <!-- Devices panel (loaded on demand for the selected user) -->
-    <section id="devices-panel" class="once" hidden>
-      <div class="links">
+    <section id="devices-panel" class="panel" hidden>
+      <div class="panel-head">
         <h2 id="devices-user"></h2>
-        <button class="ghost small-btn" id="devices-close" type="button">Close</button>
+        <button class="btn-ghost btn-sm" id="devices-close" type="button">Close</button>
       </div>
       <p class="muted small" id="devices-desc">Recognized devices for <span id="devices-user-email"></span>.</p>
       <div id="devices-loading" class="once" hidden><span class="muted">Loading devices…</span></div>
@@ -84,8 +117,8 @@
       <div id="devices-empty" class="once" hidden><p class="muted small">No recognized devices.</p></div>
       <p class="note" id="devices-note" hidden></p>
     </section>
-
   </main>
+  <script src="/auth-ui/admin-ui.js" defer></script>
   <script src="/auth-ui/users.js" defer></script>
 </body>
 </html>
