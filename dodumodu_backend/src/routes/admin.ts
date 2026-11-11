@@ -35,6 +35,7 @@ import {
 } from "../config/adminBase";
 import { parseListQuery, pageMeta } from "../shared/listQuery";
 import { requirePermissionOf } from "./admin/helpers";
+import { mayCall, legacyFromGrants } from "../auth/route-access";
 import { categoryRoutes } from "./admin/categories";
 import { productRoutes } from "./admin/products";
 import { orderRoutes } from "./admin/orders";
@@ -51,8 +52,6 @@ import {
   ADMIN_DEVICES_HTML,
   ADMIN_SESSIONS_JS,
   ADMIN_DEVICES_JS,
-  ADMIN_USERS_HTML,
-  ADMIN_USERS_JS,
   ADMIN_UI_JS,
   ADMIN_DEVICE_ACCEPT_HTML,
   ADMIN_DEVICE_ACCEPT_JS,
@@ -105,7 +104,6 @@ const PUBLIC_PATHS = [
   "/assets/auth.js",
   "/assets/sessions.js",
   "/assets/devices.js",
-  "/assets/users.js",
   "/assets/device-accept.js",
   "/assets/admin-ui.js",
   "/device/accept",
@@ -172,11 +170,18 @@ adminRoute.use("*", async (c, next) => {
         if (!getSidToken(c as never)) throw new UnauthorizedError("no_session");   // anonymous: no database work
         const sess = await loadSession(c as never);
         if (!sess) throw new UnauthorizedError("no_session");
-        if (sess.role !== "admin") throw new ForbiddenError(PERMISSIONS.ordersRead);   // staff use /admin-v2, which scopes rows
+        // Non-admin operators are admitted, but only to the routes their grants allow (route-access.ts, default deny).
+        // Every signed-in operator loads the console shell itself; what it then lets them open is the table's decision.
+        const base = adminBasePath({ ENVIRONMENT: c.env.ENVIRONMENT, ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH }) ?? "/admin";
+        const flat = c.req.path.replace(/\/+$/, "");
+        const isShell = c.req.method === "GET" && (flat === "" || flat === base);   // the namespace may already be stripped from the path
+        if (!isShell && !mayCall(sess.role, sess.perms, c.req.method, c.req.path)) throw new ForbiddenError(PERMISSIONS.ordersRead);
         if (!isSameOriginWrite(c.req.method, c.req.header("origin"), c.req.header("host"))) {
           throw new ForbiddenError(PERMISSIONS.ordersWrite);                          // cookie-authenticated writes must come from this site
         }
-        principal = resolvePrincipal(sess.email, c.env.ADMIN_OPERATORS);
+        principal = sess.role === "admin"
+          ? { ...resolvePrincipal(sess.email, c.env.ADMIN_OPERATORS), role: "admin" }
+          : { email: sess.email.trim().toLowerCase(), permissions: legacyFromGrants(sess.role, sess.perms), role: sess.role };
         c.set("authType", "session");
       }
     }
@@ -237,10 +242,6 @@ adminRoute.get("/assets/devices.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(namespaceJs(ADMIN_DEVICES_JS, c.env), 200);
 });
-adminRoute.get("/assets/users.js", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(namespaceJs(ADMIN_USERS_JS, c.env), 200);
-});
 adminRoute.get("/assets/admin-ui.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   return c.body(namespaceJs(ADMIN_UI_JS, c.env), 200);
@@ -293,8 +294,14 @@ adminRoute.get("/sessions", (c) => c.html(namespaceHtml(ADMIN_SESSIONS_HTML, c.e
 adminRoute.get("/sessions/", (c) => c.html(namespaceHtml(ADMIN_SESSIONS_HTML, c.env), 200));
 adminRoute.get("/devices", (c) => c.html(namespaceHtml(ADMIN_DEVICES_HTML, c.env), 200));
 adminRoute.get("/devices/", (c) => c.html(namespaceHtml(ADMIN_DEVICES_HTML, c.env), 200));
-adminRoute.get("/users", (c) => c.html(namespaceHtml(ADMIN_USERS_HTML, c.env), 200));
-adminRoute.get("/users/", (c) => c.html(namespaceHtml(ADMIN_USERS_HTML, c.env), 200));
+// The standalone users page is retired: Users & access is the console's #users section. Old links and
+// bookmarks land there (an anonymous visitor is sent to sign-in first by the dispatcher in app.ts).
+const toConsoleUsers = (c: { env: Env; redirect: (to: string, status: 302) => Response }) => {
+  const active = adminBasePath({ ENVIRONMENT: c.env.ENVIRONMENT, ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH });
+  return c.redirect(`${active ?? "/admin"}/#users`, 302);
+};
+adminRoute.get("/users", (c) => toConsoleUsers(c));
+adminRoute.get("/users/", (c) => toConsoleUsers(c));
 
 /**
  * The one place a thrown error becomes an HTTP response.

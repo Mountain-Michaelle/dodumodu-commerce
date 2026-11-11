@@ -174,7 +174,6 @@ body:has(.page-shell) { display: block; align-items: normal; justify-content: no
 /* Per-page column templates (header + rows read the same variable) */
 [data-page="sessions"] { --cols: minmax(210px, 2fr) minmax(180px, 1.6fr) minmax(190px, 1fr) minmax(110px, 0.8fr) 190px; --min: 920px; }
 [data-page="devices"]  { --cols: minmax(210px, 2fr) minmax(170px, 1.5fr) 110px 120px minmax(190px, 1fr) 190px; --min: 1040px; }
-[data-page="users"]    { --cols: minmax(230px, 2.2fr) 130px 100px 110px minmax(300px, 2.4fr); --min: 960px; }
 .sessions-scope { display: none; }
 .sessions-scope.is-on { display: inline-block; }
 

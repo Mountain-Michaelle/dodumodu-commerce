@@ -116,12 +116,13 @@ export function mountAdminPages(app: Hono<{ Bindings: Env }>, backendRoot: strin
   app.get("/admin/sessions/", page(uiRoot, "sessions.html", "session"));
   app.get("/admin/devices", page(uiRoot, "devices.html", "admin"));
   app.get("/admin/devices/", page(uiRoot, "devices.html", "admin"));
-  app.get("/admin/users", page(uiRoot, "users.html", "admin"));
-  app.get("/admin/users/", page(uiRoot, "users.html", "admin"));
+  // The standalone users page is gone: Users & access lives in the console.
+  app.get("/admin/users", (c) => c.redirect("/admin/#users", 302));
+  app.get("/admin/users/", (c) => c.redirect("/admin/#users", 302));
 
   // Public assets (JS/CSS only — fixed map, no traversal). Safe to expose:
   // no secrets in client code; sessions.js/devices.js render only via guarded APIs.
-  for (const name of ["auth.js", "auth.css", "qr.js", "qr-logo.mjs", "sessions.js", "devices.js", "users.js"]) {
+  for (const name of ["auth.js", "auth.css", "qr.js", "qr-logo.mjs", "sessions.js", "devices.js"]) {
     app.get(`/admin/assets/${name}`, asset(name));
   }
 }

@@ -165,7 +165,7 @@ export function aggregateOrdersByMonth(
   return result;
 }
 
-async function calculateMetrics(db: Db, months: string[]): Promise<Map<string, KpiMetrics>> {
+async function calculateMetrics(db: Db, months: string[], assignedTo: string | null = null): Promise<Map<string, KpiMetrics>> {
   const result = new Map(months.map((month) => [month, emptyMetrics()]));
   if (months.length === 0) return result;
 
@@ -173,10 +173,10 @@ async function calculateMetrics(db: Db, months: string[]): Promise<Map<string, K
   const from = ranges[0].from;
   const to = ranges[ranges.length - 1].to;
   const [ordersInRange, activePhones, deliveryEvents, currentDeliveries] = await Promise.all([
-    monthlyKpiRepo.ordersBetween(db, from, to),
+    monthlyKpiRepo.ordersBetween(db, from, to, assignedTo),
     spamRepo.activePhoneNorms(db),
-    monthlyKpiRepo.deliveryEventsBetween(db, from, to),
-    monthlyKpiRepo.currentlyDeliveredBetween(db, from, to),
+    monthlyKpiRepo.deliveryEventsBetween(db, from, to, assignedTo),
+    monthlyKpiRepo.currentlyDeliveredBetween(db, from, to, assignedTo),
   ]);
   const selectedMonths = new Set(months);
   const scopedOrders = ordersInRange.filter((order) => selectedMonths.has(lagosMonthKey(order.createdAt)));
@@ -301,6 +301,21 @@ export const monthlyKpiService = {
         return reportFromSnapshot(snapshot);
       })
       .filter((row): row is MonthlyKpiReport => row !== null);
+  },
+
+  /**
+   * The same report for ONE operator: only orders assigned to them, calculated live. It never reads or writes
+   * the shared monthly snapshots, because those are whole-business figures and persisting a person's slice
+   * there would corrupt them.
+   */
+  async reportForAssignee(db: Db, assignedTo: string, monthCount: number, now = new Date()): Promise<MonthlyKpiReport[]> {
+    const earliest = await monthlyKpiRepo.earliestOrder(db, assignedTo);
+    const months = monthKeysClamped(monthCount, now, earliest ? lagosMonthKey(earliest) : null);
+    const currentMonth = lagosMonthKey(now);
+    const metrics = await calculateMetrics(db, months, assignedTo);
+    return months
+      .map((month) => ({ ...metrics.get(month)!, month, current: month === currentMonth, snapshot: null }))
+      .filter((row) => row.current || Number(row.totalOrders) > 0);
   },
 
   async closePreviousMonth(db: Db, now = new Date()) {

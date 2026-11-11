@@ -185,6 +185,9 @@ export const orders = pgTable("orders", {
   // NULL means "not yet assigned".
   assignedTo: text("assigned_to"),
   assignedAt: timestamp("assigned_at"),
+  // Migration 0028. The operator (email) who entered this order by hand in the admin console.
+  // NULL = placed by a customer through the storefront.
+  createdBy: text("created_by"),
   // Soft delete (migration 0018). NULL means live; a timestamp means the order
   // was deleted and is hidden from the list unless an operator filters for it.
   // Never a hard DELETE: a delivered order is the record a parcel arrived, and

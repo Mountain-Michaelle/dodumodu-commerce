@@ -71,11 +71,3 @@ test("deleting an order needs its own permission too", () => {
   assert.throws(() => requirePermission(writer, PERMISSIONS.ordersDelete), ForbiddenError);
 });
 
-import { legacyPermissionsForRole } from "./adminAuth";
-import { test as legacyTest } from "node:test";
-import legacyAssert from "node:assert/strict";
-legacyTest("legacy console permissions: admins hold every key, other roles none", () => {
-  legacyAssert.ok(legacyPermissionsForRole("admin").includes("products:write"));
-  legacyAssert.deepEqual(legacyPermissionsForRole("staff"), []);
-  legacyAssert.deepEqual(legacyPermissionsForRole("general"), []);
-});

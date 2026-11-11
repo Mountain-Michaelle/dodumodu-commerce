@@ -69,6 +69,8 @@ export const orderService = {
       ip?: string | null;
       deviceId?: string | null;
       clientKind?: string | null;
+      /** The operator who entered this order by hand (admin console). Null/absent for a storefront order. */
+      createdBy?: string | null;
     } = {},
   ): Promise<{ order: OrderRow; checkoutUrl?: string }> {
     // Fast path for an obvious retry. This is an optimization, NOT the protection —
@@ -195,6 +197,7 @@ export const orderService = {
         amount,
         reference,
         status: input.paymentMethod === "cod" ? "confirmed_cod" : "awaiting_payment",
+        createdBy: options.createdBy ?? null,
       });
     } catch (err: unknown) {
       // Two requests raced past the `existing` check above at the same instant.
@@ -210,7 +213,7 @@ export const orderService = {
     // into a 500 (the customer would retry and be answered with the same order anyway,
     // but would first be told it failed): log it for repair and carry on.
     try {
-      await ordersRepo.writeStatusHistory(db, order.id, null, order.status, "system");
+      await ordersRepo.writeStatusHistory(db, order.id, null, order.status, options.createdBy ? `admin:${options.createdBy}` : "system");
     } catch (err) {
       console.error(JSON.stringify({
         event: "order_history_write_failed",

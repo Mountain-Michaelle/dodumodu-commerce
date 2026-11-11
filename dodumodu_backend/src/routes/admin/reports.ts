@@ -5,6 +5,7 @@ import { PERMISSIONS, type Principal } from "../../auth/adminAuth";
 import { monthlyKpiService } from "../../services/monthlyKpiService";
 import { visitorAnalyticsService } from "../../services/visitorAnalyticsService";
 import { requirePermissionOf } from "./helpers";
+import { orderScope } from "../../auth/orderScope";
 
 export const reportRoutes = new Hono<{ Bindings: Env; Variables: { principal: Principal } }>();
 
@@ -19,12 +20,12 @@ reportRoutes.get("/monthly-kpis", async (c) => {
   }
 
   const principal = c.get("principal");
-  const reports = await monthlyKpiService.report(
-    createDb(c.env.DATABASE_URL),
-    monthCount,
-    new Date(),
-    principal.email,
-  );
+  const db = createDb(c.env.DATABASE_URL);
+  // A mono operator sees the report for the orders assigned to them, never the business-wide one.
+  const scope = orderScope({ role: principal.role ?? "admin", email: principal.email });
+  const reports = scope.restricted
+    ? await monthlyKpiService.reportForAssignee(db, principal.email, monthCount)
+    : await monthlyKpiService.report(db, monthCount, new Date(), principal.email);
   return c.json({
     reports,
     collectionAvailable: false,
@@ -50,6 +51,11 @@ const MAX_DAILY_SPAN_DAYS = 93;
 
 reportRoutes.get("/visitors", async (c) => {
   requirePermissionOf(c, PERMISSIONS.ordersRead);
+  // Site-wide traffic is part of the general report: admin and general operators only.
+  const viewer = c.get("principal");
+  if (orderScope({ role: viewer.role ?? "admin", email: viewer.email }).restricted) {
+    return c.json({ error: { code: "FORBIDDEN", message: "You do not have permission to do that" } }, 403);
+  }
 
   const from = c.req.query("from");
   const to = c.req.query("to");

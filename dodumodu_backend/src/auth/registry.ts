@@ -118,6 +118,11 @@ export const REGISTRY: readonly RegistryEntry[] = [
   priv("products.delete", "products", "Delete product", ["products.view"], {
     adminOnly: true, roles: ["admin"], important: true, notify: "instant", sensitive: true,
   }),
+  sec("media.view", "media", "View media", { roles: ["admin", "general"] }),
+  priv("media.add", "media", "Upload media", ["media.view"], { roles: ["admin", "general"] }),
+  priv("media.delete", "media", "Delete media", ["media.view"], {
+    adminOnly: true, roles: ["admin"], important: true, notify: "instant", sensitive: true,
+  }),
   sec("categories.view", "categories", "View categories", { roles: ["admin", "general"] }),
   priv("categories.add", "categories", "Add category", ["categories.view"], { roles: ["admin", "general"] }),
   priv("categories.change", "categories", "Edit category", ["categories.view"], { roles: ["admin", "general"] }),
@@ -137,6 +142,7 @@ export const REGISTRY: readonly RegistryEntry[] = [
   priv("abuse.delete", "abuse", "Delete abuse record", ["abuse.view"], {
     adminOnly: true, roles: ["admin"], important: true, notify: "instant", sensitive: true,
   }),
+  sec("settings.manage", "settings", "Discount tiers and payment rules", { adminOnly: true, roles: ["admin"] }),
   sec("reports.view", "reports", "View reports", { scoped: true }),
   priv("reports.export", "reports", "Export reports", ["reports.view"], {
     scoped: true, important: true, notify: "digest",

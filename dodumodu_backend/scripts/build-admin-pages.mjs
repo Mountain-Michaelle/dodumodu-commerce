@@ -87,9 +87,6 @@ const out =
   lit('ADMIN_DEVICES_HTML', read('devices.html')
     .replaceAll('/auth-ui/', '/admin/assets/')) +
   lit('ADMIN_DEVICES_JS', read('devices.js')) +
-  lit('ADMIN_USERS_HTML', read('users.html')
-    .replaceAll('/auth-ui/', '/admin/assets/')) +
-  lit('ADMIN_USERS_JS', read('users.js')) +
   lit('ADMIN_UI_JS', read('admin-ui.js')) +
   lit('ADMIN_DEVICE_ACCEPT_HTML', read('device-accept.html')
     .replaceAll('/auth-ui/', '/admin/assets/')) +
@@ -100,4 +97,4 @@ const out =
 writeFileSync(OUT, out)
 
 console.log(`built ${OUT}`)
-console.log(`  admin login page, console shell, sessions, devices, users, assets`)
+console.log(`  admin login page, console shell, sessions, devices, assets`)
