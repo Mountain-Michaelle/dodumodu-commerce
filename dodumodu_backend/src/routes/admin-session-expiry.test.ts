@@ -379,10 +379,10 @@ test("only a lost session (401) sends the page to sign-in; 403 never does, in th
   const helper = await fs.readFile("src/auth-ui/admin-ui.js", "utf8");
   assert.ok(helper.includes("if (res.status === 401)"), "admin-ui.js must redirect on 401");
   assert.ok(!/status === 401 \|\| [a-z.]*status === 403/.test(helper), "admin-ui.js must not redirect on 403");
-  for (const f of ["sessions.js", "devices.js", "users.js"]) {
+  for (const f of ["sessions.js", "devices.js"]) {
     const js = await fs.readFile(`src/auth-ui/${f}`, "utf8");
     assert.ok(!/status === 401 \|\| [a-z.]*status === 403/.test(js), `${f} must not redirect on 403`);
-    assert.ok(!/location\.href\s*=/.test(js.replace(/\/\/.*$/gm, "")) || f === "users.js", `${f} sends people to sign-in only through the helper`);
+    assert.ok(!/location\.href\s*=/.test(js.replace(/\/\/.*$/gm, "")), `${f} sends people to sign-in only through the helper`);
   }
 });
 

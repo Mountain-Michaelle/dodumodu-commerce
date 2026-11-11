@@ -12,6 +12,7 @@ import { parseListQuery, pageMeta, normalizeSearch, likePattern } from "../../sh
 import { orderListFiltersSchema } from "../../validation/adminSchema";
 import { PERMISSIONS } from "../../auth/adminAuth";
 import { orderCsv } from "./csv";
+import { orderScope } from "../../auth/orderScope";
 import { requirePermissionOf, readBody, actorOf } from "./helpers";
 // Spam moderation reads only. Flagging and reverting are POSTs on /admin/spam
 // behind their own permission checks; nothing on this router can create or clear
@@ -113,6 +114,27 @@ async function withSpamFlags(db: Db, orders: { id: number; phone: string }[]) {
 export function orderRoutes() {
   const route = new Hono<{ Bindings: Env; Variables: { principal: Principal } }>();
 
+  // Row-level scope. A mono operator only ever sees orders assigned to them; everything else (admin, general,
+  // the Access operator) is unrestricted. Applied to lists below and, here, to every single-order route so an
+  // out-of-scope order answers 404 exactly like one that does not exist.
+  const scopeOf = (c: { get: (k: "principal") => Principal }) => {
+    const p = c.get("principal");
+    return orderScope({ role: p.role ?? "admin", email: p.email });
+  };
+  const inOrderScope = async (c: Parameters<typeof scopeOf>[0] & { req: { param: (k: string) => string }; env: Env }, next: () => Promise<void>) => {
+    const id = Number(c.req.param("id"));
+    const scope = scopeOf(c);
+    if (scope.restricted && Number.isInteger(id)) {
+      const found = await ordersRepo.findById(createDb(c.env.DATABASE_URL), id);
+      if (!found || !scope.allows(found.assignedTo ?? null)) {
+        return Response.json({ error: { code: "NOT_FOUND", message: "Order not found" } }, { status: 404 });
+      }
+    }
+    await next();
+  };
+  route.use("/:id", inOrderScope as never);
+  route.use("/:id/*", inOrderScope as never);
+
   route.get("/", async (c) => {
     requirePermissionOf(c, PERMISSIONS.ordersRead);
     const query = parseListQuery(c.req.query(), {
@@ -133,6 +155,7 @@ export function orderRoutes() {
       sort: query.sort,
       limit: query.limit,
       offset: query.offset,
+      scope: scopeOf(c).sqlWhere(),
     });
 
 
@@ -196,6 +219,7 @@ export function orderRoutes() {
       sort: query.sort,
       limit: query.limit,
       offset: query.offset,
+      scope: scopeOf(c).sqlWhere(),
     });
     // Built server-side so the escaping rule lives in exactly one place; the
     // browser's only job is to copy the exact characters it is handed.

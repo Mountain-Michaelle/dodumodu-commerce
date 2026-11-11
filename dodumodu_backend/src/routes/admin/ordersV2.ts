@@ -32,7 +32,12 @@ import {
 } from "../../services/orderCrmService";
 import { parseListQuery, pageMeta, normalizeSearch, likePattern } from "../../shared/listQuery";
 import { orderListFiltersSchema } from "../../validation/adminSchema";
+import { orderSchema } from "../../validation/orderSchema";
 import { orderCsv } from "./csv";
+import { orderService, ProductNotFoundError, PackageNotFoundError, InvalidQuantityError, PaymentUnavailableError } from "../../services/orderService";
+import { CodNotAvailableError } from "../../services/codPolicyService";
+import { productsRepo } from "../../data/productsRepo";
+import { knownStateNames, isKnownState, displayState } from "../../services/nigeriaStates";
 import * as orderEvidence from "../../abuse/orderEvidence";
 import * as spamRepo from "../../abuse/spamRepo";
 import { normalizePhone } from "../../shared/normalizePhone";
@@ -173,6 +178,63 @@ function versionOf(body: { expectedUpdatedAt?: string | null }): Date | null {
 }
 
 export const orderV2Routes = new Hono<AppEnv>();
+
+// Manual order entry (admin console "+ New order"). Authorised by the orders.add privilege, so it is a
+// per-user switch like every other section. Same rules as a storefront order: the server prices it, applies
+// the pay-on-delivery policy and delivery-fee rules (orderService.createOrder); nothing is trusted from the
+// form except the product, package, quantity and customer fields.
+const manualOrderSchema = orderSchema.omit({ turnstileToken: true, idempotencyKey: true }).extend({
+  // Sent by the form so a double-click cannot create two orders; generated here when absent.
+  idempotencyKey: z.string().uuid().optional(),
+  state: orderSchema.shape.state.refine(isKnownState, "Choose a state from the list"),
+});
+
+// GET /admin-v2/orders/form-options — what the "+ New order" modal needs, behind orders.add (not products.view,
+// so an operator who may enter orders does not also get the product catalogue admin).
+orderV2Routes.get("/form-options", async (c) => guarded(c, async () => {
+  await guard({ perm: "orders.add" })(c);
+  const all = await productsRepo.listAll(createDb(c.env.DATABASE_URL));
+  return c.json({
+    products: all.filter((p) => p.active).map((p) => ({
+      id: p.id, name: p.name, price: p.price,
+      packageOptions: Array.isArray(p.packageOptions) ? p.packageOptions : [],
+    })),
+    states: knownStateNames(),
+    deliveryDates: [
+      { value: "today", label: "Today" }, { value: "tomorrow", label: "Tomorrow" },
+      { value: "next_tomorrow", label: "Day after tomorrow" },
+    ],
+    paymentMethods: [{ value: "cod", label: "Pay on delivery" }, { value: "pay_now", label: "Pay now (online)" }],
+  });
+}));
+
+// POST /admin-v2/orders — create an order by hand. The order records who entered it (created_by). An operator
+// restricted to their own orders is assigned the order they create, otherwise it would vanish from their list.
+orderV2Routes.post("/", async (c) => guarded(c, async () => {
+  const sess = await guard({ perm: "orders.add" })(c);
+  const body = await readJson(c, manualOrderSchema, "order");
+  const db = createDb(c.env.DATABASE_URL);
+  try {
+    const { order, checkoutUrl } = await orderService.createOrder(
+      db, c.env as never,
+      { ...body, idempotencyKey: body.idempotencyKey ?? crypto.randomUUID(), state: displayState(body.state), turnstileToken: "" },
+      { createdBy: sess.email },
+    );
+    let assigned = order.assignedTo ?? null;
+    if (orderScope(sess).restricted && assigned !== sess.email) {
+      await orderCrmService.assign(db, [order.id], sess.email, sess.email, "created by assignee");
+      assigned = (await ordersRepo.findById(db, order.id))?.assignedTo ?? null;
+    }
+    return c.json({ order: { ...order, assignedTo: assigned }, checkoutUrl, visibleToCreator: !orderScope(sess).restricted || assigned === sess.email }, 201);
+  } catch (e) {
+    if (e instanceof ProductNotFoundError) throw new ValidationError("Check the highlighted fields", { productId: ["Choose an active product"] });
+    if (e instanceof PackageNotFoundError) throw new ValidationError("Check the highlighted fields", { packageId: ["Choose a package from the list"] });
+    if (e instanceof InvalidQuantityError) throw new ValidationError("Check the highlighted fields", { quantity: [e.message] });
+    if (e instanceof CodNotAvailableError) throw new ValidationError("Check the highlighted fields", { paymentMethod: [e.message] });
+    if (e instanceof PaymentUnavailableError) throw new ValidationError("Check the highlighted fields", { paymentMethod: [e.message] });
+    throw e;
+  }
+}));
 
 // GET /admin-v2/orders — readout list. Same shape as the v1 list; the registry
 // guard carries the authorization.

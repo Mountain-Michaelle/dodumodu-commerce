@@ -1,9 +1,9 @@
-import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import type { Db } from "../db";
 import { monthlyKpiSnapshots, orders, orderStatusHistory } from "../schema";
 
 export const monthlyKpiRepo = {
-  async ordersBetween(db: Db, from: Date, to: Date) {
+  async ordersBetween(db: Db, from: Date, to: Date, assignedTo: string | null = null) {
     return db.select({
       id: orders.id,
       reference: orders.reference,
@@ -18,11 +18,11 @@ export const monthlyKpiRepo = {
       productId: orders.productId,
       quantity: orders.quantity,
     }).from(orders)
-      .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to)))
+      .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to), assignedTo ? eq(orders.assignedTo, assignedTo) : undefined))
       .orderBy(orders.createdAt, orders.id);
   },
 
-  async deliveryEventsBetween(db: Db, from: Date, to: Date) {
+  async deliveryEventsBetween(db: Db, from: Date, to: Date, assignedTo: string | null = null) {
     return db.select({
       orderId: orderStatusHistory.orderId,
       createdAt: orderStatusHistory.createdAt,
@@ -31,10 +31,13 @@ export const monthlyKpiRepo = {
         eq(orderStatusHistory.newStatus, "delivered"),
         gte(orderStatusHistory.createdAt, from),
         lt(orderStatusHistory.createdAt, to),
+        assignedTo
+          ? sql`${orderStatusHistory.orderId} IN (SELECT id FROM orders WHERE assigned_to = ${assignedTo})`
+          : undefined,
       ));
   },
 
-  async currentlyDeliveredBetween(db: Db, from: Date, to: Date) {
+  async currentlyDeliveredBetween(db: Db, from: Date, to: Date, assignedTo: string | null = null) {
     return db.select({
       id: orders.id,
       deliveredAt: orders.deliveredAt,
@@ -43,14 +46,16 @@ export const monthlyKpiRepo = {
         eq(orders.status, "delivered"),
         gte(orders.deliveredAt, from),
         lt(orders.deliveredAt, to),
+        assignedTo ? eq(orders.assignedTo, assignedTo) : undefined,
       ));
   },
 
-  async earliestOrder(db: Db) {
+  async earliestOrder(db: Db, assignedTo: string | null = null) {
     // The oldest stored order, so the report window can start at the month the
     // business actually began trading instead of blindly covering the requested
     // 12/24 months and surfacing phantom pre-launch months.
     const [row] = await db.select({ createdAt: orders.createdAt }).from(orders)
+      .where(assignedTo ? eq(orders.assignedTo, assignedTo) : undefined)
       .orderBy(asc(orders.createdAt))
       .limit(1);
     return row?.createdAt ?? null;

@@ -89,3 +89,8 @@ export function isStateInList(state: string, list: readonly string[]): boolean {
   if (!wanted) return false;
   return list.some((entry) => normalizeState(entry) === wanted);
 }
+
+/** The states an operator may pick when entering an order by hand, in display form. */
+export function knownStateNames(): string[] {
+  return [...KNOWN_STATES].map(displayState).sort((a, b) => a.localeCompare(b));
+}

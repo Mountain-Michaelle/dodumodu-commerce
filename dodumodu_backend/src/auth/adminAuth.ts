@@ -48,6 +48,11 @@ const OPERATOR_PERMISSIONS: readonly Permission[] = Object.values(PERMISSIONS);
 export type Principal = {
   email: string;
   permissions: readonly Permission[];
+  /**
+   * Set for a signed-in admin-console session. Absent for the Cloudflare-Access operator, who is the owner
+   * and unrestricted. Row-level scoping (orderScope) reads it: a "mono" operator only sees their own orders.
+   */
+  role?: string;
 };
 
 /**
@@ -109,15 +114,6 @@ export function resolvePrincipal(email: string | undefined, adminOperators?: str
   }
 
   return { email: normalized, permissions: OPERATOR_PERMISSIONS };
-}
-
-/**
- * The legacy (console) permission keys a signed-in role holds. Only administrators reach the legacy admin API
- * (staff use /admin-v2), and they hold every key, exactly as resolvePrincipal grants. The console uses this list
- * to decide which "Add"/"Upload" controls to show; the server still checks every request independently.
- */
-export function legacyPermissionsForRole(role: string): readonly Permission[] {
-  return role === "admin" ? OPERATOR_PERMISSIONS : [];
 }
 
 /** True when this principal may perform this action. */

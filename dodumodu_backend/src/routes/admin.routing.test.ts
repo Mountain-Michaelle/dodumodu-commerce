@@ -79,7 +79,7 @@ test("a malformed or unknown session cookie is treated as signed out everywhere 
 
 test("valid administrator: pages load; sign-in redirects to the console; the console loads (no loop)", async () => {
   const a = await signIn("admin");
-  for (const p of PAGES) assert.equal((await call("GET", p, a.cookie)).status, 200, p);
+  for (const p of PAGES.filter((x) => !x.startsWith("/users"))) assert.equal((await call("GET", p, a.cookie)).status, 200, p);
   const si = await call("GET", "/sign-in/", a.cookie);
   assert.equal(si.status, 302); assert.equal(si.headers.get("location"), `${NS}/`);
   assert.equal((await call("GET", "/sign-in", a.cookie)).status, 302);
@@ -97,7 +97,7 @@ test("expired, revoked and version-bumped sessions are signed out: pages redirec
   ];
   for (const [label, kill] of cases) {
     const a = await signIn(`dead-${label}`);
-    assert.equal((await call("GET", "/users/", a.cookie)).status, 200, `${label}: alive first`);
+    assert.equal((await call("GET", "/devices/", a.cookie)).status, 200, `${label}: alive first`);
     await kill(a.u.id);
     for (const p of PAGES) goesToSignIn(await call("GET", p, a.cookie), `${label} ${p}`);
     assert.equal((await call("GET", "/sign-in/", a.cookie)).status, 200, `${label}: sign-in page shown`);
@@ -126,15 +126,25 @@ test("staff session: sign-in page still loads (no loop); admin pages and APIs ar
 
 test("logout ends access immediately; a fresh sign-in afterwards works", async () => {
   const a = await signIn("logout");
-  assert.equal((await call("GET", "/users/", a.cookie)).status, 200);
+  assert.equal((await call("GET", "/devices/", a.cookie)).status, 200);
   assert.equal((await call("POST", "/auth/logout", a.cookie)).status, 200);
-  goesToSignIn(await call("GET", "/users/", a.cookie), "after logout");
+  goesToSignIn(await call("GET", "/devices/", a.cookie), "after logout");
   assert.equal((await call("GET", "/sign-in/", a.cookie)).status, 200);
   const again = await signIn("logout-again");
-  assert.equal((await call("GET", "/users/", again.cookie)).status, 200);
+  assert.equal((await call("GET", "/devices/", again.cookie)).status, 200);
 });
 
 test("only GET navigations are redirected: a write to a page path is never turned into a redirect", async () => {
   const r = await call("POST", "/users/");
   assert.notEqual(r.status, 302);
+});
+
+test("the old standalone /users page is retired: an administrator is sent to Users & access in the console", async () => {
+  const a = await signIn("users-redirect");
+  for (const p of ["/users", "/users/"]) {
+    const r = await call("GET", p, a.cookie);
+    assert.equal(r.status, 302, p);
+    assert.equal(r.headers.get("location"), `${NS}/#users`, p);
+  }
+  assert.equal((await call("GET", "/assets/users.js", a.cookie)).status, 404, "its script is no longer served");
 });

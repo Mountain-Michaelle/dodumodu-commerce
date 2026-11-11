@@ -185,7 +185,7 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
       const sid = getSidToken(c as never);
       if (sid) {
         const session = await loadSession(c as never);
-        if (session && session.role === "admin") {
+        if (session) {   // any signed-in operator: the console shows each role only the sections it holds
           const base = active;
           return c.html(rewriteAdminHtml(ADMIN_CONSOLE_HTML, base), 200);
         }

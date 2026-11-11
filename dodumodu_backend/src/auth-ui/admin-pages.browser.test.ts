@@ -94,7 +94,7 @@ test("management pages in Chromium", { skip: pw ? false : "playwright/chromium n
   });
 
   await t.test("every page: header aligns with rows, no errors, nothing clipped sideways on a phone", async () => {
-    for (const p of ["/users/", "/devices/", "/sessions/"]) {
+    for (const p of ["/devices/", "/sessions/"]) {
       const { page, errors } = await open(p);
       const a = await alignment(page);
       assert.deepEqual(a.cells, a.heads, `${p}: header cells line up with row cells`);
@@ -115,21 +115,6 @@ test("management pages in Chromium", { skip: pw ? false : "playwright/chromium n
     assert.ok(info.left > 0, "programmatic scroll works"); assert.equal(info.bar, 0, "no scrollbar is drawn");
     await page.mouse.move(400, 300); await page.mouse.wheel(60, 0); await page.waitForTimeout(150);
     assert.ok(await page.evaluate(() => (document.querySelector(".table-scroll") as any).scrollLeft) > 0);
-    await page.close();
-  });
-
-  await t.test("users: server-side search, empty state, copy puts the FULL id on the clipboard", async () => {
-    const { page } = await open("/users/");
-    assert.ok((await page.locator("#list .row").count()) >= 5);
-    await page.fill("#search", `${tag}-zeta`); await oneRowWith(page, `${tag}-zeta@example.com`);
-    assert.equal(await page.locator("#count").innerText(), "1 user");
-    await page.fill("#search", "zzzz-nobody"); await page.waitForSelector("#list .state");
-    assert.match(await page.locator("#list").innerText(), /No users match/);
-    await page.fill("#search", `${tag}-zeta`); await oneRowWith(page, `${tag}-zeta@example.com`);
-    await page.locator('button[title="Copy user ID"]').first().click();
-    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), zeta.u.id);
-    await page.locator('button[title="Copy email"]').first().click();
-    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `${tag}-zeta@example.com`);
     await page.close();
   });
 

@@ -101,7 +101,6 @@ export function rewriteAdminHtml(html: string, base: string): string {
     .replaceAll('href="/auth-ui/auth.css"', `href="${base}/assets/auth.css"`)
     .replaceAll('src="/auth-ui/devices.js"', `src="${base}/assets/devices.js"`)
     .replaceAll('src="/auth-ui/sessions.js"', `src="${base}/assets/sessions.js"`)
-    .replaceAll('src="/auth-ui/users.js"', `src="${base}/assets/users.js"`)
     .replace(/href="\/(admin\.[^."]+\.min\.css)"/g, `href="${base}/assets/$1"`)
     .replace(/src="\/(admin\.[^."]+\.min\.js)"/g, `src="${base}/assets/$1"`);
   if (rewritten.includes("window.ADMIN_BASE_PATH")) return rewritten;
