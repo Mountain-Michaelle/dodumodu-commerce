@@ -6,9 +6,9 @@ export const EMAIL_BRAND = {
   surface: '#ffffff',
   text: '#2b2320',
   muted: '#6b5f59',
-  primary: '#cf7f00',
+  primary: '#00352a',
   primaryDark: '#084d02',
-  accent: '#F7A21B',
+  accent: '#00352a',
   border: '#ece1db',
   font: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
 } as const;

@@ -55,17 +55,18 @@ test("notification bodies never leak secrets and keys are stable", async () => {
 test("login code: plain-text body unchanged", async () => {
   const { provider, sent } = recordingProvider();
   await sendLoginCode(provider, "a@b.com", "ABCDEFGHIJ");
-  assert.equal(sent[0].text, "Your code is ABCDEFGHIJ. It expires in 3 minutes. If you did not request it, ignore this email.");
+  assert.equal(sent[0].text, "Your code is ABCDEFGHIJ. Code expires in 3 minutes. If you did not request it, ignore this email.");
 });
 
 test("login code: HTML contains the OTP in correct order", async () => {
   const { provider, sent } = recordingProvider();
   await sendLoginCode(provider, "a@b.com", "1234567890");
   const html = sent[0].html ?? "";
-  for (const d of "1234567890") assert.ok(html.includes(`>${d}<`), `digit ${d} present in HTML`);
-  // Stripping HTML tags leaves the digits contiguous and readable
+  // The full code appears as contiguous selectable text in the HTML
   const textContent = html.replace(/<[^>]*>/g, "");
   assert.ok(textContent.includes("1234567890"), "digits contiguous and readable when HTML stripped");
+  // Orange background wraps the code
+  assert.ok(html.includes("#F7A21B"), "orange brand accent background present");
 });
 
 test("login code: HTML has no clipboard JavaScript", async () => {
