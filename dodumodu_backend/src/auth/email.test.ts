@@ -65,7 +65,7 @@ test("login code: HTML contains the OTP in correct order", async () => {
   // The full code appears as contiguous selectable text in the HTML
   const textContent = html.replace(/<[^>]*>/g, "");
   assert.ok(textContent.includes("1234567890"), "digits contiguous and readable when HTML stripped");
-  // Orange background wraps the code
+  // Orange background wraps the code (Dodumodu brand accent)
   assert.ok(html.includes("#F7A21B"), "orange brand accent background present");
 });
 
