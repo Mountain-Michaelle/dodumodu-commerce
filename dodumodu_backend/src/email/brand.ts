@@ -8,7 +8,13 @@ export const EMAIL_BRAND = {
   muted: '#6b5f59',
   primary: '#00352a',
   primaryDark: '#084d02',
+  /** Dark green background of the OTP code block. */
   accent: '#00352a',
+  /** Orange text colour used for the code on top of `accent`. */
+  onAccent: '#F7A21B',
   border: '#ece1db',
   font: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+  /** Monospace stack for codes. Kept separate from `font` so it is never
+   * concatenated into a style attribute as a bare, invalid fragment. */
+  mono: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, 'Courier New', monospace",
 } as const;
