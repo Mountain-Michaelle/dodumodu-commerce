@@ -18,7 +18,7 @@ export function loginCodeTemplate(data: LoginCodeData): { subject: string; text:
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr>
           <td style="padding:0 0 20px;">
-            <h1 style="margin:0 0 10px;font-size:20px;font-weight:700;color:${EMAIL_BRAND.text};">
+            <h1 style="margin:0 0 10px;font-size:25px;font-weight:700;color:${EMAIL_BRAND.text};">
               Your sign-in code
             </h1>
             <p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:${EMAIL_BRAND.muted};">
