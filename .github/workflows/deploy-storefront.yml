@@ -41,10 +41,35 @@ env:
   # These are GitHub Secrets; they are never logged.
   WORKER_URL: ${{ secrets.WORKER_URL }}
   DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+  # What the storefront build bakes into every page (dodumodu_site/build/bundle.mjs reads these from
+  # its environment). Without them the CI build used the yoursite.com placeholder for canonical and
+  # og:url, an empty Turnstile site key (so no order form challenge) and the default media base.
+  # SITE_URL is the real https origin; the other three are PUBLIC values, so they are repository
+  # Variables (Settings > Secrets and variables > Actions > Variables), not secrets.
+  # build-site.mjs fails the build in CI if SITE_URL is missing or still the placeholder.
+  SITE_URL: ${{ secrets.SITE_URL }}
+  API_BASE: ${{ vars.API_BASE }}
+  IMAGE_DELIVERY_BASE: ${{ vars.IMAGE_DELIVERY_BASE }}
+  TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # A throwaway database for the DB-backed tests. The job-level DATABASE_URL is the production
+    # read-only role, and the MFA integration tests (correctly) refuse any non-local database.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dodumodu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,19 +92,25 @@ jobs:
       - name: Render storefront from published snapshots
         id: render
         working-directory: dodumodu_backend
-        run: |
-          npm run build:site
-          echo "build_id=$(node -p "require('./src/generated/build-id.json').buildId" 2>/dev/null || node -e "console.log(require('fs').readFileSync('src/generated/site.ts','utf8').match(/BUILD_ID = \"([^\"]+)\"/)[1])")" >> "$GITHUB_OUTPUT"
-          echo "expected=$(node -e "const m=require('fs').readFileSync('src/generated/site.ts','utf8').match(/PRODUCTS = (\{.*?\});/s); const p=JSON.parse(m[1]); const e={}; for (const [k,v] of Object.entries(p)) e[k]=v.publishId; console.log(JSON.stringify(e))")" >> "$GITHUB_OUTPUT"
+        # scripts/build-site.mjs appends build_id and expected (slug -> publish id) to $GITHUB_OUTPUT.
+        # This step used to scrape them out of src/generated/site.ts with a regex that could not match
+        # (PRODUCTS is written as a JSON string literal), leaving EXPECTED empty so verify-deploy
+        # refused every build after it had already been deployed.
+        run: npm run build:site
         # Fails the job rather than deploying a half-rendered build.
 
       - name: Typecheck
         working-directory: dodumodu_backend
         run: npm run typecheck
 
-      - name: Tests (backend + renderer)
+      - name: Tests (backend, renderer, build scripts)
         working-directory: dodumodu_backend
-        run: npm test
+        run: |
+          npm run db:reset-test
+          npm run test:db
+          node --test build/*.test.mjs
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dodumodu_test
 
       - name: Wrangler dry-run (bundle-size guard)
         working-directory: dodumodu_backend

@@ -82,6 +82,50 @@ try {
   // Discount tiers and payment rules already have defaults from the migrations;
   // only fill them in when the table is empty, so a real configuration is
   // never overwritten.
+  // The page copy (summary, benefits, how-to, FAQ, trust badges). Without it a published demo page has
+  // no content sections at all. Publishing creates an all-empty row on first use, so the row is filled
+  // while it is still untouched (no summary, no list items) and left alone once an admin has edited it.
+  // Shapes match validation/adminSchema.ts: benefits [{icon,title,body}], howToUse [{title,body}], faq [{q,a}].
+  await client.query(
+    `INSERT INTO product_pages (product_id, summary_html, benefits, how_to_use, faq, trust_badges, delivery_badge, hero_alt)
+     VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8)
+     ON CONFLICT (product_id) DO UPDATE SET
+       summary_html = EXCLUDED.summary_html, benefits = EXCLUDED.benefits, how_to_use = EXCLUDED.how_to_use,
+       faq = EXCLUDED.faq, trust_badges = EXCLUDED.trust_badges, delivery_badge = EXCLUDED.delivery_badge,
+       hero_alt = EXCLUDED.hero_alt, updated_at = now()
+     WHERE product_pages.summary_html = ''
+       AND jsonb_array_length(product_pages.benefits) = 0
+       AND jsonb_array_length(product_pages.how_to_use) = 0
+       AND jsonb_array_length(product_pages.faq) = 0`,
+    [
+      product.id,
+      "A fast-absorbing <strong>Vitamin C + Niacinamide</strong> serum designed for African skin. Fades hyperpigmentation, restores natural radiance and clears blemishes in just 14 days.",
+      JSON.stringify([
+        { icon: "check", title: "14-Day Dark Spot Clearance", body: "Visibly evens out stubborn dark spots, acne scars, and sun damage without peeling." },
+        { icon: "shield", title: "Gentle On Melanin-Rich Skin", body: "No hydroquinone, no bleaching agents, safe for daily use." },
+        { icon: "truck", title: "Free Delivery In Lagos & Ogun", body: "Order today and receive within 24-48 hours." },
+        { icon: "check", title: "Risk-Free Cash On Delivery", body: "Open and verify your package before paying our trusted delivery dispatch." },
+      ]),
+      JSON.stringify([
+        { title: "Cleanse", body: "Wash face with warm water and a gentle cleanser, then pat dry." },
+        { title: "Apply", body: "Dispense 3-4 drops directly onto face and gently massage into skin." },
+        { title: "Lock", body: "Follow with your favorite moisturizer and SPF sunscreen in the morning." },
+      ]),
+      JSON.stringify([
+        { q: "How fast will I get my order?", a: "Orders in Lagos and Ogun arrive within 24-48 hours. Other states arrive in 2-4 business days." },
+        { q: "Can I pay on delivery?", a: "Yes, in Lagos, Ogun, Enugu and Abuja for up to 4 items, and you may inspect the package before paying." },
+        { q: "Will it bleach or lighten my skin tone?", a: "No. It contains zero hydroquinone or bleaching steroids. It only clears hyperpigmentation to reveal your natural glow." },
+      ]),
+      JSON.stringify([
+        { icon: "shield", text: "Dermatologist tested" },
+        { icon: "truck", text: "Pay on delivery available" },
+        { icon: "check", text: "10,000+ happy customers" },
+      ]),
+      "Free delivery in Lagos & Ogun",
+      "Bottle of Radiance Glow Serum",
+    ],
+  );
+
   const { rows: [tierCount] } = await client.query("SELECT count(*)::int AS n FROM discount_tiers");
   if (tierCount.n === 0) {
     await client.query(
