@@ -7,9 +7,21 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#fff8f5">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-112 0 480 480'%3E%3Cpath fill='%23F7A21B' fill-rule='evenodd' d='M0 208H194a8 8 0 0 1 8 8V406a8 8 0 0 1-8 8H34a8 8 0 0 1-7.9-6.6L-7.9 217.4A8 8 0 0 1 0 208zM14 273.5h156a4.5 4.5 0 0 1 0 9H14a4.5 4.5 0 0 1 0-9zM30 337.5h140a4.5 4.5 0 0 1 0 9H30a4.5 4.5 0 0 1 0-9zM57.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM57.5 282.5h9v55h-9zM57.5 346.5h9V382a4.5 4.5 0 0 1-9 0zM113.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM113.5 282.5h9v55h-9zM113.5 346.5h9V382a4.5 4.5 0 0 1-9 0z'/%3E%3Cpath d='M218 382V30h22' fill='none' stroke='%23F7A21B' stroke-width='48' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath fill='%231F2A44' fill-rule='evenodd' d='M23 441a32 32 0 1 0 64 0a32 32 0 1 0-64 0M43 441a12 12 0 1 0 24 0a12 12 0 1 0-24 0zM123 441a32 32 0 1 0 64 0a32 32 0 1 0-64 0M143 441a12 12 0 1 0 24 0a12 12 0 1 0-24 0z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/__SITE_CSS__">
 <style>
-  body{margin:0;font-family:system-ui,sans-serif;background:#fff8f5;color:#2b2320}
+  /* Shared rules this page used to get from the site stylesheet, inlined (about 1 KB) so the
+     page makes no stylesheet request at all. Values are the tokens in shared/styles/tokens.css. */
+  :root{--color-bg:#fff8f5;--color-border:#ece1db;--color-primary-dark:#084d02;--color-success:#2f7d4f}
+  *,::before,::after{box-sizing:border-box}
+  h1,p{margin:0 0 12px}
+  h1{font-size:1.6rem;font-weight:700;line-height:1.25}
+  .dm{display:block;height:auto;color:var(--dm-ink,#1f2a44);pointer-events:none}
+  .price-breakdown{background:var(--color-bg);border:1px solid var(--color-border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:4px;font-size:.88rem}
+  .price-breakdown:empty{display:none}
+  .price-breakdown-row{display:flex;justify-content:space-between;gap:12px;word-break:break-word}
+  .price-breakdown-row[data-emphasis=true]{font-weight:700;font-size:1.05rem;color:var(--color-primary-dark);border-top:1px solid var(--color-border);padding-top:8px;margin-top:4px}
+  .price-breakdown-discount{color:var(--color-success)}
+
+  body{line-height:1.5;-webkit-font-smoothing:antialiased;margin:0;font-family:system-ui,sans-serif;background:#fff8f5;color:#2b2320}
   /* Top padding is smaller than before (56px -> 28px): the brand header above now
      provides the breathing room, and the confirmation stays on the first screen. */
   .confirm-page{max-width:480px;margin:0 auto;padding:28px 20px 72px;text-align:center}
@@ -48,11 +60,15 @@
   .dm-hero{width:clamp(200px,62vw,300px)}
   .confirm-sign{margin:40px 0 0;display:flex;flex-direction:column;align-items:center;gap:10px;font-size:.8rem;color:#8a7b74;line-height:1.2}
   .dm-sign{width:112px;opacity:.92}
-  .dm-once .dm-b{animation-iteration-count:4}
-  .dm-once .dm-r{animation-iteration-count:2}
-  .dm-once .dm-s path{animation:dm-g .8s ease-out}
-  .dm-once.dm-run .dm-s g path{animation-delay:0s}
+  /* Arrival motion, once (~1.7 s) then at rest, pixel-identical to the static logo. Only transform and
+     opacity animate, so no layout or paint work. Origins are the local (0,0) of each wrapper <g>. */
+  .dm-run .dm-b{animation:dm-b .42s ease-in-out 4 alternate}
+  .dm-run .dm-r{animation:dm-r .9s linear 2}
+  .dm-run .dm-s path{animation:dm-g .8s ease-out}
+  @keyframes dm-b{to{transform:translate(-10px,-16px) rotate(-.6deg)}}
+  @keyframes dm-r{to{transform:rotate(360deg)}}
   @keyframes dm-g{from{transform:scaleX(.1);opacity:0}}
+  @media (prefers-reduced-motion:reduce){.dm-run .dm-b,.dm-run .dm-r,.dm-run .dm-s path{animation:none}}
 
   /* Bottom: a sign-off, deliberately NOT a link, so the green "Back to the
      store" button stays the single clear next action. */
@@ -77,14 +93,14 @@
      BRAND SPRITE - the DODUMODU logo, defined once, used by <use href="#dm-logo">.
      Zero-size (NOT display:none, which breaks <use> references in Safari).
      Colours: navy = currentColor (set via CSS `color`), orange = #F7A21B.
-     Identical to the sprite on the product page.
+     Identical to the sprite on the product page (copied from it; keep them in sync).
      ===================================================================== -->
-<svg class="dm-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs><linearGradient id="dm-f" gradientUnits="userSpaceOnUse" x2="450"><stop stop-color="#F7A21B" stop-opacity=".6"/><stop offset="1" stop-color="#F7A21B" stop-opacity="0"/></linearGradient><path id="dm-w" fill="currentColor" fill-rule="evenodd" d="M-32 0a32 32 0 1 0 64 0a32 32 0 1 0-64 0M-12 0a12 12 0 1 0 24 0a12 12 0 1 0-24 0z"/><g id="dm-d"><path fill="#F7A21B" fill-rule="evenodd" d="M23.5 208H221.5a6 6 0 0 1 6 6V408a6 6 0 0 1-6 6H58.5a6 6 0 0 1-5.9-4.9L17.6 215.1A6 6 0 0 1 23.5 208zM40 273.5h155.5a4.5 4.5 0 0 1 0 9H40a4.5 4.5 0 0 1 0-9zM56 337.5h139.5a4.5 4.5 0 0 1 0 9H56a4.5 4.5 0 0 1 0-9zM83.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM83.5 282.5h9v55h-9zM83.5 346.5h9V381.5a4.5 4.5 0 0 1-9 0zM139.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM139.5 282.5h9v55h-9zM139.5 346.5h9V381.5a4.5 4.5 0 0 1-9 0z"/><path d="M244 382V30h21.5" fill="none" stroke="#F7A21B" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="81" y="441"/><use href="#dm-w" x="181" y="441"/></g><g id="dm-o"><g fill="none" stroke="currentColor"><circle r="112" stroke-width="36"/><path d="M0-98V98M-85-49L85 49M-85 49L85-49" stroke-width="9"/></g><circle r="26" fill="#F7A21B"/><circle r="10" fill="currentColor"/></g><g id="dm-b"><use href="#dm-d"/><use href="#dm-d" x="596"/><path d="M946 240v118a24 24 0 0 0 24 24h142a24 24 0 0 0 24-24V240M1220 382V305a65 65 0 0 1 130 0V382M1350 305a65 65 0 0 1 130 0V382" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="984" y="441"/><use href="#dm-w" x="1098" y="441"/><use href="#dm-w" x="1220" y="441"/><use href="#dm-w" x="1350" y="441"/><use href="#dm-w" x="1480" y="441"/></g><g id="dm-c"><use href="#dm-b"/><use href="#dm-o" x="456" y="346"/><use href="#dm-o" x="1670" y="346"/></g><g id="dm-s" fill="none" stroke="url(#dm-f)" stroke-width="14" stroke-linecap="round"><path transform="translate(1709 199)" d="M0 0h248"/><path transform="translate(1796 261)" d="M0 0h125"/><path transform="translate(1820 323)" d="M0 0h203"/><path transform="translate(1817 385)" d="M0 0h158"/><path transform="translate(1784 447)" d="M0 0h86"/></g><g id="dm-logo"><use href="#dm-c"/><use href="#dm-s"/></g></defs></svg>
+<svg class="dm-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs><linearGradient id="dm-f" gradientUnits="userSpaceOnUse" x2="450"><stop stop-color="#F7A21B" stop-opacity=".6"/><stop offset="1" stop-color="#F7A21B" stop-opacity="0"/></linearGradient><path id="dm-w" fill="currentColor" fill-rule="evenodd" d="M-32 0a32 32 0 1 0 64 0a32 32 0 1 0-64 0M-12 0a12 12 0 1 0 24 0a12 12 0 1 0-24 0z"/><clipPath id="dm-k"><circle r="112"/></clipPath><g id="dm-d"><path fill="#F7A21B" fill-rule="evenodd" d="M23.5 208H221.5a6 6 0 0 1 6 6V408a6 6 0 0 1-6 6H58.5a6 6 0 0 1-5.9-4.9L17.6 215.1A6 6 0 0 1 23.5 208zM40 273.5h155.5a4.5 4.5 0 0 1 0 9H40a4.5 4.5 0 0 1 0-9zM56 337.5h139.5a4.5 4.5 0 0 1 0 9H56a4.5 4.5 0 0 1 0-9zM83.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM83.5 282.5h9v55h-9zM83.5 346.5h9V381.5a4.5 4.5 0 0 1-9 0zM139.5 273.5V240a4.5 4.5 0 0 1 9 0v33.5zM139.5 282.5h9v55h-9zM139.5 346.5h9V381.5a4.5 4.5 0 0 1-9 0z"/><path d="M244 382V30h21.5" fill="none" stroke="#F7A21B" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="81" y="441"/><use href="#dm-w" x="181" y="441"/></g><g id="dm-o"><g clip-path="url(#dm-k)"><path fill="#084D02" d="M-61.82 -35.67C-61.82 -35.67 -119.58 65.43 17.78 94.21C17.78 94.21 80.76 77.57 90.68 28.24C100.6 -21.09 94.24 29.22 49.91 39.67C49.91 39.67 44.62 -66.15 -61.82 -35.67z"/><path fill="#F7A21B" d="M-14.5 29C-14.5 29 6.17 -5.75 -13 -38.5C-13 -38.5 4.92 -5 -18.5 26C-18.5 26 -14.5 29 -14.5 29z"/><path fill="#F7A21B" d="M24 60C24 60 2.3 90.07 -35 76C-35 76 -0.2 87.57 19.5 57.5C19.5 57.5 24 60 24 60z"/><path fill="#F7A21B" d="M27.5 -17.5C27.5 -17.5 48.23 13.62 20.5 57C20.5 57 24 59.5 24 59.5C24 59.5 48.75 15.12 27.5 -17.5z"/><path fill="#F7A21B" d="M-60.47 -37C-60.47 -37 -19.65 54.49 64.14 86.28C64.14 86.28 70.99 84.4 70.99 84.4C70.99 84.4 -7.9 57.7 -60.47 -37z"/><path fill="#F7A21B" d="M-76.5 15C-76.5 15 -56.56 48.35 -15.5 28C-15.5 28 -18.5 25.5 -18.5 25.5C-18.5 25.5 -49.5 46 -76.5 15z"/></g><circle r="112" fill="none" stroke="currentColor" stroke-width="36"/></g><g id="dm-b"><use href="#dm-d"/><use href="#dm-d" x="596"/><path d="M946 240v118a24 24 0 0 0 24 24h142a24 24 0 0 0 24-24V240M1220 382V305a65 65 0 0 1 130 0V382M1350 305a65 65 0 0 1 130 0V382" fill="none" stroke="currentColor" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/><use href="#dm-w" x="984" y="441"/><use href="#dm-w" x="1098" y="441"/><use href="#dm-w" x="1220" y="441"/><use href="#dm-w" x="1350" y="441"/><use href="#dm-w" x="1480" y="441"/></g><g id="dm-c"><use href="#dm-b"/><use href="#dm-o" x="456" y="346"/><use href="#dm-o" x="1670" y="346"/></g><g id="dm-s" fill="none" stroke="url(#dm-f)" stroke-width="14" stroke-linecap="round"><path transform="translate(1710.5 207.5)" d="M0 0h390"/><path transform="translate(1805.5 262)" d="M0 0h200"/><path transform="translate(1812.5 324.5)" d="M0 0h320"/><path transform="translate(1812.5 390.5)" d="M0 0h250"/><path transform="translate(1784.5 456.5)" d="M0 0h140"/></g><g id="dm-logo"><use href="#dm-c"/><use href="#dm-s"/></g></defs></svg>
 
 <!-- ICONS -->
 
 <main class="confirm-page">
-  <a class="brand-bar" href="/" aria-label="DODUMODU home"><svg class="dm dm-hero dm-run dm-once" viewBox="1 -16 2030 504" width="240" height="60" aria-hidden="true" focusable="false"><g transform="translate(750 441)"><g class="dm-b"><use href="#dm-b" x="-750" y="-441"/></g></g><g transform="translate(456 346)"><use class="dm-r" href="#dm-o"/></g><g transform="translate(1670 346)"><use class="dm-r" href="#dm-o"/></g><g class="dm-s" fill="none" stroke="url(#dm-f)" stroke-width="14" stroke-linecap="round"><g transform="translate(1709 199)"><path d="M0 0h248"/></g><g transform="translate(1796 261)"><path d="M0 0h125"/></g><g transform="translate(1820 323)"><path d="M0 0h203"/></g><g transform="translate(1817 385)"><path d="M0 0h158"/></g><g transform="translate(1784 447)"><path d="M0 0h86"/></g></g></svg></a>
+  <a class="brand-bar" href="/" aria-label="DODUMODU home"><svg class="dm dm-hero dm-run dm-once" viewBox="1 -16 2142 504" width="240" height="60" aria-hidden="true" focusable="false"><g transform="translate(750 441)"><g class="dm-b"><use href="#dm-b" x="-750" y="-441"/></g></g><g transform="translate(456 346)"><use class="dm-r" href="#dm-o"/></g><g transform="translate(1670 346)"><use class="dm-r" href="#dm-o"/></g><g class="dm-s" fill="none" stroke="url(#dm-f)" stroke-width="14" stroke-linecap="round"><g transform="translate(1710.5 207.5)"><path d="M0 0h390"/></g><g transform="translate(1805.5 262)"><path d="M0 0h200"/></g><g transform="translate(1812.5 324.5)"><path d="M0 0h320"/></g><g transform="translate(1812.5 390.5)"><path d="M0 0h250"/></g><g transform="translate(1784.5 456.5)"><path d="M0 0h140"/></g></g></svg></a>
   <svg class="confirm-icon" aria-hidden="true"><use href="#icon-check"></use></svg>
   <h1>We've received your order</h1>
   <p id="confirm-message">Hang tight while we confirm the details.</p>
@@ -101,14 +117,14 @@
   </section>
 
   <div class="confirm-actions">
-    <a class="back-link" href="/products/glow-serum/">&larr; Back to the store</a>
+    <a class="back-link" href="/">&larr; Back to the store</a>
     <p class="back-hint">Ordering again? Your form comes back empty and ready.</p>
   </div>
 
   <footer class="confirm-signoff">
     <p class="confirm-sign">
       <span>Thank you for shopping with</span>
-      <svg class="dm dm-sign" viewBox="1 -16 2030 504" width="112" height="28" role="img" aria-label="DODUMODU" focusable="false"><use href="#dm-logo"/></svg>
+      <svg class="dm dm-sign" viewBox="1 -16 2142 504" width="112" height="28" role="img" aria-label="DODUMODU" focusable="false"><use href="#dm-logo"/></svg>
     </p>
   </footer>
 </main>

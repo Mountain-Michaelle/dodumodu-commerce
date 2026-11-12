@@ -22,7 +22,7 @@ import { monthlyKpiSnapshotsRoute } from "./routes/monthlyKpiSnapshots";
 import { visitorAnalyticsRoute } from "./routes/visitorAnalytics";
 import { visitorRetentionRoute } from "./routes/visitorRetention";
 import * as site from "./generated/site";
-import { robotsTxt, sitemapXml, THANK_YOU_HTML } from "./staticAssets";
+import { robotsTxt, sitemapXml } from "./staticAssets";
 import { HTTPException } from "hono/http-exception";
 import { logError } from "./shared/logger";
 
@@ -240,8 +240,10 @@ app.get(site.APP_JS_PATH, (c) => {
   });
 });
 
-// Order confirmation page — served by the Worker in production (no Pages).
-app.get("/thank-you.html", (c) => c.html(THANK_YOU_HTML, 200, { "Cache-Control": "no-cache" }));
+// Order confirmation page — served by the Worker in production (no Pages). The HTML is the
+// BUILT dodumodu_site/thank-you.html (scripts/build-site.mjs writes it into generated/site.ts),
+// so there is no second hand-maintained copy to drift from the source page.
+app.get("/thank-you.html", (c) => c.html(site.THANK_YOU_HTML, 200, { "Cache-Control": "no-cache" }));
 
 // robots.txt — cacheable, sitemap URL filled from SITE_URL.
 app.get("/robots.txt", (c) => c.text(robotsTxt(c.env.SITE_URL), 200, {
@@ -284,7 +286,9 @@ app.get("/media/*", async (c) => {
   return c.body(object.body, 200, headers);
 });
 
-app.get("/:slug", async (c, next) => {
+// One handler for both URL shapes. The canonical URL, the sitemap, the admin deployment check and the
+// CI verifier all use the trailing-slash form (/slug/), so it must resolve exactly like /slug.
+const productPage = async (c: Context<{ Bindings: Env }>, next: Next) => {
   const slug = c.req.param("slug");
   // PRODUCTS is emitted by scripts/build-site.mjs as a JSON string (see the
   // `lit` helper), so parse it here rather than casting the module type.
@@ -309,4 +313,6 @@ app.get("/:slug", async (c, next) => {
     ETag: entry.etag,
     "Cache-Control": "public, max-age=60, stale-while-revalidate=3600",
   });
-});
+};
+app.get("/:slug", productPage);
+app.get("/:slug/", productPage);

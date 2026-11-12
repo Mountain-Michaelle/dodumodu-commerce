@@ -48,7 +48,24 @@ test("thank-you.html returns the order confirmation page", async () => {
   assert.equal(res.headers.get("Cache-Control"), "no-cache");
   const body = await res.text();
   assert.ok(body.includes("We've received your order"));
-  assert.ok(body.includes("/products/glow-serum/"));
+  // Back to the store is "/": the Worker has no /products/<slug>/ route, "/" serves the flagship.
+  assert.ok(body.includes('href="/">&larr; Back to the store'));
+  // Self-contained: no request for a stylesheet the Worker does not serve (it used to 404 on every view).
+  assert.ok(!/<link[^>]+rel="stylesheet"/.test(body), "thank-you must not link a stylesheet");
+  assert.ok(!body.includes("__SITE_CSS__"));
+  // The new logo (leaf wheels, viewBox 2142) and the icon sprite the check mark needs are both defined.
+  assert.ok(body.includes('id="dm-k"') && body.includes('id="icon-check"'));
+  assert.ok(!body.includes("1 -16 2030 504"), "stale logo viewBox");
+});
+
+test("a product page resolves with and without the trailing slash", async () => {
+  const slugs = Object.keys(JSON.parse(site.PRODUCTS ?? "{}"));
+  if (slugs.length === 0) return; // nothing published in this build
+  for (const path of [`/${slugs[0]}`, `/${slugs[0]}/`]) {
+    const res = await fetchApp(path);
+    assert.equal(res.status, 200, path);
+    assert.ok((await res.text()).includes("<h1"), path);
+  }
 });
 
 test("robots.txt returns plain text with sitemap URL", async () => {
