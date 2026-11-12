@@ -43,39 +43,52 @@ export const PATCHES = [
     from: 'let t=Yt[a]({shell:fe,identity:he,onNavigate:Gt})',
     to: 'let k=window.__aaRoute=(window.__aaRoute||0)+1,dc=document.createElement("div"),dt2=document.createElement("div"),sh=Object.create(fe,{toolbar:{get:()=>k===window.__aaRoute?fe.toolbar:dc},content:{get:()=>k===window.__aaRoute?fe.content:dt2}}),t=Yt[a]({shell:sh,identity:he,onNavigate:Gt})',
   },
-  {
-    id: "nav-permissions",
-    from: '{id:"media",label:"Media"}]}',
-    to: '{id:"media",label:"Media",perm:"media.view"}]}',
-  },
-  {
-    id: "nav-permissions-blocked",
-    from: '{id:"blocks",label:"Blocked"}',
-    to: '{id:"blocks",label:"Blocked",perm:"blocks.manage"}',
-  },
-  {
-    id: "nav-permissions-settings",
-    from: '{id:"discounts",label:"Discount tiers"},{id:"payment",label:"Payment rules"}',
-    to: '{id:"discounts",label:"Discount tiers",perm:"settings.manage"},{id:"payment",label:"Payment rules",perm:"settings.manage"}',
-  },
-  {
-    id: "nav-gating-list",
-    from: 'n=e("nav",{class:"sidebar-nav","aria-label":"Sections"},Zt.map(h=>e("div",{class:"nav-group"},e("h2",{class:"nav-group-title",text:h.group}),e("ul",{class:"nav-list"},h.items.map(f=>{',
-    to: 'n=e("nav",{class:"sidebar-nav","aria-label":"Sections"},Zt.map(h=>({...h,items:h.items.filter(f=>__aaAllowed(t,f))})).filter(h=>h.items.length).map(h=>e("div",{class:"nav-group"},e("h2",{class:"nav-group-title",text:h.group}),e("ul",{class:"nav-list"},h.items.map(f=>{',
-  },
-  {
-    id: "nav-gating-route",
-    from: '{content:r,toolbar:u,titleFor(h){',
-    to: '{isHidden:h=>{let f=Zt.flatMap(g=>g.items).find(g=>g.id===h);return!!f&&!__aaAllowed(t,f)},firstVisible:()=>{let f=Zt.flatMap(g=>g.items).find(g=>__aaAllowed(t,g));return f&&f.id},content:r,toolbar:u,titleFor(h){',
-  },
-  {
-    id: "nav-gating-helper",
-    from: 'var Zt=[{group:"Catalogue"',
-    to: 'function __aaAllowed(i,f){return!f.perm||!i||i.role==="admin"||!Array.isArray(i.v2perms)||i.v2perms.includes(f.perm)}var Zt=[{group:"Catalogue"',
-  },
 ];
 
 const count = (s, needle) => s.split(needle).length - 1;
+
+
+// Earlier builds of this script wrote the sidebar gating with fixed minified names. Undo exactly that text first
+// so a bundle that already carries it is re-patched by gateNav() instead of keeping the fragile version.
+const LEGACY_NAV = [
+  ['{id:"media",label:"Media"}', '{id:"media",label:"Media",perm:"media.view"}'],
+  ['{id:"blocks",label:"Blocked"}', '{id:"blocks",label:"Blocked",perm:"blocks.manage"}'],
+  ['{id:"discounts",label:"Discount tiers"},{id:"payment",label:"Payment rules"}', '{id:"discounts",label:"Discount tiers",perm:"settings.manage"},{id:"payment",label:"Payment rules",perm:"settings.manage"}'],
+  ['e("nav",{class:"sidebar-nav","aria-label":"Sections"},Zt.map(h=>e("div",{class:"nav-group"},e("h2",{class:"nav-group-title",text:h.group}),e("ul",{class:"nav-list"},h.items.map(f=>{',
+   'e("nav",{class:"sidebar-nav","aria-label":"Sections"},Zt.map(h=>({...h,items:h.items.filter(f=>__aaAllowed(t,f))})).filter(h=>h.items.length).map(h=>e("div",{class:"nav-group"},e("h2",{class:"nav-group-title",text:h.group}),e("ul",{class:"nav-list"},h.items.map(f=>{'],
+  ['{content:r,toolbar:u,titleFor(h){',
+   '{isHidden:h=>{let f=Zt.flatMap(g=>g.items).find(g=>g.id===h);return!!f&&!__aaAllowed(t,f)},firstVisible:()=>{let f=Zt.flatMap(g=>g.items).find(g=>__aaAllowed(t,g));return f&&f.id},content:r,toolbar:u,titleFor(h){'],
+  ['var Zt=[{group:"Catalogue"',
+   'function __aaAllowed(i,f){return!f.perm||!i||i.role==="admin"||!Array.isArray(i.v2perms)||i.v2perms.includes(f.perm)}var Zt=[{group:"Catalogue"'],
+];
+
+// The sidebar gating touches five places that must agree on the minified names of the nav list and the identity.
+// So it is ONE all-or-nothing step that reads those names from the bundle instead of assuming them. If anything
+// does not line up (a different console build) the whole step is skipped and the console behaves as before;
+// it can never be half-applied. The injected code is also wrapped so that a mistake can only ever mean "show the
+// section", never a blocked screen.
+export function gateNav(js) {
+  const list = /var (\w+)=\[\{group:"Catalogue",items:\[/.exec(js)?.[1];
+  const ident = /function \w+\(\{[^}]*identity:(\w+)\}\)\{/.exec(js)?.[1];
+  if (!list || !ident) return null;
+  const sidebarFrom = `e("nav",{class:"sidebar-nav","aria-label":"Sections"},${list}.map(h=>e("div",{class:"nav-group"},e("h2",{class:"nav-group-title",text:h.group}),e("ul",{class:"nav-list"},h.items.map(f=>{`;
+  const routeFrom = "{content:r,toolbar:u,titleFor(h){";
+  const steps = [
+    ['{id:"media",label:"Media"}', '{id:"media",label:"Media",perm:"media.view"}'],
+    ['{id:"blocks",label:"Blocked"}', '{id:"blocks",label:"Blocked",perm:"blocks.manage"}'],
+    ['{id:"discounts",label:"Discount tiers"},{id:"payment",label:"Payment rules"}', '{id:"discounts",label:"Discount tiers",perm:"settings.manage"},{id:"payment",label:"Payment rules",perm:"settings.manage"}'],
+    [sidebarFrom, sidebarFrom.replace(`${list}.map(h=>e(`, `${list}.map(h=>({...h,items:h.items.filter(f=>__aaAllowed(${ident},f))})).filter(h=>h.items.length).map(h=>e(`)],
+    [routeFrom, `{isHidden:h=>{try{let f=${list}.flatMap(g=>g.items).find(g=>g.id===h);return!!f&&!__aaAllowed(${ident},f)}catch{return!1}},firstVisible:()=>{try{let f=${list}.flatMap(g=>g.items).find(g=>__aaAllowed(${ident},g));return f&&f.id}catch{return void 0}},content:r,toolbar:u,titleFor(h){`],
+    [`var ${list}=[{group:"Catalogue"`, `function __aaAllowed(i,f){try{return!f.perm||!i||i.role==="admin"||!Array.isArray(i.v2perms)||i.v2perms.includes(f.perm)}catch{return!0}}var ${list}=[{group:"Catalogue"`],
+  ];
+  let out = js;
+  for (const [from, to] of steps) {
+    if (out.includes(to)) continue;                                  // already applied
+    if (count(out, from) !== 1) return null;                         // does not line up: apply nothing
+    out = out.replace(from, () => to);
+  }
+  return out;
+}
 
 export function patchConsoleJs(js) {
   let out = js.replace(/^\/\*console-fixes(?:-v1)?\*\//, "");
@@ -87,6 +100,9 @@ export function patchConsoleJs(js) {
     if (n > 1) throw new Error(`console patch "${p.id}": expected at most 1 match, found ${n}`);
     if (n === 1) out = out.replace(p.from, () => p.to);
   }
+  for (const [from, to] of LEGACY_NAV) if (out.includes(to)) out = out.replace(to, () => from);
+  const gated = gateNav(out);
+  if (gated) out = gated;
   // The new-order script is always the last block: replaced wholesale so an edited script reaches the bundle.
   const at = out.indexOf(NEW_ORDER_MARK);
   if (at >= 0) out = out.slice(0, at).replace(/\n$/, "");
