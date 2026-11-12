@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -13,39 +13,35 @@
 <link rel="canonical" href="{{CANONICAL_URL}}">
 <meta property="og:type" content="product">
 <meta property="og:site_name" content="DODUMODU Skincare">
+<meta property="og:locale" content="en_NG">
 <meta property="og:title" content="{{OG_TITLE}}">
 <meta property="og:description" content="{{OG_DESCRIPTION}}">
 <meta property="og:url" content="{{OG_URL}}">
-<meta property="og:image" content="{{OG_IMAGE}}">
-<meta property="og:image:alt" content="{{OG_IMAGE_ALT}}">
+{{OG_IMAGE_TAGS}}
 <meta property="product:price:amount" content="{{PRODUCT_PRICE_AMOUNT}}">
 <meta property="product:price:currency" content="NGN">
 <meta property="product:availability" content="in stock">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{TWITTER_TITLE}}">
 <meta name="twitter:description" content="{{TWITTER_DESCRIPTION}}">
-<meta name="twitter:image" content="{{TWITTER_IMAGE}}">
-<link rel="preconnect" href="https://picsum.photos">
-<link rel="dns-prefetch" href="https://picsum.photos">
-<link rel="preload" as="image"
-href="{{HERO_PRELOAD_SRC}}"
-imagesrcset="{{HERO_PRELOAD_SRCSET}}"
-imagesizes="(max-width: 480px) 92vw, 480px"
-fetchpriority="high" type="image/webp">
+{{TWITTER_IMAGE_TAGS}}
+{{HERO_PRECONNECT}}
+{{HERO_PRELOAD}}
 {{CSP_META}}
+{{RUNTIME_CONFIG}}
+{{JSON_LD}}
 <style>{{CSS_INLINE}}</style>
 </head>
 <body data-slug="{{BODY_DATA_SLUG}}" data-product-id="{{BODY_DATA_PRODUCT_ID}}">
-{{JSON_LD}}
 {{SVG_SPRITE}}
 <a href="#order-form" class="skip-link">Skip to order form</a>
-<div class="page">
-<header class="site-header" role="banner">
+<header class="site-header" role="banner" data-stick data-stick-show="100" data-stick-hide="#order-form" data-stick-hide-px="50">
 <a href="/" class="site-logo"><svg class="dm" viewBox="1 -16 2142 504" width="136" height="32" aria-hidden="true" focusable="false"><use href="#dm-logo"/></svg><span class="visually-hidden">DODUMODU</span></a>
 <nav class="site-nav" aria-label="Main Navigation">
 <a class="nav-cta" href="#order-form">Order Now &darr;</a>
 </nav>
 </header>
+<div class="page">
 <nav aria-label="Breadcrumb">
 <ol class="breadcrumbs" itemscope itemtype="https://schema.org/BreadcrumbList">
 <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
@@ -66,51 +62,30 @@ fetchpriority="high" type="image/webp">
 <div class="product-layout">
 <section class="hero" aria-label="Product Images">
 <div id="carousel">
-<picture>
-<source type="image/webp"
-srcset="{{HERO_SRCSET}}"
-sizes="(max-width: 480px) 92vw, 480px">
-<img class="hero-fallback"
-src="{{HERO_SRC}}"
-srcset="{{HERO_SRCSET}}"
-sizes="(max-width: 480px) 92vw, 480px"
-alt="{{HERO_ALT}}"
-width="640"
-height="640"
-fetchpriority="high"
-decoding="async">
-</picture>
+{{HERO_HTML}}
 </div>
 </section>
 <section class="section product-summary section--summary" aria-labelledby="product-title">
-<div class="rating-badge" aria-label="Rated {{RATING_VALUE}} out of 5 stars from {{RATING_COUNT}} reviews">
-<span class="rating-stars" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
-<strong>{{RATING_VALUE}}/5</strong> ({{RATING_COUNT}}+ verified reviews)
-</div>
+<div class="rating-badge" aria-label="Rated {{RATING_VALUE}} out of 5 stars from {{RATING_COUNT}} reviews"><span class="rating-stars" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span> <strong>{{RATING_VALUE}}/5</strong> ({{RATING_COUNT}}+ verified reviews)</div>
 <h1 id="product-title">{{PRODUCT_NAME}}</h1>
 <div class="price-row">
 <span class="price">{{PRICE_DISPLAY}}</span>
-<span class="badge"><svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg> Free delivery in Lagos &amp; Ogun</span>
+<span class="badge"><svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg> {{DELIVERY_BADGE}}</span>
 </div>
-<p>{{SUMMARY_HTML}}</p>
-<div class="trust-row" role="list">
-<div class="trust-item" role="listitem"><svg class="icon" aria-hidden="true"><use href="#icon-shield"></use></svg> Dermatologist tested</div>
-<div class="trust-item" role="listitem"><svg class="icon" aria-hidden="true"><use href="#icon-truck"></use></svg> Pay on delivery available</div>
-<div class="trust-item" role="listitem"><svg class="icon" aria-hidden="true"><use href="#icon-check"></use></svg> 10,000+ happy customers</div>
+<a class="cta-btn cta-summary" href="#order-form">Order Now &middot; Pay on Delivery</a>{{SUMMARY_BLOCK}}
+{{TRUST_ROW}}
+</section>
 </div>
+{{BENEFITS_SECTION}}
+<div class="stick-sentinel" data-stick-sentinel aria-hidden="true"></div>
+{{TESTIMONIALS_SECTION}}
+<section class="section cta-band" aria-labelledby="cta-mid-title">
+<h2 id="cta-mid-title">Ready to place your order?</h2>
+<p class="cta-line">Free delivery in Lagos &amp; Ogun. Pay on delivery in Lagos, Ogun, Enugu &amp; Abuja.</p>
+<div class="cta-stack"><a class="cta-btn" href="#order-form">Order Now</a></div>
+<p class="cta-note">Open and check your package before you pay.</p>
 </section>
-<section class="section lazy-section" aria-labelledby="benefits-title">
-<h2 id="benefits-title">{{WHY_LOVE_TITLE}}</h2>
-<ul class="benefits-grid">
-{{BENEFITS_HTML}}
-</ul>
-</section>
-<section class="section lazy-section" aria-labelledby="how-to-use-title">
-<h2 id="how-to-use-title">{{HOW_TO_USE_TITLE}}</h2>
-<ol class="steps-list">
-{{HOW_TO_USE_HTML}}
-</ol>
-</section>
+{{HOW_TO_SECTION}}
 <section class="section" id="order-section" aria-labelledby="order-title">
 <div class="order-head">
 <h2 id="order-title">{{CTA_TEXT}}</h2>
@@ -127,85 +102,104 @@ decoding="async">
 <div class="quantity-row">
 <div class="quantity-stepper" id="quantity-stepper">
 <button type="button" class="quantity-stepper-btn" data-action="decrement" aria-label="Decrease quantity">&minus;</button>
-<input id="quantity-input" name="quantity" type="number" min="1" max="{{MAX_ORDER_QUANTITY}}" value="1">
-<button type="button" class="quantity-stepper-btn" data-action="increment" aria-label="Increase quantity">&plus;</button>
+<input id="quantity-input" name="quantity" type="number" min="1" max="{{MAX_ORDER_QUANTITY}}" value="1" inputmode="numeric" required aria-label="Item quantity">
+<button type="button" class="quantity-stepper-btn" data-action="increment" aria-label="Increase quantity">+</button>
 </div>
+<div class="quantity-price" id="quantity-price" role="group" aria-label="Price for the selected quantity"></div>
 </div>
-<div id="quantity-price"></div>
-</div>
-<div class="field" data-field="state">
-<label for="state">State</label>
-<select id="state" name="state">
-<option value="">Select your state</option>
-<option value="Lagos">Lagos</option>
-<option value="Ogun">Ogun</option>
-<option value="Enugu">Enugu</option>
-<option value="Abuja">Abuja</option>
-<option value="Other">Other</option>
-</select>
 <div class="field-error"></div>
 </div>
-<div class="field" data-field="deliveryDate">
-<label for="delivery-date">Preferred delivery date</label>
-<input id="delivery-date" name="deliveryDate" type="date">
-<div class="field-error"></div>
-</div>
-<div class="field" data-field="paymentMethod">
-<fieldset>
-<legend>Payment method</legend>
-<div class="radio-option">
-<input id="payment-cod" name="paymentMethod" type="radio" value="cod">
-<label for="payment-cod">Pay on delivery</label>
-</div>
-<div class="radio-option">
-<input id="payment-pay_now" name="paymentMethod" type="radio" value="pay_now">
-<label for="payment-pay_now">Pay now (card / transfer)</label>
-</div>
-</fieldset>
-<div id="cod-hint" class="hint"></div>
-<div class="field-error"></div>
-</div>
+<div id="price-breakdown" class="price-breakdown" aria-live="polite"></div>
 <div class="field" data-field="customerName">
-<label for="customer-name">Full name</label>
-<input id="customer-name" name="customerName" type="text">
+<label for="customerName">Full name</label>
+<input id="customerName" name="customerName" type="text" autocomplete="name" required placeholder="e.g. Chioma Adeyemi">
 <div class="field-error"></div>
 </div>
+<div class="field-row">
 <div class="field" data-field="phone">
 <label for="phone">Phone number</label>
-<input id="phone" name="phone" type="tel">
+<input id="phone" name="phone" type="tel" autocomplete="tel" required placeholder="08012345678">
 <div class="field-error"></div>
 </div>
 <div class="field" data-field="whatsapp">
 <label for="whatsapp">WhatsApp number</label>
-<input id="whatsapp" name="whatsapp" type="tel">
+<input id="whatsapp" name="whatsapp" type="tel" autocomplete="tel" required placeholder="08012345678">
 <div class="field-error"></div>
+</div>
 </div>
 <div class="field" data-field="address">
 <label for="address">Delivery address</label>
-<textarea id="address" name="address" rows="3"></textarea>
+<textarea id="address" name="address" rows="2" required placeholder="House/Street number, landmark, area"></textarea>
 <div class="field-error"></div>
 </div>
-<div class="field field--hidden" data-field="turnstileToken">
-<input name="turnstileToken" type="hidden">
+<div class="field-row">
+<div class="field" data-field="state">
+<label for="state">State</label>
+<select id="state" name="state" required>
+<option value="">Select your state</option>
+<option>Lagos</option>
+<option>Ogun</option>
+<option>Enugu</option>
+<option>Abuja</option>
+<option>Rivers</option>
+<option>Kano</option>
+<option>Oyo</option>
+<option>Other</option>
+</select>
+<div class="field-error"></div>
 </div>
-<div class="field field--hidden">
-<input name="idempotencyKey" type="hidden">
+<div class="field" data-field="deliveryDate">
+<label for="deliveryDate">Delivery date</label>
+<select id="deliveryDate" name="deliveryDate" required data-needs-timezone-filter="true">
+<option value="" selected>Choose a delivery date</option>
+<option value="today">Today</option>
+<option value="tomorrow">Tomorrow</option>
+<option value="next_tomorrow">Day after tomorrow</option>
+</select>
+<div id="late-warning" class="late-warning" role="alert">
+<svg class="icon" aria-hidden="true"><use href="#icon-warning"></use></svg>
+It's past our same-day cutoff &mdash; we'll still note your preference, but delivery may take an extra day.
 </div>
-<div class="field field--actions">
+<div class="field-error"></div>
+</div>
+</div>
+<div class="field" data-field="paymentMethod">
+<fieldset>
+<legend>Payment method</legend>
+<div class="radio-group">
+<label class="radio-option" data-pay-option="pay_now">
+<input type="radio" name="paymentMethod" value="pay_now" checked> Pay now (card/transfer)
+</label>
+<label class="radio-option" data-pay-option="cod">
+<input type="radio" name="paymentMethod" value="cod"> Pay on delivery
+</label>
+</div>
+</fieldset>
+<p class="cod-hint" id="cod-hint" role="status" aria-live="polite"></p>
+<div class="field-error"></div>
+</div>
+<div class="field" data-field="questionNotes">
+<label for="questionNotes">Anything we should know? (optional)</label>
+<textarea id="questionNotes" name="questionNotes" rows="2" placeholder="e.g. Call my sister when you get to the gate"></textarea>
+</div>
+<input type="hidden" name="turnstileToken" value="">
+<div class="cf-turnstile" id="cf-turnstile" data-sitekey="{{TURNSTILE_SITE_KEY}}" data-callback="onTurnstileToken"></div>
+<p class="submit-note">Choosing Pay on delivery? You pay only after you open and check your package.</p>
 <button type="submit" class="submit-button">Place order</button>
+<div class="form-status" role="status" aria-live="polite"></div>
+<div id="retry-banner" class="retry-banner" role="alert">
+<span>We couldn't reach the server. Check your connection and try again.</span>
+<button type="button" id="manual-retry-button" class="manual-retry-button">Try again</button>
 </div>
-<p class="form-status"></p>
 </form>
-<div id="retry-banner" class="retry-banner" data-visible="false">
-<p>We are still processing your order. Please do not refresh.</p>
-<button id="manual-retry-button" class="retry-button">Retry</button>
-</div>
-<div id="late-warning" class="late-warning" data-visible="false">
-<p><strong>Heads up:</strong> this order is taking longer than usual to confirm. Your package is still on its way — pay on delivery when it arrives.</p>
-</div>
 </section>
-{{FAQ_HTML}}
-</div>
+{{FAQ_SECTION}}
+<section class="section cta-band" aria-labelledby="cta-end-title">
+<h2 id="cta-end-title">Still thinking it over?</h2>
+<p class="cta-line">Free delivery in Lagos &amp; Ogun, and you pay on delivery in Lagos, Ogun, Enugu &amp; Abuja.</p>
+<div class="cta-stack"><a class="cta-btn" href="#order-form">Order Now &uarr;</a></div>
+<p class="cta-note">Questions? Call Customer Support from the footer below.</p>
+</section>
 </main>
 <footer class="site-footer" role="contentinfo">
 <div class="footer-brand-row">
@@ -216,11 +210,10 @@ decoding="async">
 <li><a href="#order-form">Order</a></li>
 <li><a href="tel:+2348000000000">Customer Support</a></li>
 </ul>
-<p>&copy; 2026 DODUMODU Skincare. All rights reserved. Pay on delivery in Lagos, Ogun, Enugu &amp; Abuja.</p>
+<p>&copy; 2026 DODUMODU Skincare. All rights reserved. Pay on delivery in Lagos, Ogun, Enugu & Abuja.</p>
 </footer>
 </div>
-<script>(function(){var i=document.getElementById("order-form");if(!i)return;var d=function(){return i.dataset.enhanced==="true"},o=document.getElementById("quantity-stepper"),g=function(){return o&&o.dataset.enhanced==="true"};if(o){var l=o.querySelector('input[name="quantity"]'),L=o.querySelector('.quantity-stepper-btn[data-action="decrement"]'),x=o.querySelector('.quantity-stepper-btn[data-action="increment"]'),v=function(){var e=parseInt(l.max,10)||20,t=parseInt(l.value,10);t=isNaN(t)?1:Math.min(e,Math.max(1,t)),l.value=t,L&&(L.disabled=t<=1),x&&(x.disabled=t>=e)};o.addEventListener("click",function(e){if(!g()){var t=e.target.closest&&e.target.closest(".quantity-stepper-btn");!t||t.disabled||(l.value=(parseInt(l.value,10)||1)+(t.dataset.action==="increment"?1:-1),v())}}),l.addEventListener("input",function(){g()||v(),p()}),l.addEventListener("blur",function(){g()||v(),p()}),v()}var _=["Lagos","Ogun","Enugu","Abuja"],b=5,E=document.getElementById("cod-hint"),m=i.elements.state,C=i.elements.quantity;function A(e){var t=String(e||"").trim().toLowerCase().replace(/[.,]/g," ").replace(/\\s+/g," ").trim();return a={abuja:"fct","abuja state":"fct","fct abuja":"fct","f c t":"fct","federal capital territory":"fct","lagos state":"lagos","ogun state":"ogun","enugu state":"enugu"}[t]||t}function B(e,t){var a=_.some(function(r){return A(r)===A(e)});return a?t>=b?{reason:"bulk",message:"Pay on delivery covers up to "+(b-1)+" items \u2014 choose \"Pay now\" for bulk orders."}:null:{reason:"state",message:"Pay on delivery isn\u2019t available in "+(e||"your area")+" yet \u2014 choose \"Pay now\" and we\u2019ll dispatch today."}}function p(){if(!(d()||!E)){var e=parseInt(C&&C.value,10)||1,t=m&&m.value,a=B(t,e),r=i.querySelector?i.querySelector('input[name="paymentMethod"][value="cod"]'):null,n=r&&r.closest?r.closest(".radio-option"):null;if(a){if(r&&r.checked){var u=i.querySelector('input[name="paymentMethod"][value="pay_now"]');u&&(u.checked=!0)}r&&(r.disabled=!0)}else{r&&(r.disabled=!1)}}var D=function(e){e.style.height="auto",e.style.height=Math.max(96,e.scrollHeight)+"px"};i.querySelectorAll("textarea").forEach(function(e){e.addEventListener("input",function(){D(e)}),e.value&&D(e)});var h={customerName:function(e){return e.trim().length<2?"Enter your full name.":""},phone:function(e){return/^[0-9+\\-\\s()]{7,16}$/.test(e.trim())?"":"Enter a valid phone number."},whatsapp:function(e){return/^[0-9+\\-\\s()]{7,16}$/.test(e.trim())?"":"Enter a valid WhatsApp number."},address:function(e){return e.trim().length<8?"Add street, area and a landmark.":""},quantity:function(e){return parseInt(e,10)>=1?"":"Quantity must be at least 1."},state:function(e){return e?"":"Select your state."},deliveryDate:function(e){return e?"":"Choose a delivery date."}},N=function(e,t){e.dataset.invalid=t?"true":"false";var a=e.querySelector(".field-error");a&&(a.textContent=t)};i.querySelectorAll(".field").forEach(function(e){var t=e.dataset.field,a=i.elements[t];if(!(!a||!h[t])){var r=function(){d()||N(e,h[t](a.value||""))};a.addEventListener("blur",r),a.addEventListener("input",function(){(e.dataset.invalid==="true"||a.value)&&r()})}}),i.addEventListener("submit",function(e){if(!d()){e.preventDefault();var t=null;i.querySelectorAll(".field").forEach(function(n){var u=n.dataset.field,c=i.elements[u];if(!(!c||!h[u])){var s=h[u](c.value||"");N(n,s),s&&!t&&(t=c)}});var a=i.querySelector(".form-status"),r=i.querySelector(".submit-button");if(t){a&&(a.textContent="Please correct the highlighted fields."),t.focus(),t.scrollIntoView({behavior:"smooth",block:"center"});return}r&&(r.dataset.loading="true",r.disabled=!0),a&&(a.textContent="Placing your order..."),setTimeout(function(){r&&(r.dataset.loading="false",r.disabled=!1),a&&(a.textContent="Preview mode: run `npm run build`, or connect the order API, to complete checkout."),900)}})})();</script>
-<script>function onTurnstileToken(e){var n=document.querySelector('input[name="turnstileToken"]');n&&(n.value=e),window.__turnstileTokenReceived&&window.__turnstileTokenReceived(e)}</script>
+{{INLINE_SCRIPTS}}
 <script src="/{{APP_JS_PATH}}" defer></script>
 </body>
 </html>
