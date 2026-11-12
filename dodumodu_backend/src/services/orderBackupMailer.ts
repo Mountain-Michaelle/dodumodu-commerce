@@ -51,7 +51,8 @@ export function sendInBackground(c: Context, p: Promise<unknown>): void {
   }
 }
 
-const clean = (v: unknown, max = 500): string =>
+/** Sanitize a value for inclusion in email text. */
+export const clean = (v: unknown, max = 500): string =>
   String(v ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max);
 
 function recipients(raw: string | undefined): string[] {
