@@ -23,17 +23,6 @@ import type { Env } from "../env";
 /** The four states the admin shows. */
 export type PublishState = "PUBLISHED" | "DEPLOYING" | "FAILED" | "LIVE";
 
-/**
- * The version marker a prerendered page carries.
- *
- * `pub_<publishId>` rather than the bare id, so a page claiming to be publish "6"
- * cannot be confused with any other 6 anywhere - a build number, a category id, a
- * year.
- */
-export function publishVersion(publishId: number): string {
-  return `pub_${publishId}`;
-}
-
 const META_TAG = /<meta\s+name=["']storefront-publish-id["']\s+content=["']([^"']+)["']\s*\/?>/i;
 const META_TAG_REVERSED = /<meta\s+content=["']([^"']+)["']\s+name=["']storefront-publish-id["']\s*\/?>/i;
 const BUILD_TAG = /<meta\s+name=["']storefront-build-id["']\s+content=["']([^"']*)["']\s*\/?>/i;
@@ -113,8 +102,8 @@ export async function verifyStorefront(env: Env, slug: string): Promise<Storefro
 }
 
 export type ResolveInput = {
-  /** The newest publish id for this product, or null if it was never published. */
-  latestPublishId: number | null;
+  /** The newest publish ref (pub_ + 20 hex) for this product, or null if it was never published. */
+  latestPublishRef: string | null;
   /** The stored deployment attempt state. */
   buildStatus: string;
   /** What the public storefront actually reports. */
@@ -130,11 +119,11 @@ export type ResolveInput = {
  * exactly the case where a naive "failed wins" rule would hide a working page.
  */
 export function resolvePublishState({
-  latestPublishId, buildStatus, liveVersion,
+  latestPublishRef, buildStatus, liveVersion,
 }: ResolveInput): PublishState {
-  if (latestPublishId === null) return "PUBLISHED";
+  if (latestPublishRef === null) return "PUBLISHED";
   // Verified: the page the public storefront serves was built from this publish.
-  if (liveVersion === publishVersion(latestPublishId)) return "LIVE";
+  if (liveVersion === latestPublishRef) return "LIVE";
   // The snapshot exists but the storefront is not showing it yet.
   if (buildStatus === "failed") return "FAILED";
   if (buildStatus === "triggered") return "DEPLOYING";

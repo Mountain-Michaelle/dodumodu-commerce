@@ -390,6 +390,10 @@ export const productPublishes = pgTable("product_publishes", {
   deployHttpStatus: integer("deploy_http_status"),
   deployAttempts: integer("deploy_attempts").notNull().default(0),
   deployAttemptedAt: timestamp("deploy_attempted_at"),
+  // Public id of this publish ("pub_" + 20 hex): the marker the storefront page carries.
+  publishRef: text("publish_ref").notNull(),
+  // Hash of the snapshot content, so publishing identical content reuses this row.
+  contentHash: text("content_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -464,6 +468,22 @@ export const siteBuilds = pgTable("site_builds", {
   triggeredAt: timestamp("triggered_at").notNull().defaultNow(),
   verifiedAt: timestamp("verified_at"),
   verificationError: text("verification_error"),
+  triggerPublishId: integer("trigger_publish_id"),
+  runUrl: text("run_url"),
+  currentStep: text("current_step"),
+  failedStep: text("failed_step"),
+  lastEventAt: timestamp("last_event_at").notNull().defaultNow(),
+});
+
+// The step-by-step log of one build, written by the GitHub Actions run, read by the admin panel.
+export const deployEvents = pgTable("deploy_events", {
+  id: serial("id").primaryKey(),
+  buildId: text("build_id").notNull(),
+  step: text("step").notNull(),
+  label: text("label").notNull().default(""),
+  status: text("status").notNull(),
+  message: text("message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const visitorAnalyticsMeta = pgTable("visitor_analytics_meta", {

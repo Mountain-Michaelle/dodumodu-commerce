@@ -7,19 +7,17 @@ import { testimonialsRepo } from "../data/testimonialsRepo";
 import { discountTiersRepo } from "../data/discountTiersRepo";
 import { paymentRulesRepo } from "../data/paymentRulesRepo";
 import { publishesRepo } from "../data/publishesRepo";
+import { siteBuildsRepo } from "../data/siteBuildsRepo";
+import { PUBLISH_REF_PATTERN } from "./publishRef";
 import type { Env } from "../env";
 
-/* Publishing and deploying are separate facts, and these tests exist because it is
-   easy to conflate them.
-
-   The invariant under test: a publish is successful the moment the immutable
-   snapshot exists. Cloudflare being unreachable is a fact about Cloudflare, not
-   about whether the content was captured - and a valid snapshot must survive it.
-
-   Repository reads are stubbed, following the approach src/routes/admin.test.ts
-   uses. What is under test here is the ORDER of the two operations and the
-   SEPARATION of their outcomes, not the SQL. What is asserted is what ended up
-   recorded in product_publishes, because that is the durable artefact. */
+/* A publish is successful the moment the immutable snapshot exists; deploying is a separate fact.
+   What these tests pin down:
+     * a publish id is minted ONLY when the content changed - publishing twice, or retrying, never mints another;
+     * a retry is a new BUILD against the SAME publish ref;
+     * every dispatch failure - an unreachable GitHub, a rejected token, a missing token - is a FAILED build that
+       carries the exact reason, so the admin never shows "deploying" for ever.
+   Repository reads are stubbed; what is asserted is what ended up recorded. */
 
 const env = (token: string) => ({ MAX_ORDER_QUANTITY: "20", GITHUB_DEPLOY_TOKEN: token } as unknown as Env);
 
@@ -28,26 +26,27 @@ const PRODUCT = {
   price: 1500000, packageOptions: [], seoTitle: null, seoDescription: null,
 };
 
-type SnapshotRow = { id: number; payload: unknown; publishedBy: string; buildStatus: string };
+type PublishRow = {
+  id: number; productId: number; payload: unknown; publishedBy: string; buildStatus: string; publishRef: string;
+  contentHash: string | null; deployError: string | null; deployHttpStatus: number | null; deployAttempts: number;
+};
+type BuildRow = {
+  buildId: string; status: string; triggerPublishId: number | null; intendedPublications: { publishRef: string }[];
+  verificationError: string | null; failedStep: string | null; lastEventAt: Date;
+};
 
-/**
- * Stubs every read assemble() performs and both publish writes, recording what
- * lands in product_publishes so the assertions are about real durable state.
- */
 function harness() {
-  const rows: SnapshotRow[] = [];
+  const rows: PublishRow[] = [];
+  const builds: BuildRow[] = [];
+  const events: { buildId: string; step: string; status: string; message?: string | null }[] = [];
   const saved = {
-    findBySlug: productsRepo.findBySlug,
-    forProduct: productPagesRepo.forProduct,
-    savePage: productPagesRepo.save,
-    imagesForProduct: productsRepo.imagesForProduct,
-    listActiveForProduct: testimonialsRepo.listActiveForProduct,
-    findActive: discountTiersRepo.findActive,
-    getRules: paymentRulesRepo.get,
-    record: publishesRepo.record,
-    markBuildStatus: publishesRepo.markBuildStatus,
-    recordDeployAttempt: publishesRepo.recordDeployAttempt,
+    findBySlug: productsRepo.findBySlug, forProduct: productPagesRepo.forProduct, savePage: productPagesRepo.save,
+    imagesForProduct: productsRepo.imagesForProduct, listActiveForProduct: testimonialsRepo.listActiveForProduct,
+    findActive: discountTiersRepo.findActive, getRules: paymentRulesRepo.get,
+    record: publishesRepo.record, recordDeployAttempt: publishesRepo.recordDeployAttempt,
     latestForProduct: publishesRepo.latestForProduct,
+    sRecord: siteBuildsRepo.record, sAddEvent: siteBuildsRepo.addEvent, sMarkFailed: siteBuildsRepo.markFailed,
+    sLatestForPublish: siteBuildsRepo.latestForPublish,
   };
 
   productsRepo.findBySlug = async () => PRODUCT as never;
@@ -60,163 +59,159 @@ function harness() {
 
   publishesRepo.record = async (_db, input) => {
     const row = {
-      id: rows.length + 1,
-      payload: input.payload,
-      publishedBy: input.publishedBy ?? "unknown",
-      buildStatus: input.buildStatus ?? "triggered",
-    } as SnapshotRow;
+      id: rows.length + 1, productId: input.productId, payload: input.payload, publishedBy: input.publishedBy ?? "x",
+      buildStatus: input.buildStatus ?? "triggered", publishRef: input.publishRef, contentHash: input.contentHash ?? null,
+      deployError: null, deployHttpStatus: null, deployAttempts: 0,
+    };
     rows.push(row);
     return row as never;
   };
-  publishesRepo.markBuildStatus = async (_db, id, status) => {
+  publishesRepo.recordDeployAttempt = async (_db, id, a) => {
     const row = rows.find((r) => r.id === id);
     if (!row) return false;
-    row.buildStatus = status;
-    return true;
-  };
-  publishesRepo.recordDeployAttempt = async (_db, id, a) => {
-    const row = rows.find((r) => r.id === id) as (SnapshotRow & { deployError?: string | null }) | undefined;
-    if (!row) return false;
-    row.buildStatus = a.status;
-    row.deployError = a.error;
+    Object.assign(row, { buildStatus: a.status, deployError: a.error, deployHttpStatus: a.httpStatus, deployAttempts: row.deployAttempts + 1 });
     return true;
   };
   publishesRepo.latestForProduct = async () => (rows[rows.length - 1] ?? null) as never;
 
-  const restore = () => {
-    productsRepo.findBySlug = saved.findBySlug;
-    productPagesRepo.forProduct = saved.forProduct;
-    productPagesRepo.save = saved.savePage;
-    productsRepo.imagesForProduct = saved.imagesForProduct;
-    testimonialsRepo.listActiveForProduct = saved.listActiveForProduct;
-    discountTiersRepo.findActive = saved.findActive;
-    paymentRulesRepo.get = saved.getRules;
-    publishesRepo.record = saved.record;
-    publishesRepo.markBuildStatus = saved.markBuildStatus;
-    publishesRepo.recordDeployAttempt = saved.recordDeployAttempt;
-    publishesRepo.latestForProduct = saved.latestForProduct;
+  siteBuildsRepo.record = async (_db, input) => {
+    const row = {
+      buildId: input.buildId, status: input.status ?? "triggered", triggerPublishId: input.triggerPublishId ?? null,
+      intendedPublications: input.intendedPublications as never, verificationError: null, failedStep: null, lastEventAt: new Date(),
+    };
+    builds.push(row);
+    return row as never;
   };
+  siteBuildsRepo.addEvent = async (_db, e) => { events.push(e); return {} as never; };
+  siteBuildsRepo.markFailed = async (_db, buildId, error, step) => {
+    const b = builds.find((x) => x.buildId === buildId);
+    if (b) Object.assign(b, { status: "failed", verificationError: error, failedStep: step ?? null });
+    return b as never;
+  };
+  siteBuildsRepo.latestForPublish = async (_db, id) =>
+    ([...builds].reverse().find((b) => b.triggerPublishId === id) ?? null) as never;
 
-  return { rows, restore, onFetch: null as null | (() => void) };
+  const restore = () => {
+    productsRepo.findBySlug = saved.findBySlug; productPagesRepo.forProduct = saved.forProduct;
+    productPagesRepo.save = saved.savePage; productsRepo.imagesForProduct = saved.imagesForProduct;
+    testimonialsRepo.listActiveForProduct = saved.listActiveForProduct; discountTiersRepo.findActive = saved.findActive;
+    paymentRulesRepo.get = saved.getRules; publishesRepo.record = saved.record;
+    publishesRepo.recordDeployAttempt = saved.recordDeployAttempt; publishesRepo.latestForProduct = saved.latestForProduct;
+    siteBuildsRepo.record = saved.sRecord; siteBuildsRepo.addEvent = saved.sAddEvent;
+    siteBuildsRepo.markFailed = saved.sMarkFailed; siteBuildsRepo.latestForPublish = saved.sLatestForPublish;
+  };
+  return { rows, builds, events, restore, dispatches: [] as { body: Record<string, unknown> }[] };
 }
 
-/**
- * Runs a test with a stubbed fetch and a stubbed harness, restoring both after.
- *
- * `ctx.onFetch` is a hook the test can set to observe state at the exact moment the
- * deploy hook is called - which is the only way to assert the ORDER of the two
- * operations rather than just their end states.
- */
 async function withHarness(
-  fetchImpl: () => Promise<Response>,
+  fetchImpl: (init: RequestInit) => Promise<Response>,
   run: (ctx: ReturnType<typeof harness>) => Promise<void>,
 ) {
   const originalFetch = globalThis.fetch;
   const ctx = harness();
-  globalThis.fetch = (async () => {
-    ctx.onFetch?.();
-    return fetchImpl();
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    ctx.dispatches.push({ body: JSON.parse(String(init?.body ?? "{}")) });
+    return fetchImpl(init);
   }) as never;
   try { await run(ctx); } finally { globalThis.fetch = originalFetch; ctx.restore(); }
 }
 
 const db = {} as never;
+const ok = async () => new Response(null, { status: 204 });
 
-test("a successful hook reports published AND triggered, as two separate facts", async () => {
-  await withHarness(async () => new Response("", { status: 201 }), async (ctx) => {
-    const result = await publishService.publish(db, env("https://hook.example/d"), "glow-serum", "owner@test");
-    assert.ok(result.record, "the snapshot must exist");
-    assert.equal(result.deployment.status, "triggered");
-    assert.equal(result.deployment.retryable, true);
-    assert.equal(ctx.rows.length, 1, "exactly one snapshot");
-    assert.equal(ctx.rows[0].buildStatus, "triggered");
+test("a publish gets a random pub_ + 20 hex ref and a queued build whose id is sent to GitHub", async () => {
+  await withHarness(ok, async (ctx) => {
+    const r = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+    assert.match(r.record.publishRef, PUBLISH_REF_PATTERN);
+    assert.equal(r.reused, false);
+    assert.equal(r.outcome, "dispatched");
+    assert.equal(r.deployment.status, "triggered");
+    assert.equal(ctx.builds.length, 1);
+    const sent = (ctx.dispatches[0].body.client_payload ?? {}) as Record<string, unknown>;
+    assert.equal(sent.build_id, r.buildId, "the run reports against the build the Worker already created");
+    assert.equal(sent.publish_ref, r.record.publishRef);
   });
 });
 
-test("a FAILED hook does not roll back, delete or invalidate the snapshot", async () => {
-  await withHarness(async () => { throw new Error("ECONNREFUSED"); }, async () => {
-    const result = await publishService.publish(db, env("https://hook.example/d"), "glow-serum", "owner@test");
-    // The publish still happened. That is the entire design.
-    assert.ok(result.record, "a failed deploy must never mean the publish failed");
-    assert.equal(result.deployment.status, "failed");
-    assert.equal(result.deployment.retryable, true);
-  });
-  // The snapshot itself is inspected in the next test, where it can be.
-});
-
-test("a FAILED hook still leaves the snapshot present with its payload intact", async () => {
-  await withHarness(async () => new Response("", { status: 500 }), async (ctx) => {
-    await publishService.publish(db, env("https://hook.example/d"), "glow-serum", "owner@test");
-    assert.equal(ctx.rows.length, 1, "the snapshot must survive the deploy failure");
-    assert.ok(ctx.rows[0].payload, "and must still carry its content");
-    assert.equal(ctx.rows[0].buildStatus, "failed", "but it is honestly recorded as failed");
+test("publishing identical content again reuses the publish: no new ref, and no second build while one runs", async () => {
+  await withHarness(ok, async (ctx) => {
+    const first = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+    const second = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+    assert.equal(ctx.rows.length, 1, "a second publish row must not be created");
+    assert.equal(second.record.publishRef, first.record.publishRef);
+    assert.equal(second.reused, true);
+    assert.equal(second.outcome, "already-running");
+    assert.equal(ctx.dispatches.length, 1, "GitHub is not asked twice for the same publish");
   });
 });
 
-test("a snapshot is inserted as 'pending', never as 'triggered' before the hook fires", async () => {
-  // "triggered" means the request was ACCEPTED. Asserting it at insert time would
-  // claim something that has not happened yet. This reads the row from inside the
-  // stubbed fetch, which runs after the insert and before the status is written -
-  // so it observes exactly that window.
-  let statusWhenHookFired: string | undefined;
-  await withHarness(async () => new Response("", { status: 200 }), async (ctx) => {
-    ctx.onFetch = () => { statusWhenHookFired = ctx.rows[0]?.buildStatus; };
-    await publishService.publish(db, env("https://hook.example/d"), "glow-serum", "owner@test");
-    assert.equal(statusWhenHookFired, "pending",
-      "at the moment the hook is called the snapshot must still say pending");
-    assert.equal(ctx.rows[0].buildStatus, "triggered", "and only afterwards become triggered");
+test("a FAILED dispatch keeps the snapshot, records the exact reason, and fails the build instead of leaving it pending", async () => {
+  await withHarness(async () => new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 }), async (ctx) => {
+    const r = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+    assert.ok(r.record, "a failed deploy never means the publish failed");
+    assert.equal(r.deployment.status, "failed");
+    assert.match(r.deployment.error ?? "", /401.*Bad credentials/);
+    assert.equal(ctx.rows.length, 1);
+    assert.equal(ctx.rows[0].deployError, r.deployment.error);
+    assert.equal(ctx.builds[0].status, "failed");
+    assert.equal(ctx.builds[0].failedStep, "dispatch");
   });
 });
 
-test("with no hook configured the publish succeeds and the status stays pending", async () => {
+test("a missing token is a FAILED build with the reason, not a silent pending", async () => {
   await withHarness(async () => { throw new Error("must not be called"); }, async (ctx) => {
-    const result = await publishService.publish(db, env(""), "glow-serum", "owner@test");
-    assert.ok(result.record, "a local publish still publishes");
-    assert.equal(result.deployment.status, "pending");
-    assert.equal(result.deployment.retryable, true, "retryable after the token is configured");
-    assert.equal(ctx.rows[0].buildStatus, "pending", "an absent hook must never be recorded as a failure");
+    const r = await publishService.publish(db, env(""), "glow-serum", "owner@test");
+    assert.equal(r.deployment.status, "pending");
+    assert.match(r.deployment.error ?? "", /GITHUB_DEPLOY_TOKEN/);
+    assert.equal(ctx.builds[0].status, "failed");
+    assert.match(ctx.builds[0].verificationError ?? "", /GITHUB_DEPLOY_TOKEN/);
+  });
+});
+
+test("changed content mints a NEW ref; unchanged content after a failure reuses the old one and retries it", async () => {
+  await withHarness(async () => new Response("{}", { status: 500 }), async (ctx) => {
+    const first = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+    const again = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+    assert.equal(again.record.publishRef, first.record.publishRef, "a failed deploy does not create another publish");
+    assert.equal(ctx.rows.length, 1);
+    assert.equal(again.outcome, "dispatched", "but it does try the build again");
+    assert.equal(ctx.builds.length, 2);
+
+    PRODUCT.name = "Radiance Glow Serum 2";
+    try {
+      const changed = await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
+      assert.notEqual(changed.record.publishRef, first.record.publishRef);
+      assert.equal(ctx.rows.length, 2);
+    } finally { PRODUCT.name = "Radiance Glow Serum"; }
   });
 });
 
 test("every publish writes a complete snapshot, so the build never reads a draft table", async () => {
-  await withHarness(async () => { throw new Error("x"); }, async (ctx) => {
-    await publishService.publish(db, env(""), "glow-serum", "owner@test");
+  await withHarness(ok, async (ctx) => {
+    await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
     const payload = ctx.rows[0].payload as Record<string, unknown>;
     for (const key of ["slug", "publishedAt", "product", "page", "images", "testimonials",
       "deliveryOptions", "discountTiers", "paymentRules"]) {
       assert.ok(key in payload, `the snapshot must carry ${key}`);
     }
-    assert.equal((payload.product as Record<string, unknown>).slug, "glow-serum");
   });
 });
 
-test("a retry rebuilds the SAME snapshot instead of publishing again", async () => {
-  await withHarness(async () => { throw new Error("down"); }, async (ctx) => {
+test("a retry is a NEW build against the SAME publish and creates no second snapshot", async () => {
+  await withHarness(ok, async (ctx) => {
     const published = await publishService.publish(db, env(""), "glow-serum", "owner@test");
-    const before = ctx.rows.length;
-
-    const retry = await publishService.redeploy(db, env("https://hook.example/d"), 1);
-    assert.ok(retry, "a retry must find the existing snapshot");
-    assert.equal(retry.publishId, published.record.id, "it targets the same publish");
-    assert.equal(retry.deployment.status, "failed");
-    assert.equal(ctx.rows.length, before, "a retry must NOT create a second snapshot");
-    assert.equal(ctx.rows[0].buildStatus, "failed");
-  });
-});
-
-test("a successful retry marks the existing snapshot triggered, with no second snapshot", async () => {
-  await withHarness(async () => new Response("", { status: 200 }), async (ctx) => {
-    await publishService.publish(db, env(""), "glow-serum", "owner@test");
-    const retry = await publishService.redeploy(db, env("https://hook.example/d"), 1);
-    assert.ok(retry, "the retry must find the snapshot the publish just wrote");
+    const retry = await publishService.redeploy(db, env("tok"), 1, "owner@test");
+    assert.ok(retry);
+    assert.equal(retry.publishId, published.record.id);
+    assert.equal(retry.publishRef, published.record.publishRef);
     assert.equal(retry.deployment.status, "triggered");
-    assert.equal(ctx.rows.length, 1, "still exactly one snapshot");
-    assert.equal(ctx.rows[0].buildStatus, "triggered");
+    assert.equal(ctx.rows.length, 1, "a retry must NOT create a second snapshot");
+    assert.equal(ctx.builds.length, 2, "it is its own build, so its steps are its own");
   });
 });
 
 test("retrying a product that was never published is null, not an error", async () => {
-  await withHarness(async () => new Response("", { status: 200 }), async () => {
-    assert.equal(await publishService.redeploy(db, env("https://hook.example/d"), 1), null);
+  await withHarness(ok, async () => {
+    assert.equal(await publishService.redeploy(db, env("tok"), 1), null);
   });
 });

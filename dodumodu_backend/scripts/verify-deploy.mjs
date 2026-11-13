@@ -1,41 +1,52 @@
-// scripts/verify-deploy.mjs — post-deploy marker verification (CI).
-// Fetches the public storefront root and every intended product slug and reads
-// the <meta name="storefront-publish-id"> + <meta name="storefront-build-id">
-// markers. On ANY mismatch, stale response, timeout, or fetch failure the build
-// is left unverified (exit 1) — a successful `wrangler deploy` alone NEVER
-// marks a publication LIVE. Retry: re-run the workflow; the stale build is
-// refused if a newer intended set has since been published.
+// scripts/verify-deploy.mjs - post-deploy verification (CI).
 //
-// Env:
-//   SITE_URL               public storefront origin, e.g. https://yoursite.com
-//   EXPECTED               JSON map { slug: publishId } of the intended set
-//   EXPECTED_BUILD_ID      build id the markers must carry (optional but recommended)
-import { Pool } from 'pg'
+// Reads the PUBLIC storefront - the same bytes a customer gets - and checks every product page carries the publish
+// ref and build id this build rendered. `wrangler deploy` succeeding proves nothing about what is served, so a
+// publication is only ever reported LIVE after this has seen it. Then it asks the Worker to read the pages itself
+// and record the result: the Worker's own reading, not this script's word, is what marks the build verified.
+//
+// It also refuses to verify a build that has been overtaken: if a product was published again while this build
+// ran, the newer publish belongs to a newer build.
+//
+// Env: SITE_URL, WORKER_URL, DEPLOY_TRIGGER_SECRET, BUILD_ID.   Optional: VERIFY_ATTEMPTS (8), VERIFY_DELAY_MS (6000).
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { post, redact } from './ci.mjs'
 
+const here = dirname(fileURLToPath(import.meta.url))
 const SITE_URL = (process.env.SITE_URL ?? '').replace(/\/+$/, '')
-const EXPECTED_BUILD_ID = (process.env.EXPECTED_BUILD_ID ?? '').trim()
 const WORKER_URL = (process.env.WORKER_URL ?? '').replace(/\/+$/, '')
-const DEPLOY_TRIGGER_SECRET = (process.env.DEPLOY_TRIGGER_SECRET ?? '').trim()
-let EXPECTED = {}
-try {
-  EXPECTED = JSON.parse(process.env.EXPECTED ?? '{}')
-} catch (err) {
-  console.error(`verify-deploy: EXPECTED is not valid JSON: ${err.message}`)
-  process.exit(2)
-}
-
-if (!SITE_URL) {
-  console.error('verify-deploy: SITE_URL is required (public storefront origin)')
-  process.exit(2)
-}
-
-const slugs = Object.keys(EXPECTED)
-if (slugs.length === 0) {
-  console.error('verify-deploy: EXPECTED is empty — refusing to verify a build with no intended publications')
-  process.exit(2)
-}
-
+const SECRET = (process.env.DEPLOY_TRIGGER_SECRET ?? '').trim()
+const ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS ?? 8)
+const DELAY_MS = Number(process.env.VERIFY_DELAY_MS ?? 6000)
 const TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS ?? 8000)
+
+const STEP = 'verify'
+const LABEL = 'Reading the live storefront'
+
+async function fail(message) {
+  console.error(`verify-deploy: ${message}`)
+  const r = await post('events', { step: STEP, label: LABEL, status: 'failed', message: redact(message).slice(0, 3500) })
+  if (!r.ok) console.warn(`verify-deploy: could not report the failure (${r.status}): ${r.text}`)
+  process.exit(1)
+}
+
+if (!SITE_URL) await fail('SITE_URL is not set. Add it as a GitHub Actions secret (the public storefront origin).')
+
+let meta
+try {
+  meta = JSON.parse(readFileSync(join(here, '..', 'src', 'generated', 'build-meta.json'), 'utf8'))
+} catch (err) {
+  await fail(`cannot read the build metadata: ${err.message}`)
+}
+const expected = meta.expected ?? {}
+const buildId = meta.buildId
+const slugs = Object.keys(expected)
+if (slugs.length === 0) {
+  console.log('verify-deploy: no products are published, so there is nothing to look for - asking the Worker to close the build.')
+}
+await post('events', { step: STEP, label: LABEL, status: 'running' })
 
 function readMarker(html, name) {
   const direct = new RegExp(`<meta\\s+name=["']${name}["']\\s+content=["']([^"']*)["']\\s*\\/?>`, 'i')
@@ -43,138 +54,63 @@ function readMarker(html, name) {
   return direct.exec(html)?.[1] ?? reversed.exec(html)?.[1] ?? null
 }
 
-async function fetchPage(slug) {
-  const url = `${SITE_URL}/${slug}/`
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    headers: { 'User-Agent': 'dodumodu-deploy-verifier', 'Cache-Control': 'no-cache' },
-  })
-  if (!res.ok) return { ok: false, status: res.status, html: null, url }
-  return { ok: true, status: res.status, html: await res.text(), url }
-}
-
-// Bounded callback to the Worker's build-status endpoints. A callback failure
-// is logged and returned as false — it never overrides the verification result
-// that the caller is acting on.
-async function postLifecycle(endpoint, buildId, body = {}) {
-  if (!WORKER_URL || !DEPLOY_TRIGGER_SECRET || !buildId) {
-    console.log(`verify-deploy: skipping ${endpoint} callback — WORKER_URL, DEPLOY_TRIGGER_SECRET, or buildId not configured`)
-    return false
-  }
-  const url = `${WORKER_URL}/admin/builds/${encodeURIComponent(buildId)}/${endpoint}`
-  let attempts = 0
-  const maxAttempts = 3
-  while (attempts < maxAttempts) {
-    attempts += 1
+async function problems() {
+  const found = []
+  for (const slug of slugs) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        signal: AbortSignal.timeout(10_000),
-        headers: {
-          Authorization: `Bearer ${DEPLOY_TRIGGER_SECRET}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
+      const res = await fetch(`${SITE_URL}/${slug}/`, {
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { 'User-Agent': 'dodumodu-deploy-verifier', 'Cache-Control': 'no-cache' },
       })
-      if (res.ok) {
-        console.log(`verify-deploy: ${endpoint} callback accepted for build ${buildId}`)
-        return true
-      }
-      const text = await res.text().catch(() => '')
-      console.warn(`verify-deploy: ${endpoint} callback returned HTTP ${res.status}: ${text}`)
+      if (!res.ok) { found.push(`/${slug}/ answered HTTP ${res.status}`); continue }
+      const html = await res.text()
+      const ref = readMarker(html, 'storefront-publish-id')
+      const build = readMarker(html, 'storefront-build-id')
+      if (ref !== expected[slug]) found.push(`/${slug}/ serves ${ref ?? '(no marker)'}, expected ${expected[slug]}`)
+      else if (build !== buildId) found.push(`/${slug}/ is from build ${build ?? '(no marker)'}, expected ${buildId}`)
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err)
-      console.warn(`verify-deploy: ${endpoint} callback attempt ${attempts}/${maxAttempts} failed: ${reason}`)
+      found.push(`/${slug}/ could not be fetched (${err.name ?? err})`)
     }
-    if (attempts < maxAttempts) await new Promise((r) => setTimeout(r, 1000 * attempts))
   }
-  console.error(`verify-deploy: ${endpoint} callback failed after ${maxAttempts} attempts — build status may be stale`)
-  return false
+  return found
 }
 
-// Re-read the newest publishes and refuse if anything changed while the build
-// was running (safeguard 1: publication consistency).
-async function revalidateIntent() {
-  const databaseUrl = process.env.DATABASE_URL
-  if (!databaseUrl) {
-    // No DB handle in this step: the verifier still checks markers, it just
-    // cannot prove staleness from here. CI passes DATABASE_URL for the full check.
-    console.log('verify-deploy: no DATABASE_URL — skipping staleness revalidation')
-    return { stale: false }
-  }
-  const pool = new Pool({ connectionString: databaseUrl, max: 2 })
-  try {
-    const { rows } = await pool.query(
-      `SELECT p.slug, pp.id AS publish_id
-         FROM products p
-         JOIN product_publishes pp ON pp.product_id = p.id
-        WHERE pp.id = (SELECT MAX(pp2.id) FROM product_publishes pp2 WHERE pp2.product_id = p.id)`,
-    )
-    const current = Object.fromEntries(rows.map((r) => [r.slug, r.publish_id]))
-    for (const [slug, publishId] of Object.entries(EXPECTED)) {
-      if (current[slug] !== publishId) {
-        return { stale: true, detail: `/${slug}/ now publishes ${current[slug] ?? 'nothing'}, expected ${publishId}` }
-      }
+// A fresh deploy can take a few seconds to reach every edge location, so look more than once before concluding.
+let remaining = []
+for (let i = 1; i <= ATTEMPTS; i += 1) {
+  remaining = await problems()
+  if (remaining.length === 0) break
+  console.log(`verify-deploy: attempt ${i}/${ATTEMPTS} - ${remaining.join('; ')}`)
+  if (i < ATTEMPTS) await new Promise((r) => setTimeout(r, DELAY_MS))
+}
+if (remaining.length > 0) {
+  await fail(`the live storefront does not match this build after ${ATTEMPTS} checks: ${remaining.join('; ')}`)
+}
+
+// Overtaken? Ask which publish each product is at NOW.
+try {
+  const res = await fetch(`${WORKER_URL}/ci/snapshots?summary=1`, {
+    signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${SECRET}` },
+  })
+  if (res.ok) {
+    const { snapshots } = await res.json()
+    const current = Object.fromEntries(snapshots.map((s) => [s.slug, s.publishRef]))
+    const moved = slugs.find((s) => current[s] !== expected[s])
+    const extra = Object.keys(current).find((s) => !(s in expected))
+    if (moved || extra) {
+      await fail(`superseded: ${moved ? `/${moved}/ was published again` : `/${extra}/ was published`} while this build ran. The newer publish is built by its own run.`)
     }
-    // A newly published slug the build never rendered is also stale.
-    for (const slug of Object.keys(current)) {
-      if (!(slug in EXPECTED)) {
-        return { stale: true, detail: `/${slug}/ has a publish the build did not render` }
-      }
-    }
-    return { stale: false }
-  } finally {
-    await pool.end()
+  } else {
+    console.warn(`verify-deploy: could not check for newer publishes (HTTP ${res.status}); continuing.`)
   }
+} catch (err) {
+  console.warn(`verify-deploy: could not check for newer publishes: ${err.message}; continuing.`)
 }
 
-// The build ID reported back to the Worker. ExpectEXPECTED_BUILD_ID is set by
-// CI from the rendered output; if absent we cannot report a build ID.
-const BUILD_ID = EXPECTED_BUILD_ID || null
-
-const failures = []
-
-const intent = await revalidateIntent()
-if (intent.stale) {
-  console.error(`verify-deploy: STALE — ${intent.detail}. Refusing to mark this build verified.`)
-  if (BUILD_ID) await postLifecycle('mark-failed', BUILD_ID, { error: `stale: ${intent.detail}` })
-  process.exit(1)
+const verdict = await post('mark-verified', {}, { retries: 4 })
+let status = null
+try { status = JSON.parse(verdict.text).status } catch { /* not JSON */ }
+if (!verdict.ok || status !== 'verified') {
+  await fail(`the Worker did not accept the build as verified (HTTP ${verdict.status}): ${verdict.text}`)
 }
-
-for (const [slug, publishId] of Object.entries(EXPECTED)) {
-  const expectedVersion = `pub_${publishId}`
-  let page
-  try {
-    page = await fetchPage(slug)
-  } catch (err) {
-    failures.push(`/${slug}/: fetch failed (${err.name ?? err})`)
-    continue
-  }
-  if (!page.ok) {
-    failures.push(`/${slug}/: HTTP ${page.status}`)
-    continue
-  }
-  const liveVersion = readMarker(page.html, 'storefront-publish-id')
-  const liveBuild = readMarker(page.html, 'storefront-build-id')
-  if (liveVersion !== expectedVersion) {
-    failures.push(`/${slug}/: live ${liveVersion ?? '(no marker)'} != expected ${expectedVersion}`)
-    continue
-  }
-  if (EXPECTED_BUILD_ID && liveBuild !== EXPECTED_BUILD_ID) {
-    failures.push(`/${slug}/: build ${liveBuild ?? '(no marker)'} != expected ${EXPECTED_BUILD_ID}`)
-  }
-}
-
-if (failures.length > 0) {
-  console.error('verify-deploy: FAILED')
-  for (const f of failures) console.error(`  - ${f}`)
-  console.error('Leaving publications PUBLISHED/pending — retry with `gh workflow run deploy-storefront.yml`.')
-  if (BUILD_ID) await postLifecycle('mark-failed', BUILD_ID, { error: failures.join('; ') })
-  process.exit(1)
-}
-
-console.log(`verify-deploy: OK — ${slugs.length} product page(s) verified against their intended publishes.`)
-
-if (BUILD_ID) {
-  await postLifecycle('mark-verified', BUILD_ID)
-}
+console.log(`verify-deploy: OK - ${slugs.length} product page(s) verified against their publish refs.`)

@@ -11,6 +11,7 @@ import { catalogRoute } from "./routes/catalog";
 import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
+import { ciRoute } from "./routes/ci";
 import { PUBLIC_ORIGIN_HEADER } from "./auth/public-origin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
 import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml } from "./config/adminBase";
@@ -110,6 +111,8 @@ app.route("/", paymentsRoute);
 app.route("/", monthlyKpiSnapshotsRoute);
 app.route("/", visitorAnalyticsRoute);
 app.route("/", visitorRetentionRoute);
+// Deploy pipeline (GitHub Actions) <-> Worker. Bearer-secret only and outside the admin namespace.
+app.route("/ci", ciRoute);
 
 // The admin console gets its OWN limits, not the customer ones.
   //

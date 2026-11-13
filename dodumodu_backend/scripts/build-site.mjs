@@ -12,10 +12,6 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomBytes } from 'node:crypto'
-import { Pool } from 'pg'
-import { drizzle } from 'drizzle-orm/node-postgres'
-import { eq } from 'drizzle-orm'
-import * as schema from '../src/schema'
 import { renderProduct } from '../build/render-product.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -34,7 +30,7 @@ const lit = (k, v) => `export const ${k} = ${JSON.stringify(v)}\n`
 // A build id derived from the current time plus random bytes so each deploy
 // is distinguishable even when two builds start in the same millisecond.
 // Stored in site_builds and revalidated before deploy (safeguard 1).
-const BUILD_ID = `build_${Date.now()}_${randomBytes(4).toString('hex')}`
+const BUILD_ID = (process.env.BUILD_ID ?? '').trim() || `build_${Date.now()}_${randomBytes(4).toString('hex')}`
 
 // ---------------------------------------------------------------------------
 // Empty-catalog storefront root page.
@@ -93,6 +89,15 @@ const js = read(jsMatch[1])
 // 1c) strict CSP validation + hashes
 const bad = baseHtml.match(/\sstyle="|\son[a-z]+="/)
 if (bad) throw new Error(`index.html still has an inline style/handler attribute: ${bad[0]}`)
+// Product images are served from the media origin (IMAGE_DELIVERY_BASE), so the page's CSP must allow it or the
+// browser silently refuses every image. Read from the environment, else from wrangler.toml's [vars].
+function mediaOrigin() {
+  let v = process.env.IMAGE_DELIVERY_BASE
+  if (!v) {
+    try { v = /^\s*IMAGE_DELIVERY_BASE\s*=\s*"([^"]*)"/m.exec(readFileSync(join(backendRoot, 'wrangler.toml'), 'utf8'))?.[1] } catch { /* none */ }
+  }
+  try { const u = new URL(v ?? ''); return u.protocol === 'https:' ? u.origin : '' } catch { return '' }
+}
 const inline = (tag) =>
   [...baseHtml.matchAll(new RegExp(`<${tag}(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)</${tag}>`, 'g'))]
     .map((m) => `'sha256-${sha(m[1], 'base64')}'`)
@@ -100,7 +105,7 @@ const CSP = [
   `default-src 'none'`,
   `script-src 'self' ${inline('script').join(' ')}`,
   `style-src ${inline('style').join(' ')}`,
-  `img-src 'self' data:`,
+  `img-src 'self' data:${mediaOrigin() ? ' ' + mediaOrigin() : ''}`,
   `connect-src 'self'`,
   `base-uri 'none'`,
   `form-action 'self'`,
@@ -108,115 +113,52 @@ const CSP = [
 ].join('; ')
 
 // ---------------------------------------------------------------------------
-// 2) Fetch the latest published snapshot for every product from the database.
+// 2) Fetch the latest published snapshot of every product from the Worker.
+//
+// The build holds NO database credential. The Worker (which already owns the database) serves the
+// snapshots at GET /ci/snapshots, guarded by DEPLOY_TRIGGER_SECRET, so a leaked CI secret can read
+// published page content and nothing else - it cannot open a connection to the database.
 // ---------------------------------------------------------------------------
-const databaseUrl = process.env.DATABASE_URL
-if (!databaseUrl) {
-  throw new Error('DATABASE_URL is required for build-site.mjs — set it before running')
+const workerUrl = (process.env.WORKER_URL ?? '').replace(/\/+$/, '')
+const ciSecret = (process.env.DEPLOY_TRIGGER_SECRET ?? '').trim()
+if (!workerUrl || !ciSecret) {
+  throw new Error('WORKER_URL and DEPLOY_TRIGGER_SECRET are required: the build fetches snapshots from the Worker (/ci/snapshots)')
 }
 
-const pool = new Pool({ connectionString: databaseUrl, max: 5 })
-const db = drizzle(pool, { schema })
-
-let products = []
-try {
-  const { productPublishes, products: productsTable } = schema
-  // Every product with its newest publish (by id, which cannot tie)
-  const all = await db
-    .select({
-      productId: productsTable.id,
-      slug: productsTable.slug,
-      name: productsTable.name,
-      description: productsTable.description,
-      price: productsTable.price,
-      publishId: productPublishes.id,
-      payload: productPublishes.payload,
-      buildStatus: productPublishes.buildStatus,
-      publishProductId: productPublishes.productId,
-    })
-    .from(productsTable)
-    .leftJoin(productPublishes, eq(productPublishes.productId, productsTable.id))
-
-  // Reduce to the newest publish per product (highest id wins)
-  const latestByProduct = new Map()
-  for (const row of all) {
-    const pid = row.productId
-    const existing = latestByProduct.get(pid)
-    if (!existing || (row.publishId && row.publishId > existing.publishId)) {
-      latestByProduct.set(pid, {
-        id: row.productId,
-        slug: row.slug,
-        name: row.name,
-        description: row.description,
-        price: row.price,
-        publishId: row.publishId,
-        snapshot: row.payload,
-        buildStatus: row.buildStatus,
-      })
-    }
+async function ci(path, init = {}) {
+  const res = await fetch(`${workerUrl}/ci${path}`, {
+    ...init,
+    signal: AbortSignal.timeout(20_000),
+    headers: { Authorization: `Bearer ${ciSecret}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+  })
+  if (!res.ok) {
+    const text = (await res.text().catch(() => '')).slice(0, 300)
+    throw new Error(`Worker ${init.method ?? 'GET'} /ci${path} returned HTTP ${res.status}${text ? `: ${text}` : ''}`)
   }
-  products = [...latestByProduct.values()].filter((p) => p.publishId != null)
-} catch (err) {
-  // A permission error here is a setup problem, not a code bug. Say exactly which
-  // role connected and which database it reached so the grant can be written for it.
-  const code = err?.cause?.code ?? err?.code
-  if (code === '42501' || code === '42P01') {
-    const who = await pool.query('select current_user as u, current_database() as d').catch(() => null)
-    const row = who?.rows?.[0]
-    console.error(
-      `\nBUILD SETUP ERROR (${code}): the role in NEON_READONLY_URL cannot read the tables the build needs.\n` +
-      `  connected as: ${row?.u ?? 'unknown'}   database: ${row?.d ?? 'unknown'}\n` +
-      `  fix (run as the database owner, in THAT database):\n` +
-      `    GRANT USAGE ON SCHEMA public TO "${row?.u ?? '<role>'}";\n` +
-      `    GRANT SELECT ON products, product_publishes TO "${row?.u ?? '<role>'}";\n`)
-  }
-  throw err
-} finally {
-  await pool.end()
+  return res.json()
 }
 
-// ---------------------------------------------------------------------------
-// 2a) Record the build as triggered in site_builds before rendering.
-//    This must happen before any render/deploy step so that a failure
-//    can be associated with a build record. Uses the Worker's own
-//    authenticated /admin/deploy-trigger endpoint.
-// ---------------------------------------------------------------------------
-async function recordBuildTriggered(buildId, intendedPublications) {
-  const workerUrl = (process.env.WORKER_URL ?? "").replace(/\/+$/, "")
-  const secret = (process.env.DEPLOY_TRIGGER_SECRET ?? "").trim()
-  if (!workerUrl || !secret) {
-    console.log("build-site: WORKER_URL or DEPLOY_TRIGGER_SECRET not set — skipping build record (first deploy or local build)")
-    return
-  }
-  const body = JSON.stringify({ buildId, intendedPublications })
-  try {
-    const res = await fetch(`${workerUrl}/admin/deploy-trigger`, {
-      method: "POST",
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        "Content-Type": "application/json",
-      },
-      body,
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => "")
-      console.warn(`build-site: deploy-trigger returned HTTP ${res.status}: ${text}`)
-      return
-    }
-    const result = await res.json().catch(() => null)
-    console.log(`build-site: build recorded as triggered — buildId=${buildId} publications=${intendedPublications.length}`, result ?? "")
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
-    console.warn(`build-site: deploy-trigger call failed: ${reason}`)
-  }
-}
+const { snapshots } = await ci('/snapshots')
+const REF = /^pub_[0-9a-f]{20}$/
+const products = snapshots
+  .filter((r) => r.payload)
+  .map((r) => {
+    if (!REF.test(r.publishRef ?? '')) throw new Error(`snapshot for ${r.slug} has no valid publish ref (${r.publishRef})`)
+    return { id: r.productId, slug: r.slug, name: r.name, description: r.description, price: r.price,
+      publishId: r.publishId, publishRef: r.publishRef, snapshot: r.payload }
+  })
 
-const intendedPublications = products
-  .filter((p) => p.publishId != null)
-  .map((p) => ({ slug: p.slug, publishId: p.publishId }))
-
-await recordBuildTriggered(BUILD_ID, intendedPublications)
+// Record what this build intends to ship, BEFORE rendering, so a failure from here on is attached to a
+// build the admin can see. The id comes from the run that was dispatched (BUILD_ID) when there is one.
+const intendedPublications = products.map((p) => ({ slug: p.slug, publishId: p.publishId, publishRef: p.publishRef }))
+await ci(`/builds/${encodeURIComponent(BUILD_ID)}/start`, {
+  method: 'POST',
+  body: JSON.stringify({
+    intendedPublications,
+    ...(process.env.RUN_URL ? { runUrl: process.env.RUN_URL } : {}),
+  }),
+})
+console.log(`build-site: build ${BUILD_ID} recorded with ${intendedPublications.length} publication(s)`)
 
 // ---------------------------------------------------------------------------
 // 3) Render every product page from its snapshot.
@@ -227,10 +169,10 @@ const PRODUCTS = {}
 let flagshipHtml = null
 
 for (const row of products) {
-  const { slug, snapshot, publishId } = row
+  const { slug, snapshot, publishId, publishRef } = row
   if (!slug || !snapshot) continue
 
-  const html = renderProduct(snapshot, {
+  const html = renderProduct({ ...snapshot, publishRef }, {
     css,
     jsPath,
     csp: CSP,
@@ -241,6 +183,7 @@ for (const row of products) {
   PRODUCTS[slug] = {
     html,
     publishId,
+    publishRef,
     etag: etag(html),
   }
 
@@ -272,6 +215,11 @@ const out =
   lit('CSP', CSP)
 
 writeFileSync(OUT, out)
+// What the verifier must find on the live pages once this build is deployed.
+writeFileSync(
+  join(dirname(OUT), 'build-meta.json'),
+  JSON.stringify({ buildId: BUILD_ID, expected: Object.fromEntries(products.filter((p) => PRODUCTS[p.slug]).map((p) => [p.slug, p.publishRef])) }, null, 2),
+)
 
 const kb = (s) => (Buffer.byteLength(s) / 1024).toFixed(1) + ' KB'
 console.log(

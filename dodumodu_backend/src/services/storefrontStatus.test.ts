@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  resolvePublishState, readPublishVersion, publishVersion, verifyStorefront,
+  resolvePublishState, readPublishVersion, verifyStorefront,
 } from "./storefrontStatus";
 
 /* LIVE is a MEASUREMENT, not a claim.
@@ -20,9 +20,11 @@ async function withFetch(impl: (url: string) => Promise<Response>, body: () => P
 
 /* ---- the version marker ---- */
 
-test("the version marker is namespaced, so publish 6 is never confused with any other 6", () => {
-  assert.equal(publishVersion(6), "pub_6");
-  assert.equal(publishVersion(123), "pub_123");
+test("a publish ref is pub_ plus 20 random hex characters, and two never match", async () => {
+  const { newPublishRef, PUBLISH_REF_PATTERN } = await import("./publishRef");
+  const a = newPublishRef();
+  assert.match(a, PUBLISH_REF_PATTERN);
+  assert.notEqual(a, newPublishRef());
 });
 
 test("the marker is read from rendered HTML in either attribute order", () => {
@@ -92,7 +94,7 @@ test("a served page with no marker is 'unreadable', which is not evidence of any
 
 test("LIVE requires the storefront to report EXACTLY the latest publish", () => {
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "triggered", liveVersion: "pub_7",
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "triggered", liveVersion: "pub_00000000000000000007",
   }), "LIVE");
 });
 
@@ -100,7 +102,7 @@ test("a stale storefront is NOT live, whatever the deploy hook said", () => {
   // The hook was accepted (buildStatus "triggered") but the edge is still serving
   // pub_6. Reporting LIVE here is precisely the bug this design exists to stop.
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "triggered", liveVersion: "pub_6",
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "triggered", liveVersion: "pub_00000000000000000006",
   }), "DEPLOYING");
 });
 
@@ -108,34 +110,34 @@ test("a verified page is LIVE even if the last hook attempt failed", () => {
   // The ordering matters: a naive "failed wins" rule would hide a page that IS
   // already being served.
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "failed", liveVersion: "pub_7",
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "failed", liveVersion: "pub_00000000000000000007",
   }), "LIVE");
 });
 
 test("a failed hook with no verification is FAILED, and the snapshot is unaffected", () => {
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "failed", liveVersion: null,
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "failed", liveVersion: null,
   }), "FAILED");
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "failed", liveVersion: "pub_6",
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "failed", liveVersion: "pub_00000000000000000006",
   }), "FAILED");
 });
 
 test("an accepted rebuild that has not landed is DEPLOYING", () => {
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "triggered", liveVersion: null,
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "triggered", liveVersion: null,
   }), "DEPLOYING");
 });
 
 test("a snapshot with no rebuild requested is PUBLISHED", () => {
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "pending", liveVersion: null,
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "pending", liveVersion: null,
   }), "PUBLISHED");
 });
 
 test("a product that was never published is PUBLISHED with no version to claim", () => {
   assert.equal(resolvePublishState({
-    latestPublishId: null, buildStatus: "pending", liveVersion: null,
+    latestPublishRef: null, buildStatus: "pending", liveVersion: null,
   }), "PUBLISHED");
 });
 
@@ -143,7 +145,7 @@ test("a storefront serving a NEWER publish than we hold is not our LIVE", () => 
   // Somebody deployed without publishing through this console. The newest publish
   // we hold is not the one being served, so claiming LIVE would be false.
   assert.equal(resolvePublishState({
-    latestPublishId: 7, buildStatus: "triggered", liveVersion: "pub_9",
+    latestPublishRef: "pub_00000000000000000007", buildStatus: "triggered", liveVersion: "pub_00000000000000000009",
   }), "DEPLOYING");
 });
 
@@ -152,7 +154,7 @@ test("a storefront serving a NEWER publish than we hold is not our LIVE", () => 
 test("a product with no publish record at all is 'Not published', never LIVE", () => {
   // Scenario 2: created but never published. The admin must not show a View link.
   assert.equal(resolvePublishState({
-    latestPublishId: null, buildStatus: "pending", liveVersion: null,
+    latestPublishRef: null, buildStatus: "pending", liveVersion: null,
   }), "PUBLISHED");
 });
 
@@ -160,7 +162,7 @@ test("a publish with pending status and no verification is PUBLISHED, not DEPLOY
   // The snapshot exists but no rebuild has been requested. Not DEPLOYING because
   // nothing has been triggered yet.
   assert.equal(resolvePublishState({
-    latestPublishId: 3, buildStatus: "pending", liveVersion: null,
+    latestPublishRef: "pub_00000000000000000003", buildStatus: "pending", liveVersion: null,
   }), "PUBLISHED");
 });
 
@@ -168,6 +170,6 @@ test("a publish that was requested but the storefront cannot be reached is DEPLO
   // The hook was accepted but verifyStorefront could not reach the edge.
   // LIVE is unknown, so the honest state is DEPLOYING, not a definitive failure.
   assert.equal(resolvePublishState({
-    latestPublishId: 5, buildStatus: "triggered", liveVersion: null,
+    latestPublishRef: "pub_00000000000000000005", buildStatus: "triggered", liveVersion: null,
   }), "DEPLOYING");
 });
