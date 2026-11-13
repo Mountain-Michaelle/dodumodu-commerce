@@ -8,6 +8,7 @@ import { maskPhone } from "../../abuse/spamRepo";
 import { abuseConfigFrom } from "../../abuse/config";
 import { PERMISSIONS, type Principal } from "../../auth/adminAuth";
 import { buildShadowReport } from "../../abuse/shadowReport";
+import { requireBlockAuthority } from "../../auth/blockGate";
 import { requirePermissionOf, readBody, actorOf } from "./helpers";
 import { normalizeSearch, likePattern } from "../../shared/listQuery";
 // Admin moderation surface for spam flags.
@@ -130,6 +131,7 @@ spamRoutes.get("/suspects", async (c) => {
 });
 spamRoutes.post("/flag", async (c) => {
   requirePermissionOf(c, PERMISSIONS.ordersWrite);
+  await requireBlockAuthority(c);
   const body = await readBody(c, flagSchema, "spam flag");
   const db = createDb(c.env.DATABASE_URL);
   const hasPhone = typeof body.phone === "string" && body.phone.length > 0;
@@ -150,6 +152,7 @@ spamRoutes.post("/flag", async (c) => {
 });
 spamRoutes.post("/:id/revert", async (c) => {
   requirePermissionOf(c, PERMISSIONS.ordersWrite);
+  await requireBlockAuthority(c);
   const body = await readBody(c, revertSchema, "spam revert");
   const row = await spamService.revert(createDb(c.env.DATABASE_URL), {
     id: Number(c.req.param("id")),

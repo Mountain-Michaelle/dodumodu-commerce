@@ -67,7 +67,7 @@ export const productsRepo = {
     })();
     const ordered = opts.sort.direction === "asc" ? asc(column) : desc(column);
 
-    const rows = await db
+    const rowsQuery = db
       .select({
         id: products.id,
         slug: products.slug,
@@ -89,11 +89,13 @@ export const productsRepo = {
 
     // Same WHERE, so the count cannot disagree with the page and produce a next
     // button leading to a page with nothing on it.
-    const [{ total }] = await db
+    const countQuery = db
       .select({ total: sql<number>`count(*)::int` })
       .from(products)
       .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(where);
+    // The page and its count are independent: one round trip of waiting instead of two.
+    const [rows, [{ total }]] = await Promise.all([rowsQuery, countQuery]);
 
     // Attach the latest publish (if any) to each row so the admin panel can
     // show per-product publication state without a second round trip per row.

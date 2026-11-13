@@ -8,6 +8,7 @@ import { OTP_TTL_SECS, OTP_RESEND_COOLDOWN_SECS, OTP_RESEND_MAX } from "./config
 import { deriveCode, codeMac, toHex, fromHex } from "./crypto";
 import { AuthServerFaultError } from "./errors";
 import { logError, swallow } from "../shared/logger";
+import { dbErrorInfo } from "../shared/dbError";
 
 export interface ChallengeIssue {
   nonceHex: string;
@@ -17,7 +18,7 @@ export interface ChallengeIssue {
 
 /** True when the database does not have migration 0027 yet (no `slot` column / unique index). */
 export function isMissingSlotSchema(e: unknown): boolean {
-  const code = (e as { code?: string } | null)?.code;
+  const { code } = dbErrorInfo(e);
   return code === "42703" || code === "42P10";
 }
 

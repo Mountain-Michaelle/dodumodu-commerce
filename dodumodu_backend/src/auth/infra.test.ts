@@ -10,6 +10,7 @@ import { q, sql } from "./sql";
 import { writeAuthLog } from "./authLog";
 import { isBlocked, createBlock, liftBlock } from "./blocks";
 import { enqueue, claimOutbox, markSent } from "./outbox";
+import { dbErrorInfo } from "../shared/dbError";
 
 const databaseUrl = process.env.DATABASE_URL;
 registerDbDriver(pgDriver);
@@ -34,7 +35,7 @@ test("writeAuthLog inserts and returns an id; the row is append-only", { skip: !
   assert.ok(id > 0);
   await assert.rejects(
     () => q(db, sql`UPDATE aa_auth_log SET reason='x' WHERE id=${id}`),
-    /append-only/,
+    (e: unknown) => /append-only/.test(dbErrorInfo(e).message),
   );
 });
 

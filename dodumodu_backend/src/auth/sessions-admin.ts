@@ -8,6 +8,7 @@ import { tokenHashHex } from "./keys";
 import { AuthRejectError } from "./errors";
 import { loadFlow } from "./flows";
 import type { FinishedSession, FinishArgs } from "./sessions";
+import { dbErrorInfo } from "../shared/dbError";
 
 /** POST /auth/session for admins (F4). Handles active/pending/first-claim. */
 export async function finishAdminSession(db: Db, a: FinishArgs): Promise<FinishedSession> {
@@ -124,8 +125,8 @@ export async function finishAdminSession(db: Db, a: FinishArgs): Promise<Finishe
     // Deploy-order safety: if migration 0026 has not been applied yet the database still rejects
     // 'new_browser'. Never lock a correctly authenticated admin out over that: register the device
     // under an already-allowed type and say so in the log, so the missing migration is visible.
-    const err = e as { code?: string; message?: string };
-    if (err?.code !== "23514" && !String(err?.message).includes("created_via_check")) throw e;
+    const err = dbErrorInfo(e);
+    if (err.code !== "23514" && !err.message.includes("created_via_check")) throw e;
     logError("migration_0026_not_applied", e);
     row = await run("operator");
   }

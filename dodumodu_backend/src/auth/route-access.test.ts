@@ -16,6 +16,10 @@ const ADMIN_ONLY = new Set([
   "POST /categories/bulk-action", "DELETE /media",
   // site-wide settings and moderation
   "GET /blocks", "GET /blocks/history", "POST /blocks", "POST /blocks/1/release",
+  // blocking and flagging are administrator decisions, never grantable
+  "POST /spam/flag", "POST /spam/1/revert",
+  "GET /abuse/summary", "GET /abuse/held", "POST /abuse/held/1/release", "POST /abuse/held/1/dismiss",
+  "GET /abuse/rpf", "POST /abuse/rpf/1/block", "POST /abuse/rpf/1/dismiss",
   "GET /discount-tiers", "PUT /discount-tiers", "GET /payment-rules", "PUT /payment-rules",
   // anything that publishes or deploys the storefront
   "POST /products/1/publish", "GET /products/1/status", "POST /products/1/redeploy", "GET /products/1/publishes",

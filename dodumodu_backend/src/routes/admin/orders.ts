@@ -162,9 +162,8 @@ export function orderRoutes() {
 
     // Both enrichments are whole-page, fixed-cost queries. Neither adds a query
     // per displayed row.
-    const spam = await withSpamFlags(db, rows);
-    const spamById = new Map(spam.map((s) => [s.id, s.spamFlagged]));
-    const evidence = await orderEvidence.evidenceForOrders(db, rows.map((row: any) => ({
+    // Independent of each other, so they run together (one round trip of waiting instead of two).
+    const [spam, evidence] = await Promise.all([withSpamFlags(db, rows), orderEvidence.evidenceForOrders(db, rows.map((row: any) => ({
       id: row.id,
       reference: row.reference,
       createdAt: row.createdAt,
@@ -172,7 +171,8 @@ export function orderRoutes() {
       address: row.address ?? "",
       productId: row.productId,
       quantity: row.quantity,
-    })));
+    })))]);
+    const spamById = new Map(spam.map((s) => [s.id, s.spamFlagged]));
     const orders = rows.map((o: OrderListItem) => {
       const item = evidence.get(o.id);
       return {

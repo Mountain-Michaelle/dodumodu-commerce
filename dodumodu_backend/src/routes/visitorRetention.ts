@@ -1,3 +1,4 @@
+import { secretMatches } from "../shared/secureEqual";
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { createDb } from "../db";
@@ -16,7 +17,7 @@ export const visitorRetentionRoute = new Hono<{ Bindings: Env }>();
 
 visitorRetentionRoute.post("/internal/visitor-retention/prune", async (c) => {
   const secret = c.req.header("x-cron-secret");
-  if (!c.env.RECONCILE_CRON_SECRET || secret !== c.env.RECONCILE_CRON_SECRET) {
+  if (!secretMatches(secret, c.env.RECONCILE_CRON_SECRET)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 

@@ -1,20 +1,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PATCHES, PATCH_MARK, NEW_ORDER_SOURCE, patchConsoleJs, gateNav } from "./console-patch.mjs";
+import { PATCHES, resolvePatch, PATCH_MARK, NEW_ORDER_SOURCE, ABUSE_SOURCE, patchConsoleJs, gateNav } from "./console-patch.mjs";
+import { minifyJs } from "./minify-assets.mjs";
 import { ADMIN_CONSOLE_ASSETS, ADMIN_CONSOLE_HTML } from "../src/generated/adminPages";
 
 const js = Object.entries(ADMIN_CONSOLE_ASSETS).find(([n]) => n.endsWith(".min.js"))!;
-test("shipped console bundle carries every fix and is referenced by its hashed name", () => {
-  assert.ok(js[1].startsWith(PATCH_MARK));
+// The shipped bundle is MINIFIED (no comments, short names). Patching matches the bundle's own text and marker
+// comments, so the patched-but-unminified form is kept beside it as the build input and the checks run on that form.
+const base = readFileSync(new URL("../src/generated/console-bundle.base.js", import.meta.url), "utf8");
+test("shipped console bundle is the minified form of the patched base and is referenced by its hashed name", () => {
+  assert.equal(js[1], minifyJs(base), "regenerate adminPages.ts: scripts/build-admin-pages.mjs");
   assert.ok(ADMIN_CONSOLE_HTML.includes(js[0]));
-  for (const p of PATCHES) { assert.ok(js[1].includes(p.to), p.id); if (!p.to.includes(p.from)) assert.ok(!js[1].includes(p.from), `${p.id}: unpatched text still present`); }
+  assert.ok(base.startsWith(PATCH_MARK));
+  for (const patch of PATCHES) {
+    if (patch.applied) {
+      // Structural patch (reads the minified names from the bundle): it must be in the shipped text, and the bundle must
+      // still be one it recognises - otherwise the site's code changed shape and the fix is silently not being applied.
+      assert.ok(patch.applied(base), `${patch.id}: not applied - the site's minified code changed shape; update its pattern`);
+      continue;
+    }
+    const p = resolvePatch(patch, base)!;
+    assert.ok(base.includes(p.to), patch.id);
+    if (!p.to.includes(p.from)) assert.ok(!base.includes(p.from), `${patch.id}: unpatched text still present`);
+  }
 });
-test("the shipped bundle carries the CURRENT new-order script (regenerate adminPages.ts after editing it)", () => {
-  assert.ok(js[1].includes(NEW_ORDER_SOURCE));
+test("the shipped bundle carries the CURRENT new-order and abuse scripts (regenerate adminPages.ts after editing them)", () => {
+  assert.ok(base.includes(NEW_ORDER_SOURCE));
+  assert.ok(base.includes(ABUSE_SOURCE));
+  assert.ok(js[1].includes("aa-new-order") && js[1].includes("aa-abuse-panel"), "both injected screens are in what is served");
+  assert.ok(!/\/\/ "\+ New order"/.test(js[1]) && !js[1].includes("Self-contained on purpose"), "the developer comments are gone from what is served");
 });
 test("patching is idempotent, skips fixes a bundle already has, and refuses an ambiguous anchor", () => {
-  assert.equal(patchConsoleJs(js[1]), js[1]);
+  assert.equal(patchConsoleJs(base), base);
   assert.ok(patchConsoleJs("function other(){}").includes("function other(){}"), "an unrelated bundle is not rejected");
   assert.throws(() => patchConsoleJs(`${PATCHES[0].from};${PATCHES[0].from}`), /expected at most 1 match, found 2/);
 });

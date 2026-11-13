@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { createDb } from "../db";
 import { paymentService } from "../services/paymentService";
+import { secretMatches } from "../shared/secureEqual";
 
 /** §5.11 — alert when something needs operator attention.
  *
@@ -90,7 +91,7 @@ paymentsRoute.post("/opay-callback", async (c) => {
 // public route, and not a Workers Cron Trigger (per the stack table in §1).
 paymentsRoute.post("/reconcile-pending", async (c) => {
   const secret = c.req.header("x-cron-secret");
-  if (secret !== c.env.RECONCILE_CRON_SECRET) {
+  if (!secretMatches(secret, c.env.RECONCILE_CRON_SECRET)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 

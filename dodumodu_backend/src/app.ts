@@ -24,7 +24,9 @@ import { visitorRetentionRoute } from "./routes/visitorRetention";
 import * as site from "./generated/site";
 import { robotsTxt, sitemapXml, THANK_YOU_HTML } from "./staticAssets";
 import { HTTPException } from "hono/http-exception";
-import { logError } from "./shared/logger";
+import { logError, logWarn } from "./shared/logger";
+import { reportConfigOnce } from "./config/configCheck";
+import { securityHeaders } from "./middleware/securityHeaders";
 
 /**
  * The CORS allowlist, from ALLOWED_ORIGINS (comma separated). Scoped to exact
@@ -46,6 +48,16 @@ export function isOriginAllowed(origin: string, allowedOrigins: string | undefin
 }
 
 export const app = new Hono<{ Bindings: Env }>();
+
+// Browser protections (CSP, frame, HSTS, nosniff, referrer) on every response; see middleware/securityHeaders.ts.
+app.use("*", securityHeaders());
+
+// Names (never values) of anything misconfigured in production, logged once per isolate. A report only: each
+// feature already refuses on its own, so a gap here never takes the storefront down.
+app.use("*", async (c, next) => {
+  reportConfigOnce(c.env as unknown as Record<string, unknown>, (problems) => logWarn("config_problems", { problems: problems.join("; ") }));
+  await next();
+});
 
 // Last line of defence: any fault no route handled is logged (Cloudflare Workers Logs) with
 // the method, path and cf-ray, and the client gets the same bland 500 as before - no message,

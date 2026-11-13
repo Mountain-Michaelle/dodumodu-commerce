@@ -162,7 +162,7 @@ export const ordersRepo = {
       ? asc(orderSortColumn(opts.sort.field))
       : desc(orderSortColumn(opts.sort.field));
 
-    const rows = await db
+    const rowsQuery = db
       .select({
         order: orders,
         productName: products.name,
@@ -183,12 +183,14 @@ export const ordersRepo = {
 
     // Same WHERE, same joins, one number. A count that drifted from the page
     // query shows pagination that lies: a next button to a page with nothing on it.
-    const [{ total }] = await db
+    const countQuery = db
       .select({ total: count() })
       .from(orders)
       .innerJoin(products, eq(orders.productId, products.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(where);
+    // The page and its count do not depend on each other: one round trip of waiting instead of two.
+    const [rows, [{ total }]] = await Promise.all([rowsQuery, countQuery]);
 
     return {
       rows: rows.map((row) => ({
@@ -552,6 +554,8 @@ export type OrderListFilters = {
   // list; true shows ONLY deleted orders (the "Deleted" filter). Never both in
   // one result - the WHERE enforces whichever is set.
   deleted: boolean;
+  /** "rpf_suspect" shows only orders tagged by a rotating-phone-flood alert. Absent/null = no filter. */
+  abuseTag?: "rpf_suspect" | null;
 };
 
 /**
@@ -576,6 +580,7 @@ export function filtersFromQuery(input: {
   assignedTo?: string;
   unassigned?: "true" | "false";
   deleted?: "true" | "false";
+  abuseTag?: "rpf_suspect";
 }): OrderListFilters {
   return {
     status: input.status ?? null,
@@ -589,6 +594,7 @@ export function filtersFromQuery(input: {
     assignedTo: input.assignedTo ?? null,
     unassigned: input.unassigned === "true",
     deleted: input.deleted === "true",
+    abuseTag: input.abuseTag ?? null,
   };
 }
 
@@ -698,6 +704,7 @@ function buildOrderWhere(search: string | null, filters: OrderListFilters, scope
     conditions.push(lt(orders.createdAt, to));
   }
   if (filters.paymentMethod) conditions.push(eq(orders.paymentMethod, filters.paymentMethod));
+  if (filters.abuseTag) conditions.push(eq(orders.abuseTag, filters.abuseTag));
   if (filters.phone) conditions.push(like(orders.phone, filters.phone + "%"));
   if (filters.from) conditions.push(gte(orders.createdAt, filters.from));
   if (filters.to) conditions.push(lte(orders.createdAt, filters.to));

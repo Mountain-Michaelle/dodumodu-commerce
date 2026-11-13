@@ -10,6 +10,12 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 head_sampling_rate = 1
 
+# Smart Placement: every query goes to Neon over HTTPS, so most of a request's time is waiting on the database. This lets
+# Cloudflare run the Worker close to Neon (it measures, and falls back to the nearest edge if that is not faster).
+# To undo: delete this block. Pair it with a Neon project in the region closest to most of your admins.
+[placement]
+mode = "smart"
+
 [vars]
 # =============================================================================
 # REQUIRED PRODUCTION VARIABLES — replace every FILL-IN placeholder below
@@ -48,26 +54,21 @@ IMAGE_DELIVERY_BASE = "https://media.example.com"
 PAGES_DEPLOY_HOOK = "https://api.example.com/v1/pages/deploy"
 RATE_LIMIT_ORDER_PER_PHONE_PER_HOUR = "5"
 MAX_ORDER_QUANTITY = "20"
-ALLOWED_ORIGINS = "https://https://your-worker.workers.dev,https://your-custom-domain.com"
+ALLOWED_ORIGINS = "https://your-worker.workers.dev,https://your-custom-domain.com"
 # Public origin of the deployed Worker, e.g. https://<your-worker>.workers.dev
 WORKER_URL = "https://your-worker.workers.dev"
 OPAY_BASE_URL = "https://sandboxapi.opaycheckout.com"
 
 # =============================================================================
-# SECRETS — set each one with: wrangler secret put <NAME>
-# These are listed here explicitly so none are missed. Do NOT commit real values.
+# SECRETS - NEVER put a value for these in this file (not even a placeholder).
+# Set each one with:  wrangler secret put <NAME>
+#   OPAY_PUBLIC_KEY, OPAY_SECRET_KEY, OPAY_MERCHANT_ID, OPAY_WEBHOOK_SECRET
+#   RECONCILE_CRON_SECRET, DEPLOY_TRIGGER_SECRET, GITHUB_DEPLOY_TOKEN
+#   TURNSTILE_SECRET_KEY, RESEND_API_KEY, DATABASE_URL, ANALYTICS_IP_HMAC_SECRET
+# A [vars] entry would be readable in the dashboard and would overwrite the real secret on every deploy.
+# `npm run check:config` and the test suite fail if a secret or a FILL-IN placeholder appears below.
 # =============================================================================
-OPAY_PUBLIC_KEY = "FILL-IN-via-wrangler-secret-put"
-OPAY_SECRET_KEY = "FILL-IN-via-wrangler-secret-put"
-OPAY_MERCHANT_ID = "FILL-IN-via-wrangler-secret-put"
-OPAY_WEBHOOK_SECRET = "FILL-IN-via-wrangler-secret-put"
 AUTH_FROM_EMAIL = "onboarding@resend.dev"
-# Secret used by CI to authenticate build-status mutations (mark-deployed/verified/failed).
-# Set via: wrangler secret put DEPLOY_TRIGGER_SECRET
-DEPLOY_TRIGGER_SECRET = "FILL-IN-via-wrangler-secret-put"
-# Secret used by the production Worker to authenticate GitHub repository_dispatch calls.
-# Set via: wrangler secret put GITHUB_DEPLOY_TOKEN
-GITHUB_DEPLOY_TOKEN = "FILL-IN-via-wrangler-secret-put"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"

@@ -142,3 +142,24 @@ test("the customer limiter is unchanged: still per IP, still the customer ceilin
   assert.equal(res?.status, 429, "the customer ceiling still applies");
   assert.equal((res?.body as { error: unknown }).error, "Too many requests");
 });
+test("admin limiter: a broken or slow-to-write KV never blocks or breaks an operator, and the ceiling still holds", async () => {
+  const env = { RATE_LIMIT_ADMIN_PER_MINUTE: "3", RATE_LIMIT_ADMIN_WRITES_PER_MINUTE: "2" };
+  const admin = (kv: KVNamespace) => ctx(kv, env, { [ACCESS]: "owner@example.com" });
+
+  // KV down for reads: the operator is let through (the session check already authenticated them).
+  const downKv = { get: async () => { throw new Error("KV unavailable"); }, put: async () => { throw new Error("KV unavailable"); } } as unknown as KVNamespace;
+  assert.equal(await refusedBy(adminRateLimit, () => admin(downKv)), undefined, "read passes when KV is down");
+  assert.equal(await refusedBy(adminWriteRateLimit, () => admin(downKv)), undefined, "write passes when KV is down");
+
+  // KV rejects the WRITE (KV allows 1 write/second/key): no error reaches the operator.
+  const store = new Map<string, string>();
+  const flakyPut = { get: async (k: string) => store.get(k) ?? null, put: async () => { throw new Error("KV PUT failed: 429"); } } as unknown as KVNamespace;
+  assert.equal(await refusedBy(adminRateLimit, () => admin(flakyPut)), undefined, "a rejected counter write is invisible");
+
+  // With a working KV the ceiling is still enforced: 3 reads pass, the 4th is refused; 2 writes pass, the 3rd is refused.
+  const kv = memoryKV();
+  for (let i = 0; i < 3; i++) assert.equal(await refusedBy(adminRateLimit, () => admin(kv)), undefined, `read ${i + 1} passes`);
+  assert.equal((await refusedBy(adminRateLimit, () => admin(kv)))?.status, 429, "4th read is refused");
+  for (let i = 0; i < 2; i++) assert.equal(await refusedBy(adminWriteRateLimit, () => admin(kv)), undefined, `write ${i + 1} passes`);
+  assert.equal((await refusedBy(adminWriteRateLimit, () => admin(kv)))?.status, 429, "3rd write is refused");
+});

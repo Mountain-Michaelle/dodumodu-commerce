@@ -89,6 +89,8 @@ export const orderListFiltersSchema = z.object({
   // shows ONLY soft-deleted orders; "false" is the explicit default. The list
   // query owns the rule so a deleted order is invisible unless asked for.
   deleted: z.enum(["true", "false"]).optional(),
+  // Orders that belong to an open rotating-phone-flood alert ("RPF Suspect"). Absent = no filter.
+  abuseTag: z.enum(["rpf_suspect"]).optional(),
 });
 
 export type OrderListFiltersInput = z.infer<typeof orderListFiltersSchema>;

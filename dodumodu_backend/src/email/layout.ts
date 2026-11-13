@@ -11,7 +11,7 @@ export function escapeHtml(value: string): string {
 
 /** Shared branded email layout (table-based, email-client-safe).
  * Wraps email body content with header and footer. Reusable by all templates. */
-export function emailLayout({ title, body }: { title: string; body: string }): string {
+export function emailLayout({ title, body, footer }: { title: string; body: string; footer?: string }): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -36,7 +36,7 @@ export function emailLayout({ title, body }: { title: string; body: string }): s
             <td style="padding:24px 32px 32px;border-top:1px solid ${EMAIL_BRAND.border};">
               <p style="margin:0;font-size:13px;line-height:1.5;color:${EMAIL_BRAND.muted};">
                 DODUMODU &mdash; Skincare. Pay on delivery.<br>
-                If you didn't request this code, you can safely ignore this email.
+                ${footer ?? "If you didn't request this code, you can safely ignore this email."}
               </p>
             </td>
           </tr>
@@ -46,4 +46,17 @@ export function emailLayout({ title, body }: { title: string; body: string }): s
   </table>
 </body>
 </html>`;
+}
+
+/** Label/value rows for notification emails (order details, device facts). Values are escaped here; empty values are skipped. */
+export function detailList(rows: ReadonlyArray<readonly [label: string, value: string | null | undefined]>): string {
+  const cells = rows
+    .filter(([, value]) => value !== null && value !== undefined && String(value) !== "")
+    .map(([label, value]) => `
+        <tr>
+          <td style="padding:6px 16px 6px 0;font-size:13px;line-height:1.5;color:${EMAIL_BRAND.muted};vertical-align:top;white-space:nowrap;">${escapeHtml(label)}</td>
+          <td style="padding:6px 0;font-size:14px;line-height:1.5;color:${EMAIL_BRAND.text};word-break:break-word;">${escapeHtml(String(value))}</td>
+        </tr>`)
+    .join("");
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${cells}</table>`;
 }

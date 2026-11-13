@@ -4,6 +4,7 @@ import type { Env } from "../../env";
 import { createDb } from "../../db";
 import * as blockRepo from "../../abuse/blockRepo";
 import { PERMISSIONS, type Principal } from "../../auth/adminAuth";
+import { requireBlockAuthority } from "../../auth/blockGate";
 import { requirePermissionOf, readBody, actorOf } from "./helpers";
 
 // The Blocked screen's API.
@@ -86,6 +87,7 @@ blockRoutes.get("/history", async (c) => {
 
 blockRoutes.post("/", async (c) => {
   requirePermissionOf(c, PERMISSIONS.ordersWrite);
+  await requireBlockAuthority(c);
   const body = await readBody(c, createSchema, "block");
   const db = createDb(c.env.DATABASE_URL);
   const row = await blockRepo.createBlock(db, {
@@ -104,6 +106,7 @@ blockRoutes.post("/", async (c) => {
 
 blockRoutes.post("/:id/release", async (c) => {
   requirePermissionOf(c, PERMISSIONS.ordersWrite);
+  await requireBlockAuthority(c);
   const body = await readBody(c, releaseSchema, "release");
   const row = await blockRepo.releaseBlock(
     createDb(c.env.DATABASE_URL),

@@ -1,3 +1,4 @@
+import { decideHold, evaluateRpf } from "../abuse/spamDiversion";
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { createDb } from "../db";
@@ -67,6 +68,9 @@ export async function verifyTurnstile(env: Env, token: string, remoteIp: string)
 // is precisely the traffic a flood produces. It does not reject anything: in the
 // shadow phase its verdict is data, and the schema/Turnstile/service chain below
 // behaves exactly as it did before the abuse layer existed.
+// A held order has no row in `orders`; this offset keeps the id the storefront is handed clearly apart from real ones.
+const HELD_ORDER_ID_BASE = 1_000_000_000;
+
 ordersRoute.post("/create-order", orderGuard, async (c) => {
   const body = c.get("parsedBody");
   const parsed = orderSchema.safeParse(body);
@@ -99,6 +103,34 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
   }
 
   const db = createDb(c.env.DATABASE_URL);
+  const reqMeta = { ip: remoteIp || null, deviceId: c.get("deviceId") ?? null, clientKind: c.get("clientKind") ?? null, browser: c.get("browser") ?? null };
+
+  // Verified spam (one unproven phone flooding the form) is HELD instead of stored: the customer still sees the normal
+  // thank-you page, the order is emailed to SPAM_ORDER_EMAIL and listed under Abuse & spam, and an admin can release it.
+  // Every doubt - a returning customer, a replay, a mail or database problem - resolves to "store it normally".
+  // Held orders skip the regular backup email below: they are announced on the spam address only.
+  if (!isReplay) {
+    try {
+      const hold = await decideHold(db, c.env, parsed.data, reqMeta);
+      if (hold.hold) {
+        const view = hold.view;
+        return c.json({
+          orderId: HELD_ORDER_ID_BASE + hold.held.id,
+          reference: hold.held.reference,
+          status: "confirmed_cod",
+          flaggedLate: view.flaggedLate, packageId: view.packageId, quantity: view.quantity, unitPrice: view.unitPrice,
+          subtotal: view.subtotal, discountPercent: view.discountPercent, discountAmount: view.discountAmount, amount: view.amount,
+          checkoutUrl: undefined,
+        });
+      }
+    } catch (err) {
+      // The request is invalid (bad product/package/quantity): it is refused exactly as a stored order would be.
+      if (err instanceof ProductNotFoundError) return c.json({ error: "Product not found" }, 404);
+      if (err instanceof PackageNotFoundError) return c.json({ error: "Invalid package selected" }, 400);
+      if (err instanceof InvalidQuantityError) return c.json({ error: "Invalid request", fields: { quantity: [err.message] } }, 400);
+      throw err;
+    }
+  }
   // Safety net, started NOW and never awaited: the order is emailed in parallel with the
   // database write, so it exists somewhere even if the write is rejected. A replay sends
   // again on purpose - Resend's idempotency key makes that a no-op if the first one went out.
@@ -123,6 +155,9 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     created = true;
     // Bookkeeping must never turn a saved order into a failure for the customer.
     await noteOrderOutcome(c, "created", { status: order.status, id: order.id }).catch(swallow("orders_best_effort_failed"));
+    // A device or address spreading orders over many different phones is raised as an alert for a person to judge;
+    // it runs after the response is decided, never delays it, and never touches the order beyond a tag.
+    sendInBackground(c, evaluateRpf(db, c.env, reqMeta));
     // Never echo back any price-related field the client sent - every field
     // below is the value the server computed, so the thank-you page can show
     // an accurate breakdown without recomputing anything itself.

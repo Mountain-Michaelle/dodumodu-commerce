@@ -1,3 +1,4 @@
+import { isUsableSecret, secureEqual } from "../shared/secureEqual";
 import type { Env } from "../env";
 import type { OrderRow } from "../data/ordersRepo";
 
@@ -62,6 +63,9 @@ export const opayClient = {
    */
   async verifyWebhookSignature(env: Env, rawBody: string, signatureHeader: string | null): Promise<boolean> {
     if (!signatureHeader) return false;
+    // A key that is blank or a template placeholder is a key everybody knows: any signature made with it is
+    // forgeable, so verification must fail instead of "succeeding" on it.
+    if (!isUsableSecret(env.OPAY_WEBHOOK_SECRET)) return false;
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(env.OPAY_WEBHOOK_SECRET),
@@ -71,7 +75,7 @@ export const opayClient = {
     );
     const sigBytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
     const computed = [...new Uint8Array(sigBytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-    return timingSafeEqual(computed, signatureHeader);
+    return secureEqual(computed, signatureHeader.trim().toLowerCase());
   },
 
   /** Direct status lookup for reconciliation (§5.9) — does not rely on a webhook arriving. */
@@ -89,10 +93,3 @@ export const opayClient = {
     return res.json<OpayWebhookPayload>();
   },
 };
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return mismatch === 0;
-}

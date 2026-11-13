@@ -13,6 +13,7 @@ import { normalizePhone } from "../shared/normalizePhone";
 import { notificationService } from "./notificationService";
 import { assignmentRepo } from "../data/assignmentRepo";
 import { logError } from "../shared/logger";
+import { dbErrorInfo } from "../shared/dbError";
 
 export class ProductNotFoundError extends Error {}
 export class PackageNotFoundError extends Error {}
@@ -42,7 +43,7 @@ function computeUnitPrice(product: { price: number; packageOptions: unknown }, p
   return chosen.price ?? product.price;
 }
 
-function generateReference(): string {
+export function generateReference(): string {
   // Always `ddmd-` + 15 unique lowercase hex chars: recognizable in a WhatsApp
   // thread or a pasted sheet, and with 16^15 (~1.15 quintillion) possibilities
   // it is non-guessable and id conflicts are practically impossible - about a
@@ -252,9 +253,35 @@ export const orderService = {
 
     return { order, checkoutUrl };
   },
+
+  /**
+   * What the customer is shown for an order that is being HELD (src/abuse/spamDiversion.ts): the same server-computed
+   * figures createOrder would have produced - price breakdown, lateness flag, a fresh reference - without writing
+   * anything and without asking a payment provider for a checkout. It raises the same domain errors for a bad
+   * product, package or quantity, so a held request is refused exactly like a stored one would have been.
+   */
+  async previewOrder(db: Db, env: Env, input: OrderInput): Promise<{
+    reference: string; flaggedLate: boolean; packageId: string | null; quantity: number; unitPrice: number;
+    subtotal: number; discountPercent: number; discountAmount: number; amount: number;
+  }> {
+    const product = await productsRepo.findById(db, input.productId);
+    if (!product || !product.active) throw new ProductNotFoundError(String(input.productId));
+    const maxQuantity = parseInt(env.MAX_ORDER_QUANTITY, 10);
+    if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > maxQuantity) {
+      throw new InvalidQuantityError(`quantity must be an integer between 1 and ${maxQuantity}`);
+    }
+    const unitPrice = computeUnitPrice(product, input.packageId);
+    const tiers = await discountTiersRepo.findActive(db);
+    const { subtotal, discountPercent, discountAmount, amount } = discountService.computePriceBreakdown(unitPrice, input.quantity, tiers);
+    const { flaggedLate } = deliveryService.validateSubmittedDate(new Date(), input.deliveryDate);
+    return {
+      reference: generateReference(), flaggedLate, packageId: input.packageId ?? null, quantity: input.quantity,
+      unitPrice, subtotal, discountPercent, discountAmount, amount,
+    };
+  },
 };
 
 function isUniqueViolation(err: unknown, columnHint: string): boolean {
-  const message = err instanceof Error ? err.message : String(err);
+  const { message } = dbErrorInfo(err);
   return message.includes("unique") && message.includes(columnHint);
 }

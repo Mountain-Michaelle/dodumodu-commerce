@@ -4,7 +4,7 @@
  * localStorage. Neutral errors; 429 shows a server countdown; 503 keeps the
  * form usable ("nothing was counted"). Disables submit while in flight.
  */
-import { makeQrElement } from "./qr-logo.mjs";
+// The QR library (~25 KB) is needed only while enrolling a new authenticator, so it is loaded on demand (see enrollStart).
 
 const AUTH = `${window.ADMIN_BASE_PATH || "/admin"}/auth`;
 const ENROLL_TTL_SECS = 120; // fallback; the server sends expires_in
@@ -242,6 +242,7 @@ async function enrollStart() {
   const qrPanel = document.createElement("div");
   qrPanel.className = "qr-panel";
   try {
+    const { makeQrElement } = await import("./qr-logo.mjs");
     qrPanel.appendChild(makeQrElement(otpauth_uri, { size: 220, ecc: "M" }));
   } catch {
     showNote("error", "Could not draw the QR code. Use the setup key below instead.");
