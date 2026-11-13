@@ -677,6 +677,11 @@ adminRoute.get("/products/:id/status", async (c) => {
     // word that could equally have come from a stored flag.
     liveVersion,
     buildStatus: latest?.buildStatus ?? null,
+    // The exact reason the last deploy attempt failed or did not start (null when fine).
+    deployError: latest?.deployError ?? null,
+    deployHttpStatus: latest?.deployHttpStatus ?? null,
+    deployAttempts: latest?.deployAttempts ?? 0,
+    deployAttemptedAt: latest?.deployAttemptedAt ?? null,
     storefrontUrl: verification.url || null,
     // Why a check failed, when one did. "unconfigured" locally is normal, not an
     // error; the admin renders it as "not verified" rather than as a failure.

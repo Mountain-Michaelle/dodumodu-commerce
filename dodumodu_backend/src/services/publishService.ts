@@ -133,12 +133,11 @@ export const publishService = {
       publishId: record.id,
       productId: payload.product.id,
     });
-    // Only write a status when there is something to say. A local publish with no
-    // hook configured stays "pending" rather than being marked "failed" for the
-    // absence of something that was never expected to be there.
-    if (deployment.status !== "pending") {
-      await publishesRepo.markBuildStatus(db, record.id, deployment.status);
-    }
+    // Always recorded, "pending" (token not configured) included: the reason must be
+    // readable later in the admin, not only in this one response.
+    await publishesRepo.recordDeployAttempt(db, record.id, {
+      status: deployment.status, error: deployment.error, httpStatus: deployment.httpStatus,
+    });
 
     console.log(JSON.stringify({
       event: "product_published",
@@ -147,6 +146,8 @@ export const publishService = {
       by: publishedBy,
       deployment: deployment.status,
       deploymentMs: deployment.durationMs,
+      httpStatus: deployment.httpStatus,
+      error: deployment.error,
     }));
 
     return { record, deployment };
@@ -170,11 +171,15 @@ export const publishService = {
       publishId: latest.id,
       productId: latest.productId,
     });
-    await publishesRepo.markBuildStatus(db, latest.id, deployment.status);
+    await publishesRepo.recordDeployAttempt(db, latest.id, {
+      status: deployment.status, error: deployment.error, httpStatus: deployment.httpStatus,
+    });
     console.log(JSON.stringify({
       event: "product_redeploy",
       publishId: latest.id,
       deployment: deployment.status,
+      httpStatus: deployment.httpStatus,
+      error: deployment.error,
     }));
     return { publishId: latest.id, deployment };
   },

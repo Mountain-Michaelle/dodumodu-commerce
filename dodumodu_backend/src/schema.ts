@@ -384,6 +384,12 @@ export const productPublishes = pgTable("product_publishes", {
   payload: jsonb("payload").notNull(),
   publishedBy: text("published_by").notNull(),
   buildStatus: text("build_status").notNull().default("triggered"),
+  // What the last deploy attempt did: the exact error (GitHub's reason included), HTTP
+  // status, how many attempts, and when. Delivery bookkeeping only - never the payload.
+  deployError: text("deploy_error"),
+  deployHttpStatus: integer("deploy_http_status"),
+  deployAttempts: integer("deploy_attempts").notNull().default(0),
+  deployAttemptedAt: timestamp("deploy_attempted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
