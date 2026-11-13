@@ -18,7 +18,7 @@
     "db:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 stop",
     "db:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 init",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\" \"migrations/**/*.test.ts\"",
     "test:db": "tsx --import ./scripts/require-test-db.mjs --test --test-concurrency=1 \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "test:mfa": "tsx --import ./scripts/require-test-db.mjs --test --test-concurrency=1 src/auth/totp.test.ts src/auth/totp-backup.test.ts src/auth/totp-relogin.test.ts src/auth/recovery.test.ts src/auth/device-trust.test.ts src/auth/blocks-flow.test.ts src/auth/sessions3b.test.ts",
     "db:reset-test": "node scripts/reset-test-db.mjs --yes",

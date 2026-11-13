@@ -35,6 +35,8 @@ permissions:
 env:
   # Read-only Neon role for snapshot reads at build time. Never a read-write
   # connection string in CI; the Worker runtime uses its own secret.
+  # Its grants are managed by `npm run db:migrate` (migrations/readonlyAccess.ts), which reads the
+  # role from this URL (or READONLY_DB_ROLE) and grants it SELECT on the tables the build reads.
   DATABASE_URL: ${{ secrets.NEON_READONLY_URL }}
   MAX_ORDER_QUANTITY: "20"
   # Worker origin and CI auth secret for build-status lifecycle callbacks.

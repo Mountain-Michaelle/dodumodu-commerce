@@ -15,6 +15,7 @@ import { Client } from "pg";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureReadonlyAccess } from "./readonlyAccess";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const rootEnvPath = resolve(dir, "..", "..", ".env");
@@ -61,6 +62,7 @@ if (process.argv.includes("--baseline")) {
     await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [file]);
     console.log(`Recorded ${file} as already applied (no statements run).`);
   }
+  await ensureReadonlyAccess(client);
   await client.end();
   console.log("Baseline recorded.");
   process.exit(0);
@@ -90,6 +92,8 @@ try {
     console.log(`Applied ${file}`);
     ran += 1;
   }
+  // After every run, applied or not: this is what repairs a fresh database or a new role.
+  await ensureReadonlyAccess(client);
 } finally {
   await client.end();
 }
