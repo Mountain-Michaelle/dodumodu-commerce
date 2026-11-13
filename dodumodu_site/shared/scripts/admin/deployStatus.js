@@ -42,8 +42,12 @@ export function stateDetail(status) {
     return `Verified on the public page${status.checkedAt
       ? ` at ${new Date(status.checkedAt).toLocaleTimeString()}` : ""}.`;
   }
+  if (status.state === "DEPLOYING" && status.deployError) return status.deployError;
   if (status.state === "DEPLOYING") return "Published. The storefront is still serving the previous version.";
-  if (status.state === "FAILED") return "The snapshot is safe and retryable. The storefront is unchanged.";
+  if (status.state === "FAILED") {
+    return status.deployError || "The snapshot is safe and retryable. The storefront is unchanged.";
+  }
+  if (status.buildStatus === "pending" && status.deployError) return `Deploy not started: ${status.deployError}`;
   if (!status.publishVersion) return "This product has never been published.";
   if (status.verificationReason === "unconfigured") {
     return "Published. Live status cannot be checked until SITE_URL is configured.";
@@ -84,7 +88,7 @@ export function renderDeploymentStatus(status, { onRetry } = {}) {
       : null,
     // Offered only where it can help: a rebuild that failed. A DEPLOYING or LIVE
     // publish has nothing to retry.
-    status.state === "FAILED" && onRetry
+    (status.state === "FAILED" || (status.state !== "LIVE" && status.buildStatus === "pending")) && onRetry
       ? el("button", {
         class: "button button-primary", type: "button", text: "Retry Deployment",
         onclick: onRetry,
@@ -94,6 +98,14 @@ export function renderDeploymentStatus(status, { onRetry } = {}) {
   return el("div", { class: "deploy-panel" },
     el("h3", { class: "detail-heading", text: "Storefront" }),
     banner,
+    status.deployError
+      ? el("div", { class: "deploy-error" },
+        el("strong", { text: "Last deploy attempt" }),
+        el("pre", { class: "reference", text:
+          `${status.deployError}${status.deployHttpStatus ? `\nHTTP ${status.deployHttpStatus}` : ""}`
+          + `${status.deployAttempts ? `\nAttempts: ${status.deployAttempts}` : ""}`
+          + `${status.deployAttemptedAt ? `\nAt: ${new Date(status.deployAttemptedAt).toLocaleString()}` : ""}` }))
+      : null,
     el("div", { class: "deploy-versions" }, publishRow, liveRow),
     actions);
 }

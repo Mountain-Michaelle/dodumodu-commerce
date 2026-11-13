@@ -211,7 +211,7 @@ export function productsView({ shell, identity, onNavigate }) {
           // Offered only when there is a snapshot and the last attempt did not reach
           // Cloudflare. It re-fires the deploy against the SAME snapshot, so retrying
           // can never change what customers will receive.
-          latestPublish && latestPublish.buildStatus === "failed"
+          latestPublish && ["failed", "pending"].includes(latestPublish.buildStatus)
             ? el("button", {
               class: "button button-danger", type: "button", text: "Rebuild storefront",
               title: "Ask Cloudflare to rebuild the site from the last published snapshot",

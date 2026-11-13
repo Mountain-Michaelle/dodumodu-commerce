@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../db";
 import { productPublishes } from "../schema";
 
@@ -39,6 +39,24 @@ export const publishesRepo = {
     return rows.length > 0;
   },
 
+  /** Records the outcome of one deploy attempt, error text included, and counts it. */
+  async recordDeployAttempt(
+    db: Db, id: number,
+    attempt: { status: string; error: string | null; httpStatus: number | null },
+  ): Promise<boolean> {
+    const rows = await db.update(productPublishes)
+      .set({
+        buildStatus: attempt.status,
+        deployError: attempt.error,
+        deployHttpStatus: attempt.httpStatus,
+        deployAttempts: sql`${productPublishes.deployAttempts} + 1`,
+        deployAttemptedAt: new Date(),
+      })
+      .where(eq(productPublishes.id, id))
+      .returning();
+    return rows.length > 0;
+  },
+
   // The newest snapshot for one product: what the live site was built from.
   // Ordered by id rather than created_at, because ids cannot tie - two
   // publishes in the same second otherwise have no defined order.
@@ -58,6 +76,8 @@ export const publishesRepo = {
       id: productPublishes.id,
       publishedBy: productPublishes.publishedBy,
       buildStatus: productPublishes.buildStatus,
+      deployError: productPublishes.deployError,
+      deployAttempts: productPublishes.deployAttempts,
       createdAt: productPublishes.createdAt,
     })
       .from(productPublishes)

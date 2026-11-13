@@ -46,6 +46,7 @@ function harness() {
     getRules: paymentRulesRepo.get,
     record: publishesRepo.record,
     markBuildStatus: publishesRepo.markBuildStatus,
+    recordDeployAttempt: publishesRepo.recordDeployAttempt,
     latestForProduct: publishesRepo.latestForProduct,
   };
 
@@ -73,6 +74,13 @@ function harness() {
     row.buildStatus = status;
     return true;
   };
+  publishesRepo.recordDeployAttempt = async (_db, id, a) => {
+    const row = rows.find((r) => r.id === id) as (SnapshotRow & { deployError?: string | null }) | undefined;
+    if (!row) return false;
+    row.buildStatus = a.status;
+    row.deployError = a.error;
+    return true;
+  };
   publishesRepo.latestForProduct = async () => (rows[rows.length - 1] ?? null) as never;
 
   const restore = () => {
@@ -85,6 +93,7 @@ function harness() {
     paymentRulesRepo.get = saved.getRules;
     publishesRepo.record = saved.record;
     publishesRepo.markBuildStatus = saved.markBuildStatus;
+    publishesRepo.recordDeployAttempt = saved.recordDeployAttempt;
     publishesRepo.latestForProduct = saved.latestForProduct;
   };
 
