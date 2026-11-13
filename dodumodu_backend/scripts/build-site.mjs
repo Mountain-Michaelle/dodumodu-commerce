@@ -156,6 +156,21 @@ try {
     }
   }
   products = [...latestByProduct.values()].filter((p) => p.publishId != null)
+} catch (err) {
+  // A permission error here is a setup problem, not a code bug. Say exactly which
+  // role connected and which database it reached so the grant can be written for it.
+  const code = err?.cause?.code ?? err?.code
+  if (code === '42501' || code === '42P01') {
+    const who = await pool.query('select current_user as u, current_database() as d').catch(() => null)
+    const row = who?.rows?.[0]
+    console.error(
+      `\nBUILD SETUP ERROR (${code}): the role in NEON_READONLY_URL cannot read the tables the build needs.\n` +
+      `  connected as: ${row?.u ?? 'unknown'}   database: ${row?.d ?? 'unknown'}\n` +
+      `  fix (run as the database owner, in THAT database):\n` +
+      `    GRANT USAGE ON SCHEMA public TO "${row?.u ?? '<role>'}";\n` +
+      `    GRANT SELECT ON products, product_publishes TO "${row?.u ?? '<role>'}";\n`)
+  }
+  throw err
 } finally {
   await pool.end()
 }
