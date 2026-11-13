@@ -7,6 +7,7 @@
 // Nothing in src/app.ts, src/routes/, src/services/ or src/data/ knows this
 // file exists — that is the point. Production runs src/index.ts instead, with
 // the real bindings, and needs no change here.
+import { isNonProduction } from "./config/environment";
 import { serve } from "@hono/node-server";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -198,7 +199,11 @@ const LOCAL_ADMIN_EMAIL = process.env.LOCAL_ADMIN_EMAIL ?? "admin@dodumodu.local
 
 const fetchWithLocalIdentity: typeof app.fetch = (request) => {
   const headers = new Headers(request.headers);
-  headers.set("cf-access-authenticated-user-email", LOCAL_ADMIN_EMAIL);
+  // Local-only by enforcement, not just by comment: with a production (or unknown) ENVIRONMENT the identity
+  // is never injected and any identity header a client sent is dropped, so this entry point cannot be an
+  // open admin door if it is ever started with the wrong configuration.
+  if (isNonProduction(env.ENVIRONMENT)) headers.set("cf-access-authenticated-user-email", LOCAL_ADMIN_EMAIL);
+  else headers.delete("cf-access-authenticated-user-email");
   if (!headers.has("cf-connecting-ip")) headers.set("cf-connecting-ip", "127.0.0.1");
   return app.fetch(new Request(request, { headers }), env);
 };

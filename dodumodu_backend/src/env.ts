@@ -158,6 +158,23 @@ export type Env = {
    * it reaches the backend, independent of the database. Empty/unset = feature skipped.
    */
   ORDER_BACKUP_EMAIL?: string;
+  /** Where orders held as verified spam are emailed (comma separated). Unset = nothing is ever held. */
+  SPAM_ORDER_EMAIL?: string;
+  /** Where rotating-phone-flood alerts are emailed (comma separated). Unset = every active admin's address. */
+  RPF_ALERT_EMAIL?: string;
+  /** "off" | "shadow" (default: log only) | "divert". */
+  RL_SPAM_ACTION?: string;
+  /** Orders one phone may place in 24h before further ones are held (default 5). */
+  RL_SPAM_PHONE_MAX_24H?: string;
+  RL_SPAM_SIMILAR_MIN?: string;
+  RL_SPAM_BURST_MIN?: string;
+  RL_SPAM_BURST_MINUTES?: string;
+  RL_SPAM_WINDOW_HOURS?: string;
+  /** "off" | "alert" (default). Alerts only; nothing is ever blocked automatically. */
+  RL_RPF_MODE?: string;
+  RL_RPF_DEVICE_PHONES?: string;
+  RL_RPF_IP_PHONES?: string;
+  RL_RPF_WINDOW_MINUTES?: string;
 
   // Build-deploy secrets — set via wrangler secret put; never committed.
   /** CI authenticates build-status mutations (mark-deployed/verified/failed) with this secret. */

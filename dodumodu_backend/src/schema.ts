@@ -188,6 +188,8 @@ export const orders = pgTable("orders", {
   // Migration 0028. The operator (email) who entered this order by hand in the admin console.
   // NULL = placed by a customer through the storefront.
   createdBy: text("created_by"),
+  // Migration 0029. 'rpf_suspect' when the order belongs to an open rotating-phone-flood alert; NULL otherwise.
+  abuseTag: text("abuse_tag"),
   // Soft delete (migration 0018). NULL means live; a timestamp means the order
   // was deleted and is hidden from the list unless an operator filters for it.
   // Never a hard DELETE: a delivered order is the record a parcel arrived, and

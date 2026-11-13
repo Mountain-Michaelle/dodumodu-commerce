@@ -137,7 +137,10 @@ export const REGISTRY: readonly RegistryEntry[] = [
     adminOnly: true, roles: ["admin"], important: true, notify: "instant", sensitive: true,
   }),
   sec("abuse.view", "abuse", "View abuse reports", { roles: ["admin", "general"] }),
-  priv("abuse.resolve", "abuse", "Resolve abuse report", ["abuse.view"], { roles: ["admin", "general"] }),
+  // Blocking and flagging are decisions about a person, a device or an address: administrators only, never grantable.
+  priv("abuse.resolve", "abuse", "Resolve abuse report", ["abuse.view"], {
+    adminOnly: true, roles: ["admin"], important: true, notify: "instant", sensitive: true,
+  }),
   priv("abuse.dismiss", "abuse", "Dismiss abuse report", ["abuse.view"], { roles: ["admin", "general"] }),
   priv("abuse.delete", "abuse", "Delete abuse record", ["abuse.view"], {
     adminOnly: true, roles: ["admin"], important: true, notify: "instant", sensitive: true,

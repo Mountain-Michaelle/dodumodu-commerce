@@ -161,11 +161,12 @@ test("unauthenticated GET /admin/assets/auth.js returns JavaScript", async () =>
   assert.ok(res.headers.get("Content-Type")?.includes("javascript"));
   const body = await res.text();
   assert.ok(body.length > 0);
-  // Meaningful asset content: the auth.js module defines the AUTH endpoint,
-  // imports the QR element, and declares showNote — not an error response.
-  assert.ok(body.includes("window.ADMIN_BASE_PATH || \"/admin\""));
-  assert.ok(body.includes("import { makeQrElement }"));
-  assert.ok(body.includes("function showNote"));
+  // Meaningful asset content (served minified, so local names are mangled):
+  // the auth endpoint base, the QR import and the auth path — not an error response.
+  assert.ok(body.includes('window.ADMIN_BASE_PATH||"/admin"'));
+  assert.ok(body.includes("import(\"./qr-logo.mjs\")"), "the QR library loads on demand, not on every sign-in page view");
+  assert.ok(!body.includes("import{makeQrElement"));
+  assert.ok(body.includes("/auth`"));
 });
 
 test("unauthenticated GET /admin/assets/sessions.js returns JavaScript", async () => {
@@ -277,3 +278,20 @@ function bodyIncludesError(body: string): boolean {
     return false;
   }
 }
+test("sign-in assets are cacheable: ETag + short freshness window, and a repeat visit gets a 304 with no body", async () => {
+  const app = makeApp();
+  for (const path of ["auth.js", "auth.css", "qr-logo.mjs", "qr.js"]) {
+    const first = await app.fetch(new Request(`http://localhost/admin/assets/${path}`), env);
+    assert.equal(first.status, 200, path);
+    const etag = first.headers.get("ETag");
+    assert.ok(etag, `${path} has an ETag`);
+    assert.match(first.headers.get("Cache-Control") ?? "", /max-age=\d+/, `${path} is cacheable`);
+    assert.doesNotMatch(first.headers.get("Cache-Control") ?? "", /immutable/, `${path} has no content hash in its URL, so it must not be immutable`);
+    const again = await app.fetch(new Request(`http://localhost/admin/assets/${path}`, { headers: { "If-None-Match": etag! } }), env);
+    assert.equal(again.status, 304, `${path} revalidates with a 304`);
+    assert.equal((await again.text()).length, 0, `${path} 304 has no body`);
+  }
+  // the page itself is never cached: it carries per-request state
+  const page = await app.fetch(new Request("http://localhost/admin/sign-in/"), env);
+  assert.match(page.headers.get("Cache-Control") ?? "", /no-store/);
+});

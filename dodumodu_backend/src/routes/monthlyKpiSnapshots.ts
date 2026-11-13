@@ -1,3 +1,4 @@
+import { secretMatches } from "../shared/secureEqual";
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { createDb } from "../db";
@@ -7,7 +8,7 @@ export const monthlyKpiSnapshotsRoute = new Hono<{ Bindings: Env }>();
 
 monthlyKpiSnapshotsRoute.post("/internal/monthly-kpi-snapshots/close", async (c) => {
   const secret = c.req.header("x-cron-secret");
-  if (!c.env.RECONCILE_CRON_SECRET || secret !== c.env.RECONCILE_CRON_SECRET) {
+  if (!secretMatches(secret, c.env.RECONCILE_CRON_SECRET)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 

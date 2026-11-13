@@ -1,3 +1,6 @@
+import { abuseRoutes } from "./admin/abuse";
+import { isNonProduction } from "../config/environment";
+import { isUsableSecret, secureEqual } from "../shared/secureEqual";
 import { Context, Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -141,7 +144,10 @@ adminRoute.use("*", async (c, next) => {
   // form.
   const isPublic = PUBLIC_PATHS.some(
     (p) => c.req.path === p || c.req.path.endsWith(p),
-  ) || /\/assets\/admin\.[^.]+\.min\.(?:css|js)$/.test(c.req.path);
+  );
+  // The console bundle is the whole admin UI (every route it calls is in there), so it is no longer public:
+  // it needs a signed-in session like the console page itself. Only the sign-in assets above stay open.
+  const isConsoleAsset = c.req.method === "GET" && /\/assets\/admin\.[^.]+\.min\.(?:css|js)$/.test(c.req.path);
   if (isPublic) {
     return next();
   }
@@ -151,7 +157,7 @@ adminRoute.use("*", async (c, next) => {
     const secret = c.env.DEPLOY_TRIGGER_SECRET;
     const auth = c.req.header("authorization");
     let principal: Principal;
-    if (secret && auth === `Bearer ${secret}`) {
+    if (isUsableSecret(secret) && secureEqual(auth?.startsWith("Bearer ") ? auth.slice(7) : null, secret)) {
       c.set("authType", "build-secret");
       principal = { email: "ci@deploy", permissions: [] } as Principal;
     } else {
@@ -161,7 +167,9 @@ adminRoute.use("*", async (c, next) => {
       //    that, any visitor could send the header themselves and be an administrator.
       //  * An admin-auth v2 session (__Host-sid): the sign-in this deployment actually uses.
       const v2 = adminAuthEnabled(c.env as never);
-      const accessTrusted = !v2 || c.env.TRUST_ACCESS_HEADER === "1";
+      // Fail closed: in production the header counts only when TRUST_ACCESS_HEADER=1 says so on purpose. The
+      // implicit "v2 is off, so trust it" rule applies to local/sandbox runs only (they have no Access in front).
+      const accessTrusted = c.env.TRUST_ACCESS_HEADER === "1" || (!v2 && isNonProduction(c.env.ENVIRONMENT));
       const accessEmail = accessTrusted ? c.req.header(ACCESS_EMAIL_HEADER) : undefined;
       if (accessEmail || !v2) {
         principal = resolvePrincipal(accessEmail, c.env.ADMIN_OPERATORS);
@@ -175,7 +183,7 @@ adminRoute.use("*", async (c, next) => {
         const base = adminBasePath({ ENVIRONMENT: c.env.ENVIRONMENT, ADMIN_BASE_PATH: c.env.ADMIN_BASE_PATH }) ?? "/admin";
         const flat = c.req.path.replace(/\/+$/, "");
         const isShell = c.req.method === "GET" && (flat === "" || flat === base);   // the namespace may already be stripped from the path
-        if (!isShell && !mayCall(sess.role, sess.perms, c.req.method, c.req.path)) throw new ForbiddenError(PERMISSIONS.ordersRead);
+        if (!isShell && !isConsoleAsset && !mayCall(sess.role, sess.perms, c.req.method, c.req.path)) throw new ForbiddenError(PERMISSIONS.ordersRead);
         if (!isSameOriginWrite(c.req.method, c.req.header("origin"), c.req.header("host"))) {
           throw new ForbiddenError(PERMISSIONS.ordersWrite);                          // cookie-authenticated writes must come from this site
         }
@@ -226,26 +234,36 @@ async function signInPage(c: Context<{ Bindings: Env }>) {
 }
 adminRoute.get("/sign-in", (c) => signInPage(c as never));
 adminRoute.get("/sign-in/", (c) => signInPage(c as never));
-adminRoute.get("/assets/auth.css", (c) => {
-  c.header("Content-Type", "text/css; charset=utf-8");
-  return c.body(ADMIN_AUTH_CSS, 200);
-});
-adminRoute.get("/assets/auth.js", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(namespaceJs(ADMIN_AUTH_JS, c.env), 200);
-});
-adminRoute.get("/assets/sessions.js", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(namespaceJs(ADMIN_SESSIONS_JS, c.env), 200);
-});
-adminRoute.get("/assets/devices.js", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(namespaceJs(ADMIN_DEVICES_JS, c.env), 200);
-});
-adminRoute.get("/assets/admin-ui.js", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(namespaceJs(ADMIN_UI_JS, c.env), 200);
-});
+
+// Static sign-in/console-page assets. Their URLs carry no content hash (the page references plain names), so they cannot be
+// "immutable"; instead they get a content ETag and a short freshness window: a repeat visit costs nothing or a 304 with no
+// body, and a deploy reaches every browser within minutes. (The hashed console bundle below stays immutable.)
+const etagMemo = new Map<string, string>();
+function weakEtag(body: string): string {
+  let tag = etagMemo.get(body);
+  if (!tag) {
+    let h = 0x811c9dc5;   // FNV-1a: cheap and non-secret; it only has to change when the content changes
+    for (let i = 0; i < body.length; i++) { h ^= body.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    tag = `W/"${h.toString(36)}-${body.length.toString(36)}"`;
+    if (etagMemo.size > 64) etagMemo.clear();
+    etagMemo.set(body, tag);
+  }
+  return tag;
+}
+function staticAsset(c: { req: { header: (k: string) => string | undefined }; header: (k: string, v: string) => void; body: (b: string | null, s: 200 | 304) => Response }, body: string, type: string): Response {
+  const etag = weakEtag(body);
+  c.header("Content-Type", type);
+  c.header("ETag", etag);
+  c.header("Cache-Control", "public, max-age=300, stale-while-revalidate=86400");
+  if (c.req.header("If-None-Match") === etag) return c.body(null, 304);
+  return c.body(body, 200);
+}
+const JS = "text/javascript; charset=utf-8", CSS = "text/css; charset=utf-8";
+adminRoute.get("/assets/auth.css", (c) => staticAsset(c as never, ADMIN_AUTH_CSS, CSS));
+adminRoute.get("/assets/auth.js", (c) => staticAsset(c as never, namespaceJs(ADMIN_AUTH_JS, c.env), JS));
+adminRoute.get("/assets/sessions.js", (c) => staticAsset(c as never, namespaceJs(ADMIN_SESSIONS_JS, c.env), JS));
+adminRoute.get("/assets/devices.js", (c) => staticAsset(c as never, namespaceJs(ADMIN_DEVICES_JS, c.env), JS));
+adminRoute.get("/assets/admin-ui.js", (c) => staticAsset(c as never, namespaceJs(ADMIN_UI_JS, c.env), JS));
 adminRoute.get("/assets/device-accept.js", (c) => {
   c.header("Content-Type", "text/javascript; charset=utf-8");
   c.header("Cache-Control", "no-store");
@@ -259,14 +277,8 @@ const deviceAcceptPage = (c: { env: Env; html: (h: string, s: 200) => Response; 
 };
 adminRoute.get("/device/accept", (c) => deviceAcceptPage(c as never));
 adminRoute.get("/device/accept/", (c) => deviceAcceptPage(c as never));
-adminRoute.get("/assets/qr.js", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(ADMIN_QR_JS, 200);
-});
-adminRoute.get("/assets/qr-logo.mjs", (c) => {
-  c.header("Content-Type", "text/javascript; charset=utf-8");
-  return c.body(ADMIN_QR_LOGO_MJS, 200);
-});
+adminRoute.get("/assets/qr.js", (c) => staticAsset(c as never, ADMIN_QR_JS, JS));
+adminRoute.get("/assets/qr-logo.mjs", (c) => staticAsset(c as never, ADMIN_QR_LOGO_MJS, JS));
 adminRoute.get("/assets/:asset", (c) => {
   const filename = c.req.param("asset");
   const asset = ADMIN_CONSOLE_ASSETS[filename as keyof typeof ADMIN_CONSOLE_ASSETS];
@@ -274,7 +286,7 @@ adminRoute.get("/assets/:asset", (c) => {
   c.header("Content-Type", filename.endsWith(".css")
     ? "text/css; charset=utf-8"
     : "text/javascript; charset=utf-8");
-  c.header("Cache-Control", "public, max-age=31536000, immutable");
+  c.header("Cache-Control", "private, max-age=31536000, immutable");
   return c.body(asset, 200);
 });
 
@@ -347,6 +359,8 @@ adminRoute.route("/media", mediaRoutes());
 // or fulfilment state, and no public route can reach it.
 adminRoute.route("/spam", spamRoutes);
 adminRoute.route("/blocks", blockRoutes);
+// Held (spam) orders and rotating-phone-flood suspects: administrators only, blocking behind a step-up.
+adminRoute.route("/abuse", abuseRoutes);
 adminRoute.route("/reports", reportRoutes);
 
 /** The operator, for the panel's own header. */

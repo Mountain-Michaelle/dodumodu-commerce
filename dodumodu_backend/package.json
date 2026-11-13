@@ -23,18 +23,19 @@
     "test:mfa": "tsx --import ./scripts/require-test-db.mjs --test --test-concurrency=1 src/auth/totp.test.ts src/auth/totp-backup.test.ts src/auth/totp-relogin.test.ts src/auth/recovery.test.ts src/auth/device-trust.test.ts src/auth/blocks-flow.test.ts src/auth/sessions3b.test.ts",
     "db:reset-test": "node scripts/reset-test-db.mjs --yes",
     "test:ui:browser": "node --test src/auth-ui/login.browser.spec.mjs",
-    "test:ui": "node --test src/auth-ui/*.test.mjs"
+    "test:ui": "node --test src/auth-ui/*.test.mjs",
+    "check:config": "node scripts/check-config.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@neondatabase/serverless": "^0.10.1",
-    "drizzle-orm": "^0.36.1",
+    "drizzle-orm": "^0.45.4",
     "hash-wasm": "^4.12.0",
     "hono": "^4.6.9",
     "libphonenumber-js": "^1.11.20",
     "pg": "^8.23.0",
     "qrcode-generator": "^2.0.4",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241004.0",

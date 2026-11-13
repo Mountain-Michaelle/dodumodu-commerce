@@ -120,7 +120,7 @@ export const categoriesRepo = {
 
     // id breaks ties so a page boundary is stable: ordered by name alone, two
     // categories called the same thing can appear on page 1 and again on page 2.
-    const rows = await db
+    const rowsQuery = db
       .select({ row: categories, productCount: countProducts })
       .from(categories)
       .where(where)
@@ -128,7 +128,9 @@ export const categoriesRepo = {
       .limit(opts.limit)
       .offset(opts.offset);
 
-    const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(categories).where(where);
+    const countQuery = db.select({ total: sql<number>`count(*)::int` }).from(categories).where(where);
+    // Independent of each other: wait for both at once (one round trip, not two).
+    const [rows, [{ total }]] = await Promise.all([rowsQuery, countQuery]);
     return { rows: rows.map((entry) => ({ ...entry.row, productCount: entry.productCount })), total };
   },
 

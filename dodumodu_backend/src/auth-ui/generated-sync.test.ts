@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as gen from "../generated/adminPages";
+import { minifyJs, minifyCss } from "../../scripts/minify-assets.mjs";
 
 const src = (f: string) => readFileSync(join(process.cwd(), "src/auth-ui", f), "utf8");
 const g = gen as unknown as Record<string, string>;
@@ -15,7 +16,11 @@ test("served scripts and stylesheet are exactly the sources", () => {
     ["ADMIN_AUTH_CSS", "auth.css"], ["ADMIN_SESSIONS_JS", "sessions.js"], ["ADMIN_DEVICES_JS", "devices.js"],
     ["ADMIN_UI_JS", "admin-ui.js"], ["ADMIN_DEVICE_ACCEPT_JS", "device-accept.js"],
   ];
-  for (const [name, file] of pairs) assert.equal(g[name], src(file), `${name} is stale: run scripts/build-admin-pages.mjs`);
+  // What is served is the minified form of the source (comments, banners and readable names removed).
+  for (const [name, file] of pairs) {
+    const expected = file.endsWith(".css") ? minifyCss(src(file)) : minifyJs(src(file));
+    assert.equal(g[name], expected, `${name} is stale: run scripts/build-admin-pages.mjs`);
+  }
 });
 
 test("served pages load the shared helper and the right page script", () => {

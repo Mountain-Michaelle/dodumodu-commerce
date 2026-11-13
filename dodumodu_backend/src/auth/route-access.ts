@@ -58,8 +58,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   rule("GET", "spam/flagged", "abuse.view"),
   rule("GET", "spam/shadow", "abuse.view"),
   rule("GET", "spam/suspects", "abuse.view"),
-  rule("POST", "spam/flag", "abuse.resolve"),
-  rule("POST", `spam/${ID}/revert`, "abuse.resolve"),
+  // POST spam/flag, POST spam/:id/revert and everything under blocks/ and abuse/ are deliberately NOT listed: this table
+  // is default-deny, so they are administrator-only (and each also asks for an authenticator step-up, auth/blockGate.ts).
   // the signed-in operator's own identity, for the console header
   rule("GET", "me", "*"),
 ];

@@ -21,6 +21,8 @@ import { readFileSync } from "node:fs";
 export const PATCH_MARK = "/*console-fixes*/";
 export const NEW_ORDER_SOURCE = readFileSync(new URL("../src/auth-ui/console-new-order.js", import.meta.url), "utf8");
 export const NEW_ORDER_MARK = "/*console-new-order*/";
+export const ABUSE_SOURCE = readFileSync(new URL("../src/auth-ui/console-abuse.js", import.meta.url), "utf8");
+export const ABUSE_MARK = "/*console-abuse*/";
 
 export const PATCHES = [
   {
@@ -33,15 +35,31 @@ export const PATCHES = [
     from: 'role:s.role,permissions:s.perms||[]}',
     to: 'role:s.role,permissions:Array.isArray(s.permissions)?s.permissions:s.perms||[]}',
   },
+  // The next two patches are STRUCTURAL: the site build minifies identifiers differently every time its source changes
+  // (He -> je, Yt -> Gt ...), so they read the names from the bundle instead of assuming them. `find` returns the exact
+  // text to replace and its replacement for THIS bundle, or null when the shape is not there (then nothing is touched).
   {
     id: "clear-toolbar",
-    from: 'N(!1),He(r)},closeNav:()=>N(!1)}',
-    to: 'N(!1),He(r),He(u)},closeNav:()=>N(!1)}',
+    applied: (js) => /(\w+)\(!1\),(\w+)\((\w+)\),\2\((\w+)\)\},closeNav:\(\)=>\1\(!1\)\}/.test(js),
+    find(js) {
+      const m = /(\w+)\(!1\),(\w+)\((\w+)\)\},closeNav:\(\)=>\1\(!1\)\}/.exec(js);
+      const t = /content:(\w+),toolbar:(\w+),/.exec(js);
+      if (!m || !t || t[1] !== m[3]) return null;
+      return { from: m[0], to: `${m[1]}(!1),${m[2]}(${m[3]}),${m[2]}(${t[2]})},closeNav:()=>${m[1]}(!1)}` };
+    },
   },
   {
     id: "route-scoped-shell",
-    from: 'let t=Yt[a]({shell:fe,identity:he,onNavigate:Gt})',
-    to: 'let k=window.__aaRoute=(window.__aaRoute||0)+1,dc=document.createElement("div"),dt2=document.createElement("div"),sh=Object.create(fe,{toolbar:{get:()=>k===window.__aaRoute?fe.toolbar:dc},content:{get:()=>k===window.__aaRoute?fe.content:dt2}}),t=Yt[a]({shell:sh,identity:he,onNavigate:Gt})',
+    applied: (js) => /let __aaK=window\.__aaRoute=/.test(js),
+    find(js) {
+      const m = /let t=(\w+)\[a\]\(\{shell:(\w+),identity:(\w+),onNavigate:(\w+)\}\)/.exec(js);
+      if (!m) return null;
+      const [from, views, shell, ident, nav] = m;
+      return {
+        from,
+        to: `let __aaK=window.__aaRoute=(window.__aaRoute||0)+1,__aaTb=document.createElement("div"),__aaCt=document.createElement("div"),__aaSh=Object.create(${shell},{toolbar:{get:()=>__aaK===window.__aaRoute?${shell}.toolbar:__aaTb},content:{get:()=>__aaK===window.__aaRoute?${shell}.content:__aaCt}}),t=${views}[a]({shell:__aaSh,identity:${ident},onNavigate:${nav}})`,
+      };
+    },
   },
 ];
 
@@ -90,14 +108,21 @@ export function gateNav(js) {
   return out;
 }
 
+/** The {from,to} a patch means for THIS bundle (null when it does not apply to it). */
+export function resolvePatch(p, js) {
+  return p.find ? p.find(js) : { from: p.from, to: p.to };
+}
+
 export function patchConsoleJs(js) {
   let out = js.replace(/^\/\*console-fixes(?:-v1)?\*\//, "");
-  for (const p of PATCHES) {
+  for (const patch of PATCHES) {
+    const p = resolvePatch(patch, out);
+    if (!p) continue;                                       // not this bundle's shape: leave it alone
     if (out.includes(p.to)) continue;                       // already applied
     const n = count(out, p.from);
     // Never ambiguous: two matches would mean patching the wrong place. No match is allowed, so a console build
     // that already contains a fix natively is left alone (the browser tests still prove the behaviour).
-    if (n > 1) throw new Error(`console patch "${p.id}": expected at most 1 match, found ${n}`);
+    if (n > 1) throw new Error(`console patch "${patch.id}": expected at most 1 match, found ${n}`);
     if (n === 1) out = out.replace(p.from, () => p.to);
   }
   for (const [from, to] of LEGACY_NAV) if (out.includes(to)) out = out.replace(to, () => from);
@@ -106,6 +131,6 @@ export function patchConsoleJs(js) {
   // The new-order script is always the last block: replaced wholesale so an edited script reaches the bundle.
   const at = out.indexOf(NEW_ORDER_MARK);
   if (at >= 0) out = out.slice(0, at).replace(/\n$/, "");
-  out += `\n${NEW_ORDER_MARK}\n${NEW_ORDER_SOURCE}`;
+  out += `\n${NEW_ORDER_MARK}\n${NEW_ORDER_SOURCE}\n${ABUSE_MARK}\n${ABUSE_SOURCE}`;
   return PATCH_MARK + out;
 }

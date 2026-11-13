@@ -1,6 +1,7 @@
 import type { Context, Next } from "hono";
 import type { Env } from "../env";
 import { ACCESS_EMAIL_HEADER } from "../auth/adminAuth";
+import { afterResponse } from "../auth/ctx";
 
 
 
@@ -29,6 +30,26 @@ async function checkAndIncrement(kv: KVNamespace, key: string, limit: number, wi
 }
 
 
+/**
+ * The console variant. Same counter, but it never makes an operator wait on the slow part:
+ *  - the counter WRITE goes to the background (Worker: waitUntil; Node: inline). KV writes are slow and capped at one per
+ *    second per key, and the console opens with a burst of reads that all charge the same key - awaiting each write made
+ *    every one of them wait, and a rejected write used to surface as an error page.
+ *  - a KV failure lets the request through. These limits are a brake on a stolen session or a runaway script, and the
+ *    session check has already authenticated the operator; a limiter outage must not lock the business out of its own console.
+ */
+async function checkAndIncrementQuick(c: Context, kv: KVNamespace, key: string, limit: number, windowSeconds: number) {
+  let count = 0;
+  try {
+    const current = await kv.get(key);
+    count = current ? parseInt(current, 10) || 0 : 0;
+  } catch {
+    return true;
+  }
+  if (count >= limit) return false;
+  await afterResponse(c, kv.put(key, String(count + 1), { expirationTtl: windowSeconds }));
+  return true;
+}
 
 /** General API rate limit — per IP. */
 export async function apiRateLimit(c: Context<{ Bindings: Env }>, next: Next) {
@@ -79,7 +100,7 @@ function adminIdentity(c: Context<{ Bindings: Env }>): string {
 export async function adminRateLimit(c: Context<{ Bindings: Env }>, next: Next) {
   const identity = adminIdentity(c);
   const limit = parseInt(c.env.RATE_LIMIT_ADMIN_PER_MINUTE, 10) || 600;
-  const ok = await checkAndIncrement(c.env.RATE_LIMIT_KV, `admin:read:${identity}`, limit, 60);
+  const ok = await checkAndIncrementQuick(c, c.env.RATE_LIMIT_KV, `admin:read:${identity}`, limit, 60);
   if (!ok) {
     return c.json({
       error: {
@@ -101,7 +122,7 @@ export async function adminRateLimit(c: Context<{ Bindings: Env }>, next: Next) 
 export async function adminWriteRateLimit(c: Context<{ Bindings: Env }>, next: Next) {
   const identity = adminIdentity(c);
   const limit = parseInt(c.env.RATE_LIMIT_ADMIN_WRITES_PER_MINUTE, 10) || 60;
-  const ok = await checkAndIncrement(c.env.RATE_LIMIT_KV, `admin:write:${identity}`, limit, 60);
+  const ok = await checkAndIncrementQuick(c, c.env.RATE_LIMIT_KV, `admin:write:${identity}`, limit, 60);
   if (!ok) {
     return c.json({
       error: {

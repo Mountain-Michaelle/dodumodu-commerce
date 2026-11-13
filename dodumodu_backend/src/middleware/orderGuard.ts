@@ -1,3 +1,4 @@
+import { browserLabel } from "../abuse/spamDetect";
 import type { Context, Next } from "hono";
 import type { Env } from "../env";
 import { createDb } from "../db";
@@ -45,6 +46,8 @@ type Vars = {
   deviceId?: string | null;
   /** in_app | browser | unknown. */
   clientKind?: string;
+  /** A coarse label such as "Chrome 120 · Android", or null. Never the raw User-Agent. */
+  browser?: string | null;
 };
 
 // The order-form abuse guard - the SINGLE abuse authority for this endpoint.
@@ -108,6 +111,7 @@ export async function orderGuard(c: Context<{ Bindings: Env; Variables: Vars }>,
   c.set("clientIp", ip);
   c.set("deviceId", deviceId);
   c.set("clientKind", clientKind);
+  c.set("browser", browserLabel(c.req.header("user-agent")));
   const db = createDb(c.env.DATABASE_URL);
 
   let replay = false;

@@ -169,7 +169,7 @@ test("admin assets work under active namespace", async () => {
   const app = dispatchApp(env);
   const res = await app.fetch(new Request("http://localhost/e5he78f823523/assets/auth.js"), env);
   assert.equal(res.status, 200, "auth.js is public → 200");
-  assert.ok((await res.text()).includes("AUTH"), "auth.js content served");
+  assert.ok((await res.text()).includes("ADMIN_BASE_PATH"), "auth.js content served");
 });
 
 test("auth management HTML rewrites auth-ui assets into the active namespace", () => {
@@ -193,10 +193,14 @@ test("console assets are served under the active namespace", async () => {
   const jsMatch = html.match(/src="[^"]*\/(admin\.[^.]+\.min\.js)"/);
   assert.ok(cssMatch, "console CSS reference");
   assert.ok(jsMatch, "console JS reference");
-  const css = await app.fetch(new Request(`http://localhost${namespace}/assets/${cssMatch![1]}`), env);
+  // The console bundle is the whole admin UI, so it is no longer public: it needs the same identity as the page.
+  const anon = await app.fetch(new Request(`http://localhost${namespace}/assets/${jsMatch![1]}`), env);
+  assert.equal(anon.status, 401, "console bundle is refused without an identity");
+  const who = { "Cf-Access-Authenticated-User-Email": "admin@example.com" };
+  const css = await app.fetch(new Request(`http://localhost${namespace}/assets/${cssMatch![1]}`, { headers: who }), env);
   assert.equal(css.status, 200);
   assert.match(css.headers.get("Content-Type") ?? "", /^text\/css/);
-  const js = await app.fetch(new Request(`http://localhost${namespace}/assets/${jsMatch![1]}`), env);
+  const js = await app.fetch(new Request(`http://localhost${namespace}/assets/${jsMatch![1]}`, { headers: who }), env);
   assert.equal(js.status, 200);
   assert.match(js.headers.get("Content-Type") ?? "", /^text\/javascript/);
 });

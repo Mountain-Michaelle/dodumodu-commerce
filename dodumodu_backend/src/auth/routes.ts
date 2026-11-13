@@ -3,6 +3,7 @@
 // ADMIN_BASE (/admin). Every route is behind flagGate (404 when off) and
 // originGuard for unsafe methods. Errors map to neutral 401 / 429 {retry_after}
 // / 503 {retry:true} / 403 so real, unknown and denied look identical.
+import { secretMatches } from "../shared/secureEqual";
 import { legacyFromGrants } from "./route-access";
 import { effectivePerms } from "./registry";
 import { Hono } from "hono";
@@ -952,7 +953,7 @@ export async function runCleanup(db: Db, batch = 500): Promise<Record<string, nu
 adminRoute.post("/internal/cleanup", async (c) => guarded(c, async () => {
   const secret = c.req.header("x-cron-secret");
   const expected = (c.env as unknown as { RECONCILE_CRON_SECRET?: string }).RECONCILE_CRON_SECRET;
-  if (!expected || secret !== expected) return c.json({ error: "Not found" }, 404);
+  if (!secretMatches(secret, expected)) return c.json({ error: "Not found" }, 404);
   const s = authInit(c);
   const counts = await runCleanup(s.db, 500);
   return c.json({ ok: true, counts });

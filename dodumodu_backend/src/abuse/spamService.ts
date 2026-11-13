@@ -3,6 +3,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../shared/httpErr
 import { normalizePhone } from "../shared/normalizePhone";
 import { ordersRepo } from "../data/ordersRepo";
 import * as spamRepo from "./spamRepo";
+import { dbErrorInfo } from "../shared/dbError";
 
 // Manual spam flagging: the one hard, human decision in the abuse layer.
 //
@@ -156,6 +157,6 @@ export const spamService = {
 
 /** Postgres unique-violation detection, same shape orderService uses. */
 function isUniqueViolation(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("duplicate key") || message.includes("unique");
+  const { code, message } = dbErrorInfo(error);
+  return code === "23505" || message.includes("duplicate key") || message.includes("unique");
 }
