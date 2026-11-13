@@ -59,6 +59,9 @@ export async function triggerGitHubDispatch(
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
       headers: {
         Accept: "application/vnd.github+json",
+        // GitHub rejects API requests that carry no User-Agent with a 403. curl and
+        // browsers add one themselves; a Worker's fetch() does not.
+        "User-Agent": "dodumodu-backend-deploy-trigger",
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -89,9 +92,19 @@ export async function triggerGitHubDispatch(
     }
 
     if (!res.ok) {
+      // GitHub says WHY in the body (bad token, missing permission, SSO, no User-Agent).
+      // Surface it, capped; the token is never echoed back by GitHub.
+      const detail = await res.text().then((t) => {
+        try { return String((JSON.parse(t) as { message?: unknown }).message ?? "").slice(0, 300); }
+        catch { return t.slice(0, 300); }
+      }).catch(() => "");
+      console.warn(JSON.stringify({
+        event: "github_dispatch_rejected", httpStatus: res.status, detail,
+        durationMs: Date.now() - started,
+      }));
       return finish({
         status: "failed",
-        error: `GitHub dispatch rejected (HTTP ${res.status})`,
+        error: `GitHub dispatch rejected (HTTP ${res.status})${detail ? `: ${detail}` : ""}`,
         httpStatus: res.status,
         retryable: true,
       });
