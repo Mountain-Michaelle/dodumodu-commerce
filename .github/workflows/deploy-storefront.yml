@@ -1,30 +1,34 @@
 name: deploy-storefront
 
-# Verified deploy pipeline: build the site from immutable published snapshots,
-# revalidate the intended publication set (publication consistency), deploy via
-# Wrangler with a least-privilege Cloudflare API token, then verify the actual
-# public markers before any publication may be reported LIVE.
+# Build the storefront from the published snapshots, deploy it with Wrangler, then READ the live pages and only
+# then report the publish as live. Every step reports to the Worker (scripts/ci.mjs), which is what the admin
+# panel shows live - and a step that fails fails the build, with its error text, instead of leaving the panel
+# on "deploying".
 #
-# Concurrency: a stale build that finished while a newer publish landed must
-# never overwrite it. The `concurrency: storefront-deploy` group plus
-# `cancel-in-progress: false` serialize deploys without cancelling the running
-# one; the verification step re-reads the newest publishes and refuses to mark
-# a build verified when its intended set no longer matches.
+# No database credential lives here. The build fetches snapshots from the Worker (GET /ci/snapshots), guarded by
+# DEPLOY_TRIGGER_SECRET.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   WORKER_URL              https://<your worker origin>       (no trailing slash)
+#   DEPLOY_TRIGGER_SECRET   same value as the Worker secret of that name
+#   SITE_URL                public storefront origin the verifier reads
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#
+# repository_dispatch only runs the workflow file on the DEFAULT branch: merge this file there first.
 
 on:
   workflow_dispatch:
     inputs:
       reason:
-        description: "Why this deploy is being run (shown in the build record)"
+        description: "Why this deploy is being run"
         required: false
         default: "manual"
-  # Triggered by the production Worker when an admin publishes/republishes a
-  # product (src/external/githubDeployTrigger.ts emits event_type "storefront-deploy").
-  # The dispatch carries client_payload { source: "admin-publish" } only — no URLs,
-  # no secrets, no build parameters.
+  # The Worker sends client_payload { build_id, publish_ref, ... } - ids only, no secrets, no parameters.
   repository_dispatch:
     types: [storefront-deploy]
 
+# One deploy at a time, never cancelling one that is mid-deploy. GitHub keeps only the NEWEST waiting run, which is
+# fine: every build renders the latest publish of every product, and a cancelled run reports itself (last step).
 concurrency:
   group: storefront-deploy
   cancel-in-progress: false
@@ -33,18 +37,21 @@ permissions:
   contents: read
 
 env:
-  # Read-only Neon role for snapshot reads at build time. Never a read-write
-  # connection string in CI; the Worker runtime uses its own secret.
-  DATABASE_URL: ${{ secrets.NEON_READONLY_URL }}
   MAX_ORDER_QUANTITY: "20"
-  # Worker origin and CI auth secret for build-status lifecycle callbacks.
-  # These are GitHub Secrets; they are never logged.
   WORKER_URL: ${{ secrets.WORKER_URL }}
   DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+  SITE_URL: ${{ secrets.SITE_URL }}
+  # The id the Worker queued for this run; a manual run makes its own.
+  BUILD_ID: ${{ github.event.client_payload.build_id || format('build_{0}_{1}', github.run_id, github.run_attempt) }}
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: dodumodu_backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,120 +61,74 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: dodumodu_backend/package-lock.json
+          cache-dependency-path: |
+            dodumodu_backend/package-lock.json
+            dodumodu_site/package-lock.json
+
+      # Reports in first, with nothing installed yet: scripts/ci.mjs needs only Node.
+      - name: Report run started
+        id: start
+        run: node scripts/ci.mjs start
 
       - name: Install backend dependencies
-        working-directory: dodumodu_backend
-        run: npm ci
+        id: install_backend
+        run: node scripts/ci.mjs step install "Installing dependencies" -- npm ci
 
       - name: Build site bundle
-        working-directory: dodumodu_site
-        run: npm ci && npm run build
+        id: site
+        run: node scripts/ci.mjs step site_install "Installing site dependencies" -- npm --prefix ../dodumodu_site ci --silent && node scripts/ci.mjs step site_build "Bundling the storefront" -- npm --prefix ../dodumodu_site run build
 
       - name: Render storefront from published snapshots
         id: render
-        working-directory: dodumodu_backend
-        run: |
-          npm run build:site
-          echo "build_id=$(node -p "require('./src/generated/build-id.json').buildId" 2>/dev/null || node -e "console.log(require('fs').readFileSync('src/generated/site.ts','utf8').match(/BUILD_ID = \"([^\"]+)\"/)[1])")" >> "$GITHUB_OUTPUT"
-          echo "expected=$(node -e "const m=require('fs').readFileSync('src/generated/site.ts','utf8').match(/PRODUCTS = (\{.*?\});/s); const p=JSON.parse(m[1]); const e={}; for (const [k,v] of Object.entries(p)) e[k]=v.publishId; console.log(JSON.stringify(e))")" >> "$GITHUB_OUTPUT"
-        # Fails the job rather than deploying a half-rendered build.
+        run: node scripts/ci.mjs step render "Rendering the published pages" -- npm run build:site
 
       - name: Typecheck
-        working-directory: dodumodu_backend
-        run: npm run typecheck
+        id: typecheck
+        run: node scripts/ci.mjs step typecheck "Type-checking" -- npm run typecheck
 
-      - name: Tests (backend + renderer)
-        working-directory: dodumodu_backend
-        run: npm test
+      - name: Tests
+        id: tests
+        run: node scripts/ci.mjs step tests "Running tests" -- npm run test:deploy
 
       - name: Wrangler dry-run (bundle-size guard)
-        working-directory: dodumodu_backend
-        run: npx wrangler deploy --dry-run
+        id: dryrun
+        run: node scripts/ci.mjs step bundle "Checking the bundle fits" -- npx wrangler deploy --dry-run
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # Strict: a refusal (409 = something newer exists) stops the run here, before it can overwrite anything.
       - name: Pre-deploy staleness check
-        id: pre-deploy
-        working-directory: dodumodu_backend
-        run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/pre-deploy" \
-            -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
-            -H "Content-Type: application/json")
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "Pre-deploy check returned HTTP $HTTP_CODE — build is stale or ineligible, aborting before deployment."
-            exit 1
-          fi
-          echo "Pre-deploy check passed — build is eligible to deploy."
-        env:
-          BUILD_ID: ${{ steps.render.outputs.build_id }}
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+        id: predeploy
+        run: node scripts/ci.mjs call pre-deploy
 
       - name: Deploy via Wrangler
         id: deploy
-        working-directory: dodumodu_backend
-        run: npx wrangler deploy
+        run: node scripts/ci.mjs step deploy "Deploying to Cloudflare" -- npx wrangler deploy
         env:
+          # Least-privilege token: Workers Scripts Edit only.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Least-privilege token: Workers Scripts Edit only. Never a global
-          # API key, and the value lives in GitHub Secrets, never in logs.
 
-      - name: Mark build deployed
-        if: success()
-        working-directory: dodumodu_backend
-        run: |
-          curl -s -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/mark-deployed" \
-            -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
-            -H "Content-Type: application/json" \
-            -d '{}' || echo "mark-deployed callback failed (build was deployed but status not recorded)"
-        env:
-          BUILD_ID: ${{ steps.render.outputs.build_id }}
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+      - name: Record deployed
+        id: deployed
+        run: node scripts/ci.mjs call mark-deployed
 
-      - name: Verify public markers before marking LIVE
+      # Reads the public pages (retrying while the deploy propagates), then asks the Worker to read them too.
+      - name: Verify the live storefront
         id: verify
-        working-directory: dodumodu_backend
         run: node scripts/verify-deploy.mjs
-        env:
-          SITE_URL: ${{ secrets.SITE_URL }}
-          DATABASE_URL: ${{ secrets.NEON_READONLY_URL }}
-          EXPECTED: ${{ steps.render.outputs.expected }}
-          EXPECTED_BUILD_ID: ${{ steps.render.outputs.build_id }}
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
 
-      - name: Mark build verified
-        if: success()
-        working-directory: dodumodu_backend
-        run: |
-          curl -s -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/mark-verified" \
-            -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
-            -H "Content-Type: application/json" \
-            -d '{}' || echo "mark-verified callback failed (verification passed but status not recorded)"
-        env:
-          BUILD_ID: ${{ steps.render.outputs.build_id }}
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
-
-      - name: Record build failure
+      # Anything above failing lands here: name the step that broke. Steps that reported their own error already
+      # failed the build with a better message; this only covers a run that died before it could say anything.
+      - name: Report failure
         if: failure()
-        working-directory: dodumodu_backend
-        run: |
-          BUILD_ID="${{ steps.render.outputs.build_id }}"
-          if [ -n "$BUILD_ID" ]; then
-            curl -s -X POST "${WORKER_URL}/admin/builds/${BUILD_ID}/mark-failed" \
-              -H "Authorization: Bearer ${DEPLOY_TRIGGER_SECRET}" \
-              -H "Content-Type: application/json" \
-              -d '{"error":"workflow step failed before verification completed"}' \
-              || echo "mark-failed callback failed (check Worker logs)"
-          else
-            echo "No build ID available — build was not recorded as triggered"
-          fi
+        run: node scripts/ci.mjs fail
         env:
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          DEPLOY_TRIGGER_SECRET: ${{ secrets.DEPLOY_TRIGGER_SECRET }}
+          STEPS_JSON: ${{ toJSON(steps) }}
 
+      - name: Report cancellation
+        if: cancelled()
+        run: node scripts/ci.mjs fail
+        env:
+          STEPS_JSON: ${{ toJSON(steps) }}

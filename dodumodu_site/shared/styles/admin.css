@@ -433,6 +433,14 @@ p:last-child { margin-bottom: 0; }
    just published" - so it is marked, not hidden. */
 .reference.is-stale { color: var(--warn, #b45309); border-color: var(--warn, #b45309); }
 
+.deploy-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; font-size: .8125rem; }
+.deploy-step { display: grid; grid-template-columns: 1.25rem 1fr; gap: 0 .5rem; align-items: baseline; }
+.deploy-step-icon { text-align: center; font-weight: 700; color: var(--text-muted); }
+.deploy-step.is-ok .deploy-step-icon { color: var(--ok); }
+.deploy-step.is-failed .deploy-step-icon, .deploy-step.is-failed .deploy-step-label { color: var(--danger); }
+.deploy-step.is-running .deploy-step-icon { color: var(--warn, #b45309); }
+.deploy-step-message, .deploy-error pre { grid-column: 2; margin: .25rem 0 0; padding: .5rem; white-space: pre-wrap; word-break: break-word; max-height: 12rem; overflow: auto; font-size: .75rem; background: var(--danger-soft); border-radius: .375rem; }
+.deploy-error { display: flex; flex-direction: column; gap: .25rem; }
 .deploy-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 
 @media (max-width: 30rem) {

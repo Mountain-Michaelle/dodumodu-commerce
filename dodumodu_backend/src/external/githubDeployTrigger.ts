@@ -31,7 +31,9 @@ const isTransient = (status: number) => status === 429 || status >= 500;
 
 export async function triggerGitHubDispatch(
   env: Env,
-  context?: { publishId?: number | string; productId?: number | string; buildId?: number | string },
+  context?: {
+    publishId?: number | string; publishRef?: string; productId?: number | string; buildId?: number | string;
+  },
 ): Promise<DispatchResult> {
   const token = (env.GITHUB_DEPLOY_TOKEN ?? "").trim();
 
@@ -71,6 +73,7 @@ export async function triggerGitHubDispatch(
         client_payload: {
           source: "admin-publish",
           publish_id: context?.publishId ?? null,
+          publish_ref: context?.publishRef ?? null,
           product_id: context?.productId ?? null,
           build_id: context?.buildId ?? null,
         },

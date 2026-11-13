@@ -37,17 +37,35 @@ export function stateLabel(state) {
  * measured, and when it turns out to be wrong it is the only thing an operator
  * remembers about the panel.
  */
+function stepLabel(status, key) {
+  return (status.build?.steps || []).find((s) => s.step === key)?.label || key;
+}
+
+const STEP_ICON = { ok: "✓", running: "⟳", failed: "✕", skipped: "–" };
+
+/** The live step list of the build behind this publish. */
+function renderSteps(build) {
+  if (!build || !build.steps || build.steps.length === 0) return null;
+  return el("ol", { class: "deploy-steps" }, build.steps.map((s) => el("li", { class: `deploy-step is-${s.status}` },
+    el("span", { class: "deploy-step-icon", "aria-hidden": "true", text: STEP_ICON[s.status] || "•" }),
+    el("span", { class: "deploy-step-label", text: s.label || s.step }),
+    s.status === "failed" && s.message ? el("pre", { class: "deploy-step-message", text: s.message }) : null)));
+}
+
 export function stateDetail(status) {
   if (status.state === "LIVE") {
     return `Verified on the public page${status.checkedAt
       ? ` at ${new Date(status.checkedAt).toLocaleTimeString()}` : ""}.`;
   }
-  if (status.state === "DEPLOYING" && status.deployError) return status.deployError;
+  if (status.state === "DEPLOYING" && status.build?.currentStep) {
+    const cur = (status.build.steps || []).find((s) => s.step === status.build.currentStep);
+    return `Now: ${cur?.label || status.build.currentStep}. The storefront is still serving the previous version.`;
+  }
   if (status.state === "DEPLOYING") return "Published. The storefront is still serving the previous version.";
   if (status.state === "FAILED") {
-    return status.deployError || "The snapshot is safe and retryable. The storefront is unchanged.";
+    const where = status.build?.failedStep ? ` at "${stepLabel(status, status.build.failedStep)}"` : "";
+    return `The build failed${where}. The snapshot is safe and the storefront is unchanged.`;
   }
-  if (status.buildStatus === "pending" && status.deployError) return `Deploy not started: ${status.deployError}`;
   if (!status.publishVersion) return "This product has never been published.";
   if (status.verificationReason === "unconfigured") {
     return "Published. Live status cannot be checked until SITE_URL is configured.";
@@ -55,7 +73,7 @@ export function stateDetail(status) {
   if (status.verificationReason === "unreachable") {
     return "Published. The public storefront could not be reached to verify it.";
   }
-  return "Published. No rebuild requested yet.";
+  return "Published, but no build is running. Use Retry Deployment to start one.";
 }
 
 export function renderDeploymentStatus(status, { onRetry } = {}) {
@@ -86,9 +104,12 @@ export function renderDeploymentStatus(status, { onRetry } = {}) {
         text: "View Storefront",
       })
       : null,
-    // Offered only where it can help: a rebuild that failed. A DEPLOYING or LIVE
-    // publish has nothing to retry.
-    (status.state === "FAILED" || (status.state !== "LIVE" && status.buildStatus === "pending")) && onRetry
+    status.build?.runUrl
+      ? el("a", { class: "button", href: status.build.runUrl, target: "_blank", rel: "noopener noreferrer", text: "View GitHub run" })
+      : null,
+    // Offered whenever nothing is running and the page is not live: a failed build, or a publish whose build
+    // never started. A build in progress or a live page has nothing to retry.
+    (status.state === "FAILED" || (status.state === "PUBLISHED" && status.publishRef && status.build?.state !== "running")) && onRetry
       ? el("button", {
         class: "button button-primary", type: "button", text: "Retry Deployment",
         onclick: onRetry,
@@ -98,9 +119,10 @@ export function renderDeploymentStatus(status, { onRetry } = {}) {
   return el("div", { class: "deploy-panel" },
     el("h3", { class: "detail-heading", text: "Storefront" }),
     banner,
-    status.deployError
+    renderSteps(status.build),
+    status.deployError && status.state !== "LIVE"
       ? el("div", { class: "deploy-error" },
-        el("strong", { text: "Last deploy attempt" }),
+        el("strong", { text: status.build?.failedStep ? `Why it failed (${stepLabel(status, status.build.failedStep)})` : "Why it failed" }),
         el("pre", { class: "reference", text:
           `${status.deployError}${status.deployHttpStatus ? `\nHTTP ${status.deployHttpStatus}` : ""}`
           + `${status.deployAttempts ? `\nAttempts: ${status.deployAttempts}` : ""}`

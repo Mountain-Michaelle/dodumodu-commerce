@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
-import { adminRoute } from "./admin";
+import { ciRoute } from "./ci";
 import { registerDbDriver } from "../db";
 import { FakeDatabase, fakeDriver } from "../testSupport/fakeDb";
 import type { Env } from "../env";
@@ -15,7 +15,7 @@ const env: Env = {
 function makeApp(db: FakeDatabase) {
   registerDbDriver(fakeDriver(db));
   const testApp = new Hono<{ Bindings: Env }>();
-  testApp.route("/admin", adminRoute);
+  testApp.route("/ci", ciRoute);
   return testApp;
 }
 
@@ -32,7 +32,7 @@ test("mark-deployed transitions triggered -> deployed", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -43,7 +43,7 @@ test("mark-deployed transitions triggered -> deployed", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/mark-deployed", {
+    new Request("https://localhost/ci/builds/build_test_1/mark-deployed", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -61,7 +61,7 @@ test("mark-deployed is idempotent (already deployed)", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "deployed",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -72,7 +72,7 @@ test("mark-deployed is idempotent (already deployed)", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/mark-deployed", {
+    new Request("https://localhost/ci/builds/build_test_1/mark-deployed", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -93,7 +93,7 @@ test("mark-verified with matching markers succeeds", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: fixedTs,
@@ -107,14 +107,14 @@ test("mark-verified with matching markers succeeds", async () => {
   globalThis.fetch = async (url: URL | RequestInfo) => {
     if (String(url).includes("/glow-serum/")) {
       return new Response(
-        '<html><meta name="storefront-publish-id" content="pub_7"><meta name="storefront-build-id" content="build_test_1"></html>',
+        '<html><meta name="storefront-publish-id" content="pub_00000000000000000007"><meta name="storefront-build-id" content="build_test_1"></html>',
       );
     }
     return new Response("Not found", { status: 404 });
   };
   try {
     const res = await app.fetch(
-      new Request("https://localhost/admin/builds/build_test_1/mark-verified", {
+      new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
       }),
@@ -136,7 +136,7 @@ test("stale-build guard returns 409 when newer build exists", async () => {
     {
       id: 1,
       buildId: "build_newer",
-      intendedPublications: [{ slug: "newer-slug", publishId: 5 }],
+      intendedPublications: [{ slug: "newer-slug", publishId: 5, publishRef: "pub_00000000000000000005" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T11:00:00Z").toISOString(), // LATER timestamp
@@ -147,7 +147,7 @@ test("stale-build guard returns 409 when newer build exists", async () => {
     {
       id: 2,
       buildId: "build_older",
-      intendedPublications: [{ slug: "older-slug", publishId: 3 }],
+      intendedPublications: [{ slug: "older-slug", publishId: 3, publishRef: "pub_00000000000000000003" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(), // EARLIER timestamp
@@ -159,7 +159,7 @@ test("stale-build guard returns 409 when newer build exists", async () => {
 
   // Try to verify the OLDER build when a NEWER build is in progress
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_older/mark-verified", {
+    new Request("https://localhost/ci/builds/build_older/mark-verified", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -176,7 +176,7 @@ test("mark-verified rejects missing or wrong build secret", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -187,7 +187,7 @@ test("mark-verified rejects missing or wrong build secret", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/mark-verified", {
+    new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer wrong-token" },
     }),
@@ -204,7 +204,7 @@ test("mark-verified is idempotent when already verified", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: fixedTs,
@@ -218,14 +218,14 @@ test("mark-verified is idempotent when already verified", async () => {
   globalThis.fetch = async (url: URL | RequestInfo) => {
     if (String(url).includes("/glow-serum/")) {
       return new Response(
-        '<html><meta name="storefront-publish-id" content="pub_7"><meta name="storefront-build-id" content="build_test_1"></html>',
+        '<html><meta name="storefront-publish-id" content="pub_00000000000000000007"><meta name="storefront-build-id" content="build_test_1"></html>',
       );
     }
     return new Response("Not found", { status: 404 });
   };
   try {
     const res1 = await app.fetch(
-      new Request("https://localhost/admin/builds/build_test_1/mark-verified", {
+      new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
       }),
@@ -236,7 +236,7 @@ test("mark-verified is idempotent when already verified", async () => {
 
     // Second call returns the current verified state without re-verifying.
     const res2 = await app.fetch(
-      new Request("https://localhost/admin/builds/build_test_1/mark-verified", {
+      new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
       }),
@@ -257,7 +257,7 @@ test("mark-verified on a failed build stays failed (terminal state)", async () =
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "failed",
       triggeredBy: "ci@deploy",
       triggeredAt: fixedTs,
@@ -268,7 +268,7 @@ test("mark-verified on a failed build stays failed (terminal state)", async () =
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/mark-verified", {
+    new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -286,7 +286,7 @@ test("mark-verified rejects marker mismatch and marks the build failed", async (
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: fixedTs,
@@ -308,7 +308,7 @@ test("mark-verified rejects marker mismatch and marks the build failed", async (
   };
   try {
     const res = await app.fetch(
-      new Request("https://localhost/admin/builds/build_test_1/mark-verified", {
+      new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
       }),
@@ -335,7 +335,7 @@ test("pre-deploy returns eligible when build is the latest and not terminal", as
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -343,10 +343,14 @@ test("pre-deploy returns eligible when build is the latest and not terminal", as
       verificationError: null,
     },
   ]);
+  db.table("product_publishes", [
+    { id: 7, productId: 1, payload: { slug: "glow-serum" }, publishedBy: "a@b.c", buildStatus: "triggered",
+      publishRef: "pub_00000000000000000007", createdAt: new Date().toISOString() },
+  ]);
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/pre-deploy", {
+    new Request("https://localhost/ci/builds/build_test_1/pre-deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -365,7 +369,7 @@ test("pre-deploy returns 409 when a newer build exists (stale build blocked)", a
     {
       id: 1,
       buildId: "build_newer",
-      intendedPublications: [{ slug: "newer-slug", publishId: 5 }],
+      intendedPublications: [{ slug: "newer-slug", publishId: 5, publishRef: "pub_00000000000000000005" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T11:00:00Z").toISOString(),
@@ -375,7 +379,7 @@ test("pre-deploy returns 409 when a newer build exists (stale build blocked)", a
     {
       id: 2,
       buildId: "build_older",
-      intendedPublications: [{ slug: "older-slug", publishId: 3 }],
+      intendedPublications: [{ slug: "older-slug", publishId: 3, publishRef: "pub_00000000000000000003" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -386,7 +390,7 @@ test("pre-deploy returns 409 when a newer build exists (stale build blocked)", a
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_older/pre-deploy", {
+    new Request("https://localhost/ci/builds/build_older/pre-deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -404,7 +408,7 @@ test("pre-deploy returns 409 when build is already verified (terminal)", async (
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "verified",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -415,7 +419,7 @@ test("pre-deploy returns 409 when build is already verified (terminal)", async (
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/pre-deploy", {
+    new Request("https://localhost/ci/builds/build_test_1/pre-deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -430,7 +434,7 @@ test("pre-deploy returns 404 when build does not exist", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/nonexistent/pre-deploy", {
+    new Request("https://localhost/ci/builds/nonexistent/pre-deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
     }),
@@ -446,7 +450,7 @@ test("pre-deploy rejects missing build secret", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -457,7 +461,7 @@ test("pre-deploy rejects missing build secret", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/pre-deploy", {
+    new Request("https://localhost/ci/builds/build_test_1/pre-deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer wrong-token" },
     }),
@@ -473,7 +477,7 @@ test("mark-failed transitions triggered -> failed", async () => {
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "triggered",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -484,7 +488,7 @@ test("mark-failed transitions triggered -> failed", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/mark-failed", {
+    new Request("https://localhost/ci/builds/build_test_1/mark-failed", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
       body: JSON.stringify({ error: "render failure" }),
@@ -509,7 +513,7 @@ test("duplicate mark-failed on an already-failed build is idempotent", async () 
     {
       id: 1,
       buildId: "build_test_1",
-      intendedPublications: [{ slug: "glow-serum", publishId: 7 }],
+      intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
       status: "failed",
       triggeredBy: "ci@deploy",
       triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
@@ -520,7 +524,7 @@ test("duplicate mark-failed on an already-failed build is idempotent", async () 
   const app = makeApp(db);
 
   const res1 = await app.fetch(
-    new Request("https://localhost/admin/builds/build_test_1/mark-failed", {
+    new Request("https://localhost/ci/builds/build_test_1/mark-failed", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer ci-secret-token" },
       body: JSON.stringify({ error: "second failure" }),
@@ -541,7 +545,7 @@ test("deploy-trigger records a build with its intended publication set", async (
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/deploy-trigger", {
+    new Request("https://localhost/ci/deploy-trigger", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -550,8 +554,8 @@ test("deploy-trigger records a build with its intended publication set", async (
       body: JSON.stringify({
         buildId: "build_trigger_1",
         intendedPublications: [
-          { slug: "glow-serum", publishId: 7 },
-          { slug: "vitamin-c", publishId: 3 },
+          { slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" },
+          { slug: "vitamin-c", publishId: 3, publishRef: "pub_00000000000000000003" },
         ],
       }),
     }),
@@ -566,8 +570,8 @@ test("deploy-trigger records a build with its intended publication set", async (
   const row = db.rows("site_builds").find((r) => r.buildId === "build_trigger_1");
   assert.ok(row, "expected the build row to be recorded");
   assert.deepEqual(row.intendedPublications, [
-    { slug: "glow-serum", publishId: 7 },
-    { slug: "vitamin-c", publishId: 3 },
+    { slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" },
+    { slug: "vitamin-c", publishId: 3, publishRef: "pub_00000000000000000003" },
   ]);
 });
 
@@ -577,7 +581,7 @@ test("deploy-trigger rejects invalid body", async () => {
   const app = makeApp(db);
 
   const res = await app.fetch(
-    new Request("https://localhost/admin/deploy-trigger", {
+    new Request("https://localhost/ci/deploy-trigger", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -590,4 +594,64 @@ test("deploy-trigger rejects invalid body", async () => {
   const body = (await res.json()) as { error: string; fields?: Record<string, string[]> };
   assert.equal(res.status, 400, `Expected 400, got ${res.status}`);
   assert.equal(body.error, "Invalid request");
+});
+
+test("pre-deploy returns 409 when a product was published again while the build ran", async () => {
+  const db = new FakeDatabase();
+  db.table("site_builds", [{
+    id: 1, buildId: "build_test_1",
+    intendedPublications: [{ slug: "glow-serum", publishId: 7, publishRef: "pub_00000000000000000007" }],
+    status: "triggered", triggeredBy: "ci@deploy", triggeredAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+    verifiedAt: null, verificationError: null,
+  }]);
+  db.table("product_publishes", [
+    { id: 9, productId: 1, payload: { slug: "glow-serum" }, publishedBy: "a@b.c", buildStatus: "triggered",
+      publishRef: "pub_00000000000000000009", createdAt: new Date().toISOString() },
+  ]);
+  const res = await makeApp(db).fetch(
+    new Request("https://localhost/ci/builds/build_test_1/pre-deploy", {
+      method: "POST", headers: { Authorization: "Bearer ci-secret-token" },
+    }),
+    env as never,
+  );
+  assert.equal(res.status, 409);
+});
+
+test("events: a failed step fails the build with its message, and a finished build's log is closed", async () => {
+  const db = new FakeDatabase();
+  db.table("site_builds", [{
+    id: 1, buildId: "build_test_1", intendedPublications: [], status: "triggered", triggeredBy: "ci@deploy",
+    triggeredAt: new Date().toISOString(), verifiedAt: null, verificationError: null, lastEventAt: new Date().toISOString(),
+    currentStep: null, failedStep: null, runUrl: null, triggerPublishId: null,
+  }]);
+  db.table("deploy_events", []);
+  const app = makeApp(db);
+  const send = (body: unknown) => app.fetch(new Request("https://localhost/ci/builds/build_test_1/events", {
+    method: "POST", headers: { Authorization: "Bearer ci-secret-token", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }), env as never);
+
+  assert.equal((await send({ step: "install", label: "Installing", status: "running" })).status, 200);
+  const failed = await send({ step: "render", label: "Rendering", status: "failed", message: "boom" });
+  assert.equal(((await failed.json()) as { status: string }).status, "failed");
+  const row = db.table("site_builds").find((r) => (r as { buildId?: string }).buildId === "build_test_1") as
+    { status: string; verificationError: string; failedStep: string };
+  assert.equal(row.status, "failed");
+  assert.equal(row.verificationError, "boom");
+  assert.equal(row.failedStep, "render");
+  const late = await send({ step: "deploy", status: "running" });
+  assert.equal(((await late.json()) as { ignored?: boolean }).ignored, true);
+});
+
+test("the CI routes refuse a missing, wrong or placeholder secret", async () => {
+  const app = makeApp(new FakeDatabase());
+  for (const auth of [undefined, "Bearer nope"]) {
+    const res = await app.fetch(new Request("https://localhost/ci/snapshots", { headers: auth ? { Authorization: auth } : {} }), env as never);
+    assert.equal(res.status, 401);
+  }
+  const res = await app.fetch(
+    new Request("https://localhost/ci/snapshots", { headers: { Authorization: "Bearer change-me" } }),
+    { ...env, DEPLOY_TRIGGER_SECRET: "change-me" } as never,
+  );
+  assert.equal(res.status, 401);
 });

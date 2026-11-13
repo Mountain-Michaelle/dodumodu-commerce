@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { renderProduct, escapeHtml, escapeHtmlAttr, escapeJsonString, escapeUrl, validateSlug, formatPrice } from './render-product.mjs'
 
 const baseSnapshot = {
-  publishId: 7,
+  publishRef: 'pub_0123456789abcdef0123',
   slug: 'glow-serum',
   product: {
     id: 1,
@@ -76,10 +76,10 @@ test('formatPrice converts minor units to naira display', () => {
 test('renderProduct fills all slots and leaves no unreplaced placeholders', () => {
   const html = renderProduct(baseSnapshot, { css: 'body{}', jsPath: '/site.abcd.js', csp: "default-src 'self'", buildId: 'build_123' })
   assert.ok(html.includes('<title>Radiance Glow Serum - DODUMODU</title>'))
-  assert.ok(html.includes('pub_7'))
+  assert.ok(html.includes('pub_0123456789abcdef0123'))
   assert.ok(html.includes('build_123'))
   assert.ok(html.includes('/glow-serum/'))
-  assert.ok(html.includes('<meta name="storefront-publish-id" content="pub_7">'))
+  assert.ok(html.includes('<meta name="storefront-publish-id" content="pub_0123456789abcdef0123">'))
   assert.ok(html.includes('<meta name="storefront-build-id" content="build_123">'))
   assert.ok(!html.match(/\{\{[A-Z_]+\}\}/), 'no unreplaced slots')
   assert.ok(html.includes('<body data-slug="glow-serum" data-product-id="1">'))

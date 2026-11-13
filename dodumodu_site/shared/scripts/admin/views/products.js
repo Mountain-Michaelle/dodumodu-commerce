@@ -405,28 +405,38 @@ export function productsView({ shell, identity, onNavigate }) {
  */
 function publishOutcome(result) {
   const deployment = result?.deployment || {};
-  if (deployment.status === "failed") {
+  // "failed" (GitHub refused or was unreachable) and "pending" (no token configured) both mean no build is
+  // running. Both carry the exact reason, which is shown rather than a generic apology.
+  if (deployment.status === "failed" || deployment.status === "pending") {
     return {
       kind: "error",
-      message: "Published. Storefront rebuild FAILED.",
-      detail: deployment.error || "Cloudflare did not accept the rebuild request. The snapshot is safe - retry the rebuild.",
+      message: result.reused
+        ? "Already published, but the build could not start."
+        : "Published, but the build could not start.",
+      detail: deployment.error || "The deploy request was not accepted. The snapshot is safe - retry the build.",
       retry: true,
     };
   }
-  if (deployment.status === "pending") {
-    // No deploy hook configured: local development, or a deployment that has not
-    // been wired up yet. The publish is real either way.
+  if (result.outcome === "unchanged") {
     return {
       kind: "success",
-      message: `Published (snapshot #${result.publishId}).`,
-      detail: "No deploy hook is configured, so the storefront was not rebuilt. Run npm run prerender locally.",
+      message: "No changes since the last publish.",
+      detail: "This version is already built and live. Nothing was rebuilt.",
+      retry: false,
+    };
+  }
+  if (result.outcome === "already-running") {
+    return {
+      kind: "success",
+      message: "This version is already being built.",
+      detail: "No second build was started. Watch the steps in the panel.",
       retry: false,
     };
   }
   return {
     kind: "success",
-    message: `Published (snapshot #${result.publishId}).`,
-    detail: "Storefront rebuild in progress.",
+    message: `Published (${result.publishRef || `snapshot #${result.publishId}`}).`,
+    detail: "Build started. The panel shows each step as it happens.",
     retry: false,
   };
 }
@@ -459,10 +469,9 @@ async function openPublish(product) {
       const outcome = publishOutcome(result);
       toast(outcome.message, outcome.kind, 6000);
       if (outcome.detail) toast(outcome.detail, outcome.kind === "error" ? "error" : "info", 9000);
-      if (outcome.retry) offerRetry(product);
-      // Reopened either way: the history list is how the operator sees the status
-      // they were just told about, and the detail view carries the retry button.
+      // Reopened either way: the detail view carries the live steps, the exact error and the retry button.
       load();
+      openDetail(product.id);
     } catch (err) {
       // Only reachable when the PUBLISH itself failed - the snapshot was never
       // written - which is genuinely an error and genuinely different.
@@ -471,21 +480,17 @@ async function openPublish(product) {
   }
 
   /** Retries only the rebuild, against the snapshot that already exists. */
-  async function retryDeploy(product) {
+  async function retryDeploy(product, refresh) {
     try {
       const result = await api.post(`/products/${product.id}/redeploy`, {});
       const outcome = publishOutcome(result);
-      toast(outcome.kind === "error" ? "Rebuild failed again." : "Rebuild requested.", outcome.kind, 6000);
+      toast(outcome.kind === "error" ? "The build could not start." : "Build started.", outcome.kind, 6000);
       if (outcome.kind === "error" && outcome.detail) toast(outcome.detail, "error", 9000);
       load();
+      if (refresh) refresh(); else openDetail(product.id);
     } catch (err) {
       toastError(err);
     }
-  }
-
-  function offerRetry(product) {
-    toast("Use “Rebuild storefront” on this product to try again.", "info", 8000);
-    void product;
   }
 
   /**
@@ -500,6 +505,16 @@ async function loadDeploymentStatus(product, host) {
   try {
     const status = await api.get(`/products/${product.id}/status`);
     mountDeploymentStatus(host, status, { onRetry: () => retryDeploy(product, refresh) });
+    // While a build runs the panel keeps itself current: poll until it is live or failed, and stop as soon as
+    // the panel is closed. A stale "deploying" is exactly what this exists to prevent.
+    clearTimeout(host._pollTimer);
+    const building = status.state === "DEPLOYING" || status.build?.state === "running";
+    host._pollUntil = host._pollUntil || Date.now() + 25 * 60 * 1000;
+    if (building && host.isConnected && Date.now() < host._pollUntil) {
+      host._pollTimer = setTimeout(() => { if (host.isConnected) refresh(); }, 3000);
+    } else if (!building) {
+      host._pollUntil = 0;
+    }
   } catch {
     mountStatusUnavailable(host, refresh);
   }
@@ -508,7 +523,7 @@ async function loadDeploymentStatus(product, host) {
 /** Plain-English names for the four deployment states. */
   function describeBuildStatus(status) {
     switch (status) {
-      case "pending": return "rebuild not started";
+      case "pending": return "build not started";
       // Deliberately not "building": the hook was accepted, and nothing has
       // confirmed a build has started.
       case "triggered": return "rebuild requested";

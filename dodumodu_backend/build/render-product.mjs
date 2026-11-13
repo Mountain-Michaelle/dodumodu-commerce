@@ -118,7 +118,12 @@ export function renderProduct(snapshot, opts = {}) {
 
   const p = snapshot.product
   const page = snapshot.page ?? {}
-  const publishId = `pub_${snapshot.publishId ?? 0}`
+  // The public marker of this publish (pub_ + 20 hex). It must be passed in: a page without one could never be
+  // verified as live, so rendering without it is an error rather than a silent "pub_0".
+  const publishId = snapshot.publishRef
+  if (!/^pub_[0-9a-f]{20}$/.test(publishId ?? '')) {
+    throw new Error(`refusing to render ${snapshot.slug}: missing or malformed publishRef`)
+  }
 
   // Canonical and Open Graph URLs use the root-level slug route.
   const canonicalUrl = `/${snapshot.slug}/`

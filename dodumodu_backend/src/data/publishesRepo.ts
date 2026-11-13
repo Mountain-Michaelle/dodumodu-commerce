@@ -57,6 +57,13 @@ export const publishesRepo = {
     return rows.length > 0;
   },
 
+  /** The newest publish of EVERY product: what a storefront build must render. */
+  async latestPerProduct(db: Db) {
+    const rows = await db.select().from(productPublishes).orderBy(desc(productPublishes.id));
+    const seen = new Set<number>();
+    return rows.filter((r) => (seen.has(r.productId) ? false : (seen.add(r.productId), true)));
+  },
+
   // The newest snapshot for one product: what the live site was built from.
   // Ordered by id rather than created_at, because ids cannot tie - two
   // publishes in the same second otherwise have no defined order.
@@ -76,6 +83,7 @@ export const publishesRepo = {
       id: productPublishes.id,
       publishedBy: productPublishes.publishedBy,
       buildStatus: productPublishes.buildStatus,
+      publishRef: productPublishes.publishRef,
       deployError: productPublishes.deployError,
       deployAttempts: productPublishes.deployAttempts,
       createdAt: productPublishes.createdAt,

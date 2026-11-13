@@ -4,6 +4,8 @@ import { productsRepo } from "../data/productsRepo";
 import { testimonialsRepo } from "../data/testimonialsRepo";
 import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
+import { IN_FLIGHT, siteBuildsRepo } from "../data/siteBuildsRepo";
+import { contentHashOf, newPublishRef } from "./publishRef";
 import { discountTiersRepo } from "../data/discountTiersRepo";
 import { paymentRulesRepo } from "../data/paymentRulesRepo";
 import { triggerGitHubDispatch } from "../external/githubDeployTrigger";
@@ -20,6 +22,15 @@ import { ProductNotFoundError } from "./catalogService";
 // from before the save with a price list from after it. A snapshot also keeps
 // the last known good page: a publish that fails half way is a publish that
 // never happened, so the previous one keeps serving.
+/** A build that has reported nothing for this long is treated as dead, not as "still running". */
+export const STALL_MS = 20 * 60 * 1000;
+
+export function newBuildId(): string {
+  const rand = new Uint8Array(4);
+  crypto.getRandomValues(rand);
+  return `build_${Date.now()}_${Array.from(rand, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export const publishService = {
   // Every read happens before any write, so the document is one consistent
   // capture rather than a view that can straddle two admin saves.
@@ -98,90 +109,135 @@ export const publishService = {
   },
 
   /**
-   * Publishes a product, then tries to start a rebuild.
+   * Publishes a product, then asks GitHub to rebuild the storefront.
    *
-   * The order here is the whole design, and it is deliberately not the order it
-   * reads like:
+   * The order is the design:
+   *   1. assemble the snapshot
+   *   2. IDENTICAL to the newest publish? Reuse it. A publish is a new row only when the content
+   *      changed, so clicking Publish twice, or retrying after a failure, never mints a second id.
+   *   3. otherwise write it with a fresh random publish ref - that is what "published" means
+   *   4. only then queue a build and dispatch, and record exactly what happened
    *
-   *   1. assemble + write the snapshot
-   *   2. THAT is the definition of published
-   *   3. only then fire the deploy hook, and record whatever it did
-   *
-   * The hook is awaited rather than handed to waitUntil, on purpose. waitUntil would
-   * let the response say "triggered" before the request had been sent, which is
-   * precisely the claim that would then be a lie. One round trip on an admin action
-   * is a fair price for an answer the panel can actually display.
-   *
-   * A hook failure does NOT roll back, delete or invalidate the snapshot. The
-   * snapshot is durable and correct; Cloudflare being briefly unreachable says
-   * nothing about what was published, and destroying a valid publish over a
-   * transient network error would be the worst possible outcome. The caller gets
-   * `published: true` alongside `deployment.status: "failed"` and offers a retry.
+   * A dispatch failure never rolls back or deletes the snapshot: GitHub being unreachable says
+   * nothing about what was published. The caller gets the snapshot AND the failure, with the exact
+   * reason, and retries against the SAME publish ref.
    */
   async publish(db: Db, env: Env, slug: string, publishedBy: string) {
     const payload = await publishService.assemble(db, env, slug);
-    const record = await publishesRepo.record(db, {
-      productId: payload.product.id,
-      payload,
-      publishedBy,
-      // "pending" not "triggered": at insert time the hook has not been fired yet.
-      // Recording "triggered" here would assert something that has not happened.
-      buildStatus: "pending",
-    });
+    const contentHash = await contentHashOf(payload);
 
-    const deployment = await triggerGitHubDispatch(env, {
-      publishId: record.id,
-      productId: payload.product.id,
-    });
-    // Always recorded, "pending" (token not configured) included: the reason must be
-    // readable later in the admin, not only in this one response.
-    await publishesRepo.recordDeployAttempt(db, record.id, {
-      status: deployment.status, error: deployment.error, httpStatus: deployment.httpStatus,
-    });
+    const latest = await publishesRepo.latestForProduct(db, payload.product.id);
+    const reused = latest !== null && latest.contentHash === contentHash;
+    const record = reused
+      ? latest
+      : await publishesRepo.record(db, {
+        productId: payload.product.id,
+        payload,
+        publishedBy,
+        publishRef: newPublishRef(),
+        contentHash,
+        // "pending" not "triggered": at insert time nothing has been dispatched yet.
+        buildStatus: "pending",
+      });
+
+    const run = await publishService.startBuild(db, env, record, publishedBy, { reuseRunning: reused });
 
     console.log(JSON.stringify({
       event: "product_published",
       slug,
       publishId: record.id,
+      publishRef: record.publishRef,
       by: publishedBy,
-      deployment: deployment.status,
-      deploymentMs: deployment.durationMs,
-      httpStatus: deployment.httpStatus,
-      error: deployment.error,
+      reused,
+      outcome: run.outcome,
+      buildId: run.buildId,
+      deployment: run.deployment.status,
+      deploymentMs: run.deployment.durationMs,
+      httpStatus: run.deployment.httpStatus,
+      error: run.deployment.error,
     }));
 
-    return { record, deployment };
+    return { record, reused, ...run };
   },
 
   /**
-   * Retries the rebuild for an EXISTING snapshot.
+   * Queues ONE build for a publish and dispatches it.
    *
-   * Publishes nothing and assembles nothing: the content is already captured, so a
-   * retry is free and cannot change what customers will receive. It re-sends the
-   * hook and records the new outcome against the same row.
+   * The build row exists BEFORE the dispatch, with its id sent to GitHub, so the run reports its
+   * steps against a row that is already there, and a dispatch that fails leaves a visible, failed
+   * build rather than nothing. `reuseRunning` makes a repeat publish a no-op while a build for the
+   * same publish is already in flight (or has already been verified).
    */
-  async redeploy(db: Db, env: Env, productId: number) {
-    // Reuses the repository's own "newest snapshot for this product" query rather
-    // than repeating the ordering here: two places deciding which publish is
-    // current is exactly how a retry ends up rebuilding the wrong content.
-    const latest = await publishesRepo.latestForProduct(db, productId);
-    if (!latest) return null;
+  async startBuild(
+    db: Db, env: Env,
+    record: { id: number; productId: number; publishRef: string },
+    by: string,
+    options: { reuseRunning: boolean },
+  ) {
+    if (options.reuseRunning) {
+      const existing = await siteBuildsRepo.latestForPublish(db, record.id, record.publishRef);
+      if (existing && existing.status === "verified") {
+        return {
+          outcome: "unchanged" as const, buildId: existing.buildId,
+          deployment: { status: "triggered" as const, error: null, httpStatus: null, durationMs: 0, retryable: true },
+        };
+      }
+      const fresh = existing
+        && (IN_FLIGHT as readonly string[]).includes(existing.status)
+        && Date.now() - new Date(existing.lastEventAt).getTime() < STALL_MS;
+      if (existing && fresh) {
+        return {
+          outcome: "already-running" as const, buildId: existing.buildId,
+          deployment: { status: "triggered" as const, error: null, httpStatus: null, durationMs: 0, retryable: true },
+        };
+      }
+    }
+
+    const buildId = newBuildId();
+    await siteBuildsRepo.record(db, {
+      buildId, intendedPublications: [], triggeredBy: by, triggerPublishId: record.id, status: "queued",
+    });
+    await siteBuildsRepo.addEvent(db, { buildId, step: "dispatch", label: "Asking GitHub to start the build", status: "running" });
 
     const deployment = await triggerGitHubDispatch(env, {
-      publishId: latest.id,
-      productId: latest.productId,
+      publishId: record.id, publishRef: record.publishRef, productId: record.productId, buildId,
     });
-    await publishesRepo.recordDeployAttempt(db, latest.id, {
+    await publishesRepo.recordDeployAttempt(db, record.id, {
       status: deployment.status, error: deployment.error, httpStatus: deployment.httpStatus,
     });
+
+    if (deployment.status === "triggered") {
+      await siteBuildsRepo.addEvent(db, {
+        buildId, step: "dispatch", label: "Asking GitHub to start the build", status: "ok",
+        message: "GitHub accepted the request. Waiting for the workflow run to start.",
+      });
+    } else {
+      await siteBuildsRepo.addEvent(db, {
+        buildId, step: "dispatch", label: "Asking GitHub to start the build", status: "failed", message: deployment.error,
+      });
+      await siteBuildsRepo.markFailed(db, buildId, deployment.error, "dispatch");
+    }
+    return { outcome: "dispatched" as const, buildId, deployment };
+  },
+
+  /**
+   * Retries the rebuild for an EXISTING snapshot: a new build, the SAME publish ref.
+   * Publishes nothing and assembles nothing, so it cannot change what customers receive.
+   */
+  async redeploy(db: Db, env: Env, productId: number, by = "admin") {
+    const latest = await publishesRepo.latestForProduct(db, productId);
+    if (!latest) return null;
+    const run = await publishService.startBuild(db, env, latest, by, { reuseRunning: false });
     console.log(JSON.stringify({
       event: "product_redeploy",
       publishId: latest.id,
-      deployment: deployment.status,
-      httpStatus: deployment.httpStatus,
-      error: deployment.error,
+      publishRef: latest.publishRef,
+      buildId: run.buildId,
+      deployment: run.deployment.status,
+      httpStatus: run.deployment.httpStatus,
+      error: run.deployment.error,
     }));
-    return { publishId: latest.id, deployment };
+    return { publishId: latest.id, publishRef: latest.publishRef, ...run };
   },
 };
 

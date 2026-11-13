@@ -10,11 +10,11 @@ import { productsRepo } from "../data/productsRepo";
 import { testimonialsRepo } from "../data/testimonialsRepo";
 import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
-import { siteBuildsRepo } from "../data/siteBuildsRepo";
+import { deployProgress } from "../services/deployProgress";
 import { publishService } from "../services/publishService";
 import { notificationService } from "../services/notificationService";
 import {
-  verifyStorefront, resolvePublishState, publishVersion, readPublishVersion, readBuildId,
+  verifyStorefront, resolvePublishState,
 } from "../services/storefrontStatus";
 import { ProductNotFoundError } from "../services/catalogService";
 import {
@@ -602,34 +602,41 @@ adminRoute.post("/products/:id/publish", async (c) => {
   }
 
   try {
-    const { record, deployment } = await publishService.publish(db, c.env, product.slug, c.get("principal").email);
-    try {
-      await notificationService.createForAdmins(db, {
-        type: "publish_requested",
-        title: "Product publish requested",
-        body: `${product.name} - rebuild ${deployment.status}`,
-        href: `/products/${product.id}`,
-        dedupeKey: `publish-requested:${record.id}`,
-      });
-    } catch (err) {
-      console.error(JSON.stringify({
-        event: "notification_create_failed", notificationType: "publish_requested",
-        publishId: record.id, error: err instanceof Error ? err.message : String(err),
-      }));
+    const { record, deployment, reused, outcome, buildId } =
+      await publishService.publish(db, c.env, product.slug, c.get("principal").email);
+    if (outcome === "dispatched") {
+      try {
+        await notificationService.createForAdmins(db, {
+          type: "publish_requested",
+          title: "Product publish requested",
+          body: `${product.name} - rebuild ${deployment.status}`,
+          href: `/products/${product.id}`,
+          dedupeKey: `publish-requested:${buildId}`,
+        });
+      } catch (err) {
+        console.error(JSON.stringify({
+          event: "notification_create_failed", notificationType: "publish_requested",
+          publishId: record.id, error: err instanceof Error ? err.message : String(err),
+        }));
+      }
     }
-    // 200 either way, and deliberately so. The publish SUCCEEDED - the immutable
-    // snapshot exists and is what customers will receive once the storefront
-    // rebuilds. A deploy hook failure is reported in the body, because returning
-    // 5xx here would tell the admin their publish failed when it did not, and
-    // invite them to publish again over a perfectly good snapshot.
+    // 200 either way, and deliberately so. The publish SUCCEEDED - the immutable snapshot exists and is
+    // what customers receive once the storefront rebuilds. A dispatch failure is reported in the body,
+    // with GitHub's own reason, because a 5xx would tell the admin their publish failed when it did not.
     return c.json({
       published: true,
+      // true when the content was identical to the newest publish: nothing new was created.
+      reused,
+      // dispatched | already-running | unchanged
+      outcome,
       publishId: record.id,
+      publishRef: record.publishRef,
+      buildId,
       publishedAt: record.createdAt,
-      payload: record.payload,
       deployment: {
         status: deployment.status,
         error: deployment.error,
+        httpStatus: deployment.httpStatus,
         retryable: deployment.retryable,
       },
     });
@@ -661,30 +668,41 @@ adminRoute.get("/products/:id/status", async (c) => {
   const latest = await publishesRepo.latestForProduct(db, product.id);
   const verification = await verifyStorefront(c.env, product.slug);
   const liveVersion = verification.liveVersion;
+  // The build behind the newest publish: its steps, its failure, its run link. Read fresh on every call
+  // so the panel can poll it; nothing here is a stored claim that the page is live.
+  const progress = latest ? await deployProgress(db, latest) : null;
+
+  // One effective status from the evidence: a failed or stalled build wins over a stale "pending" flag,
+  // and LIVE is decided only by the storefront marker below.
+  const effective =
+    progress?.state === "failed" ? "failed"
+      : progress?.state === "running" || progress?.state === "verified" ? "triggered"
+        : latest?.buildStatus ?? "pending";
 
   const state = resolvePublishState({
-    latestPublishId: latest?.id ?? null,
-    buildStatus: latest?.buildStatus ?? "pending",
+    latestPublishRef: latest?.publishRef ?? null,
+    buildStatus: effective,
     liveVersion,
   });
 
   return c.json({
     state,
     publishId: latest?.id ?? null,
-    publishVersion: latest ? publishVersion(latest.id) : null,
-    // What the storefront is actually serving. Deliberately reported even when it
-    // matches, so the operator can see that a check happened rather than trust a
-    // word that could equally have come from a stored flag.
+    publishRef: latest?.publishRef ?? null,
+    // Kept for the panel's existing field: it is the same public ref.
+    publishVersion: latest?.publishRef ?? null,
+    // What the storefront is actually serving, reported even when it matches so the operator can see a
+    // check happened rather than trust a word that could equally have come from a stored flag.
     liveVersion,
     buildStatus: latest?.buildStatus ?? null,
-    // The exact reason the last deploy attempt failed or did not start (null when fine).
-    deployError: latest?.deployError ?? null,
+    build: progress,
+    // Why the last dispatch or build failed, in one place for the panel.
+    deployError: progress?.error ?? latest?.deployError ?? null,
     deployHttpStatus: latest?.deployHttpStatus ?? null,
     deployAttempts: latest?.deployAttempts ?? 0,
     deployAttemptedAt: latest?.deployAttemptedAt ?? null,
     storefrontUrl: verification.url || null,
-    // Why a check failed, when one did. "unconfigured" locally is normal, not an
-    // error; the admin renders it as "not verified" rather than as a failure.
+    // "unconfigured" locally is normal, not an error; the admin renders it as "not verified".
     verificationReason: verification.reason,
     checkedAt: new Date().toISOString(),
   });
@@ -704,16 +722,20 @@ adminRoute.post("/products/:id/redeploy", async (c) => {
     return c.json({ error: "A redeploy takes no body" }, 400);
   }
 
-  const result = await publishService.redeploy(db, c.env, product.id);
+  const result = await publishService.redeploy(db, c.env, product.id, c.get("principal").email);
   if (!result) {
     return c.json({ error: "This product has never been published" }, 404);
   }
   return c.json({
     published: true,
+    outcome: result.outcome,
     publishId: result.publishId,
+    publishRef: result.publishRef,
+    buildId: result.buildId,
     deployment: {
       status: result.deployment.status,
       error: result.deployment.error,
+      httpStatus: result.deployment.httpStatus,
       retryable: result.deployment.retryable,
     },
   });
@@ -727,261 +749,4 @@ adminRoute.get("/products/:id/publishes", async (c) => {
   const product = await productsRepo.findById(db, Number(c.req.param("id")));
   if (!product) return c.json({ error: "Product not found" }, 404);
   return c.json({ publishes: await publishesRepo.listForProduct(db, product.id) });
-});
-
-// Deploy-trigger endpoint: called by the verified deployment pipeline after
-// `wrangler deploy` completes. It records the build's intended publication set
-// so the publication-consistency safeguard can revalidate before anything is
-// marked LIVE. Never public, never unauthenticated: it runs behind the same
-// Cloudflare Access principal middleware as every other admin route, and the
-// build secret is never logged.
-const deployTriggerSchema = z.object({
-  buildId: z.string().min(1).max(120),
-  intendedPublications: z.array(
-    z.object({ slug: z.string().min(1).max(120), publishId: z.number().int().positive() }),
-  ).max(500),
-});
-
-adminRoute.post("/deploy-trigger", async (c) => {
-  const actor = c.get("principal").email;
-  let body;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
-  const parsed = deployTriggerSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: "Invalid request", fields: parsed.error.flatten().fieldErrors }, 400);
-  }
-
-  const db = createDb(c.env.DATABASE_URL);
-  const record = await siteBuildsRepo.record(db, {
-    buildId: parsed.data.buildId,
-    intendedPublications: parsed.data.intendedPublications,
-    triggeredBy: actor,
-  });
-
-  // Never echo back the deploy secret or any other secret in logs or responses.
-  console.log(JSON.stringify({
-    event: "deploy_triggered",
-    buildId: record.buildId,
-    publicationCount: parsed.data.intendedPublications.length,
-    by: actor,
-  }));
-
-  return c.json({
-    buildId: record.buildId,
-    status: record.status,
-    intendedPublications: record.intendedPublications,
-    triggeredAt: record.triggeredAt,
-  }, 201);
-});
-
-// ---------------------------------------------------------------------------
-// Build-status mutation endpoints (CI-authenticated via DEPLOY_TRIGGER_SECRET).
-//
-// These are the only ways a build's status changes after it is recorded. Every
-// mutation is idempotent, keyed by buildId, and can never overwrite a newer
-// build's status. Verification is backed by public-marker checks, not by the
-// mere fact that CI called the endpoint.
-// ---------------------------------------------------------------------------
-
-/** Requires the CI deploy secret. Access-principal callers are refused here. */
-function requireBuildSecret(c: Context): void {
-  if (c.get("authType") !== "build-secret") {
-    throw new UnauthorizedError("build_secret_required");
-  }
-}
-
-/** Fetch each intended publication page and verify both markers match the build. */
-async function verifyPublicMarkers(
-  env: Env,
-  intendedPublications: { slug: string; publishId: number }[],
-  buildId: string,
-): Promise<{ ok: boolean; failures: string[] }> {
-  const base = (env.SITE_URL ?? "").trim().replace(/\/+$/, "");
-  const failures: string[] = [];
-
-  if (!base) {
-    return { ok: false, failures: ["SITE_URL is not configured"] };
-  }
-
-  for (const { slug, publishId } of intendedPublications) {
-    const url = `${base}/${slug}/`;
-    let html: string;
-    try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(8_000),
-        headers: { "User-Agent": "dodumodu-deploy-verifier" },
-      });
-      if (!res.ok) {
-        failures.push(`/${slug}/: HTTP ${res.status}`);
-        continue;
-      }
-      html = await res.text();
-    } catch (e) {
-      logError("publish_verify_fetch_failed", e, { slug });
-      failures.push(`/${slug}/: fetch failed`);
-      continue;
-    }
-
-    const liveVersion = readPublishVersion(html);
-    const liveBuild = readBuildId(html);
-    const expectedVersion = `pub_${publishId}`;
-    if (liveVersion !== expectedVersion) {
-      failures.push(`/${slug}/: live ${liveVersion ?? "(no marker)"} != expected ${expectedVersion}`);
-    }
-    if (liveBuild !== buildId) {
-      failures.push(`/${slug}/: build ${liveBuild ?? "(no marker)"} != expected ${buildId}`);
-    }
-  }
-
-  return { ok: failures.length === 0, failures };
-}
-
-const buildIdParamSchema = z.object({
-  buildId: z.string().min(1).max(120),
-});
-
-// Mark a build as deployed (wrangler deploy completed).
-adminRoute.post("/builds/:buildId/mark-deployed", async (c) => {
-  requireBuildSecret(c);
-  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
-
-  const db = createDb(c.env.DATABASE_URL);
-  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
-  if (!existing) return c.json({ error: "Build not found" }, 404);
-
-  // Idempotent: terminal or already-deployed builds return their current state.
-  if (existing.status === "verified" || existing.status === "failed") {
-    return c.json({ buildId, status: existing.status }, 200);
-  }
-  if (existing.status === "deployed") {
-    return c.json({ buildId, status: "deployed" }, 200);
-  }
-  if (existing.status !== "triggered") {
-    return c.json({ error: `Cannot deploy build in status ${existing.status}` }, 409);
-  }
-
-  await siteBuildsRepo.markDeployed(db, buildId);
-  return c.json({ buildId, status: "deployed" }, 200);
-});
-
-// Mark a build as verified only after public-marker checks succeed.
-adminRoute.post("/builds/:buildId/mark-verified", async (c) => {
-  requireBuildSecret(c);
-  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
-
-  const db = createDb(c.env.DATABASE_URL);
-  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
-  if (!existing) return c.json({ error: "Build not found" }, 404);
-
-  // Idempotent: verified or failed builds return their current state.
-  if (existing.status === "verified") {
-    return c.json({ buildId, status: "verified" }, 200);
-  }
-  if (existing.status === "failed") {
-    return c.json({ buildId, status: "failed" }, 200);
-  }
-  if (existing.status !== "triggered" && existing.status !== "deployed") {
-    return c.json({ error: `Cannot verify build in status ${existing.status}` }, 409);
-  }
-
-  // Stale-build guard: a newer build in progress means this one must not verify.
-  const latest = await siteBuildsRepo.getLatest(db, 1);
-  if (latest.length > 0 && latest[0].buildId !== buildId) {
-    return c.json(
-      {
-        error: "Stale build",
-        message: `A newer build (${latest[0].buildId}) is in progress; refusing to verify ${buildId}`,
-      },
-      409,
-    );
-  }
-
-  // Real public-marker verification: CI calling this endpoint is not evidence.
-  const verification = await verifyPublicMarkers(
-    c.env,
-    existing.intendedPublications as { slug: string; publishId: number }[],
-    existing.buildId,
-  );
-
-  if (!verification.ok) {
-    await siteBuildsRepo.markFailed(db, buildId, verification.failures.join("; "));
-    return c.json(
-      { buildId, status: "failed", failures: verification.failures },
-      200,
-    );
-  }
-
-  await siteBuildsRepo.markVerified(db, buildId);
-  return c.json({ buildId, status: "verified" }, 200);
-});
-
-// Mark a build as failed (render, pre-deploy, deploy, or verification failure).
-adminRoute.post("/builds/:buildId/mark-failed", async (c) => {
-  requireBuildSecret(c);
-  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
-
-  const db = createDb(c.env.DATABASE_URL);
-  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
-  if (!existing) return c.json({ error: "Build not found" }, 404);
-
-  // Idempotent: verified builds cannot be failed (terminal state).
-  if (existing.status === "verified") {
-    return c.json({ buildId, status: "verified" }, 200);
-  }
-  if (existing.status === "failed") {
-    return c.json({ buildId, status: "failed" }, 200);
-  }
-  if (existing.status !== "triggered" && existing.status !== "deployed") {
-    return c.json({ error: `Cannot fail build in status ${existing.status}` }, 409);
-  }
-
-  let body: { error?: string; message?: string };
-  try {
-    body = await c.req.json();
-  } catch {
-    body = {};
-  }
-
-  await siteBuildsRepo.markFailed(db, buildId, body?.error ?? null);
-  return c.json({ buildId, status: "failed" }, 200);
-});
-
-// Pre-deploy validation: CI calls this before `wrangler deploy` to confirm
-// this build is still the most recent one and may safely overwrite the edge.
-// Returns 409 when a newer build has since been triggered, so the stale build
-// aborts before deployment instead of racing a newer publication.
-adminRoute.post("/builds/:buildId/pre-deploy", async (c) => {
-  requireBuildSecret(c);
-  const { buildId } = buildIdParamSchema.parse({ buildId: c.req.param("buildId") });
-
-  const db = createDb(c.env.DATABASE_URL);
-  const existing = await siteBuildsRepo.getByBuildId(db, buildId);
-  if (!existing) return c.json({ error: "Build not found" }, 404);
-
-  // A build that already reached a terminal state must not deploy again.
-  if (existing.status === "verified" || existing.status === "failed") {
-    return c.json(
-      { error: `Cannot deploy build in terminal status ${existing.status}` },
-      409,
-    );
-  }
-
-  // Stale-build guard: if a newer build has been triggered since this one,
-  // this build must not deploy. getLatest is ordered by triggeredAt desc.
-  const latest = await siteBuildsRepo.getLatest(db, 1);
-  if (latest.length > 0 && latest[0].buildId !== buildId) {
-    return c.json(
-      {
-        error: "Stale build",
-        message: `A newer build (${latest[0].buildId}) has been triggered; refusing to pre-deploy ${buildId}`,
-      },
-      409,
-    );
-  }
-
-  return c.json({ buildId, status: existing.status, eligible: true }, 200);
 });
