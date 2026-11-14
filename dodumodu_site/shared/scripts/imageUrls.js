@@ -64,6 +64,15 @@ export function intrinsicWidthFor(slot, widths = DEFAULT_WIDTHS) {
 }
 
 /**
+ * Edge resizing (/cdn-cgi/image) exists only on a custom domain served by a Cloudflare zone, at the zone root.
+ * A same-origin path ("/media", served by the Worker) or a *.workers.dev address has no such endpoint: asking
+ * for one is a 404. There the original file is served as it is.
+ */
+export function canTransform(deliveryBase = "/media") {
+  return /^https?:\/\//i.test(deliveryBase) && !/^https?:\/\/[^/]*\.workers\.dev(?:[:/]|$)/i.test(deliveryBase);
+}
+
+/**
  * One image URL at one width.
  *
  * `fit=scale-down` never upscales: asking for 1200px of a 600px image returns the
@@ -107,6 +116,8 @@ export function imageUrl({
     return `${base}/${stem}.w${width}${extension}`;
   }
 
+  if (!canTransform(deliveryBase)) return `${base}/${key.replace(/^\/+/, "")}`;
+
   // format=auto negotiates; no sharpen/brightness/gamma, because those are how an
   // image comes back looking processed rather than sharp.
   const options = `width=${width},quality=${quality},format=auto,fit=scale-down`;
@@ -128,6 +139,8 @@ export function srcsetFor({
   deliveryBase = "/media",
 }) {
   if (typeof key !== "string" || key === "") return "";
+  // No edge resizing here, so every width would be the same URL: leave srcset out rather than lie about widths.
+  if (mode === "transform" && !canTransform(deliveryBase) && !/^https?:\/\//i.test(key) && key.charAt(0) !== "/") return "";
   const list = widths[slot] || widths.hero;
   const q = quality[slot] ?? quality.hero;
   return list

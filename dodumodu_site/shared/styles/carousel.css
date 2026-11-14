@@ -28,14 +28,19 @@
 }
 
 /* Controls live OUTSIDE the scrolling track so they never move with the slides: <  . . .  > */
-.carousel-wrap { width: 100%; }
+.carousel-wrap { width: 100%; position: relative; }
 
+/* Over the photo, bottom centre. The soft shadow keeps the grey readable on light and dark photos. */
 .carousel-nav {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  margin-top: var(--space-2);
+  gap: 4px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 
 .carousel-dots {
@@ -48,7 +53,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #d1d5db;
+  background: rgba(209, 213, 219, 0.85);
   padding: 0;
   border: none;
   cursor: pointer;
@@ -56,7 +61,7 @@
 }
 
 .carousel-dot[data-active="true"] {
-  background: #6b7280;
+  background: #f3f4f6;
   width: 16px;
   border-radius: 3px;
 }
@@ -70,7 +75,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #9ca3af;
+  color: #d1d5db;
   cursor: pointer;
   border-radius: 50%;
   -webkit-tap-highlight-color: transparent;
@@ -87,6 +92,6 @@
   stroke-linejoin: round;
 }
 
-.carousel-arrow:hover:not(:disabled) { color: #6b7280; }
-.carousel-arrow:focus-visible { outline: 2px solid #9ca3af; outline-offset: 2px; }
-.carousel-arrow:disabled { opacity: 0.35; cursor: default; }
+.carousel-arrow:hover:not(:disabled) { color: #fff; }
+.carousel-arrow:focus-visible { outline: 2px solid #d1d5db; outline-offset: 2px; }
+.carousel-arrow:disabled { opacity: 0.4; cursor: default; }
