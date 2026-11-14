@@ -20,25 +20,6 @@ export const publishesRepo = {
     return row;
   },
 
-  /**
-   * Records the DEPLOYMENT outcome against an existing snapshot.
-   *
-   * `payload` is deliberately absent from the SET list. That is the whole point of
-   * this method: the statement cannot corrupt published content even if it were
-   * called with the wrong row.
-   *
-   * Returns false when the row is gone, so a retry against a deleted publish fails
-   * quietly rather than throwing from a path that is trying to recover from a
-   * failure already.
-   */
-  async markBuildStatus(db: Db, id: number, status: string): Promise<boolean> {
-    const rows = await db.update(productPublishes)
-      .set({ buildStatus: status })
-      .where(eq(productPublishes.id, id))
-      .returning();
-    return rows.length > 0;
-  },
-
   /** Records the outcome of one deploy attempt, error text included, and counts it. */
   async recordDeployAttempt(
     db: Db, id: number,

@@ -90,8 +90,6 @@ export type Env = {
    * in the image path.
    */
   IMAGE_DELIVERY_BASE: string;
-  /** Cloudflare Pages deploy hook fired by the admin's Publish action. */
-  PAGES_DEPLOY_HOOK: string;
   /**
    * The PUBLIC storefront origin, e.g. https://yoursite.com.
    *
@@ -104,7 +102,6 @@ export type Env = {
   MAX_ORDER_QUANTITY: string;
   /** Comma-separated CORS allowlist. See isOriginAllowed in app.ts. */
   ALLOWED_ORIGINS: string;
-  /** Public origin of the deployed Worker, e.g. https://<your-worker>.workers.dev. */ WORKER_URL: string;
   /** OPay API root, e.g. the sandbox or production host. */
   OPAY_BASE_URL: string;
   /**
