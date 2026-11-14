@@ -2,198 +2,145 @@
 // this file turns it into elements. pricing.js supplies the numbers; this
 // file only lays them out.
 import { computePriceBreakdown, formatNaira, formatTierSummary, getNextTierNudge, resolveDiscountTier } from "./pricing.js";
-import { srcsetFor, DEFAULT_SIZES, DEFAULT_QUALITY, intrinsicWidthFor } from "./imageUrls.js";
+import { srcsetFor, imageUrl, DEFAULT_SIZES, DEFAULT_QUALITY, DEFAULT_WIDTHS, intrinsicWidthFor } from "./imageUrls.js";
 
 /**
  * The product carousel.
  *
- * What changed and why it mattered: this used to set `src` on EVERY slide, with a
- * hardcoded 640x640. Setting `src` on eight slides means the browser fetches eight
- * images to show one - on a weak connection that is the difference between seeing
- * the product and waiting for it. It also gave every image the same dimensions
- * regardless of its real size, so the slide reserved space it did not need.
+ * Fast: the server prints the first photo as a real <img> (src + srcset + preload) and puts the
+ * whole gallery in data-gallery on #carousel, so this runs immediately with no API round trip.
+ * Every photo is requested through the image delivery base at the widths in `srcset`, so the
+ * browser only downloads what it will display; photos after the first load natively (lazy).
  *
- * Now: slide 0 carries a real `src` and a real `srcset`, and every other slide
- * carries `data-src`/`data-srcset` and is promoted only when it is about to be
- * seen. The browser fetches what is on screen plus the one after it.
+ * Layout: the track scrolls, the controls do not. Arrows used to live inside the scrolling track,
+ * so they slid away with the first swipe. They now sit in a fixed bar below it: < dots >.
+ *
+ * images: [{ key, altText }] where key is an R2 key or an absolute URL. No images: the markup the
+ * server printed is left alone.
  */
-
-// Static fallback slides (picsum.photos — the same source already used for the
-// hero image) so the carousel still renders and works when there is no backend.
-// Two slides only while testing; each carries a real srcset so the browser
-// never downloads more than it will display.
-const CAROUSEL_FALLBACK_IMAGES = [
-  { url: "https://picsum.photos/seed/glow-serum-1/640/640", altText: "Radiance Glow Serum bottle with dropper" },
-  { url: "https://picsum.photos/seed/glow-serum-2/640/640", altText: "Serum texture close-up" },
-];
+const ARROW = {
+  prev: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7"/></svg>',
+  next: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 5l7 7-7 7"/></svg>',
+};
 
 export function renderCarousel(container, images, options = {}) {
-  const list = images && images.length ? images : CAROUSEL_FALLBACK_IMAGES;
+  const list = (images || []).filter((img) => img && (img.key || img.url));
   if (!list.length) return;
   container.innerHTML = "";
 
-  const widths = options.widths;
+  const { widths, mode, deliveryBase } = options;
   const quality = options.quality || DEFAULT_QUALITY;
-  const mode = options.mode;
-  const deliveryBase = options.deliveryBase;
+  const slot = "gallery";
+  const srcWidth = (widths && widths[slot] ? widths[slot] : DEFAULT_WIDTHS[slot]);
+  const mid = srcWidth[Math.min(1, srcWidth.length - 1)];
+  const side = intrinsicWidthFor(slot, widths);
 
+  const wrap = document.createElement("div");
+  wrap.className = "carousel-wrap";
   const track = document.createElement("div");
   track.className = "carousel";
   track.setAttribute("role", "region");
+  track.setAttribute("aria-roledescription", "carousel");
   track.setAttribute("aria-label", "Product photos");
 
+  const nav = document.createElement("div");
+  nav.className = "carousel-nav";
   const dotsWrap = document.createElement("div");
   dotsWrap.className = "carousel-dots";
 
-  // ---- prev / next arrows (inline SVG = zero extra requests) ----
-  const prevBtn = document.createElement("button");
-  prevBtn.type = "button";
-  prevBtn.className = "carousel-arrow carousel-arrow--prev";
-  prevBtn.setAttribute("aria-label", "Previous photo");
-  prevBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6 1.41-1.41z"/></svg>`;
-
-  const nextBtn = document.createElement("button");
-  nextBtn.type = "button";
-  nextBtn.className = "carousel-arrow carousel-arrow--next";
-  nextBtn.setAttribute("aria-label", "Next photo");
-  nextBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>`;
-
-  track.appendChild(prevBtn);
-  track.appendChild(nextBtn);
+  const mkArrow = (dir, label) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `carousel-arrow carousel-arrow--${dir}`;
+    b.setAttribute("aria-label", label);
+    b.innerHTML = ARROW[dir];
+    return b;
+  };
+  const prevBtn = mkArrow("prev", "Previous photo");
+  const nextBtn = mkArrow("next", "Next photo");
 
   let currentIndex = 0;
   let timer = null;
   const AUTOPLAY_MS = 5000;
 
   const slides = list.map((img, i) => {
+    const key = img.key || img.url;
     const slide = document.createElement("div");
     slide.className = "carousel-slide";
-
     const el = document.createElement("img");
     el.alt = img.altText || "";
-    el.width = img.width || intrinsicWidthFor("gallery", widths);
-    el.height = img.height || intrinsicWidthFor("gallery", widths);
-
-    const srcset = srcsetFor({ key: img.key || img.url, slot: "gallery", widths, quality, mode, deliveryBase });
-    if (srcset) {
-      el.srcset = srcset;
-      el.sizes = DEFAULT_SIZES.gallery;
-    }
-
-    if (i === 0) {
-      el.src = img.url;
-      el.fetchPriority = "high";
-      el.loading = "eager";
-      el.decoding = "async";
-    } else {
-      el.dataset.src = img.url;
-      if (srcset) el.dataset.srcset = srcset;
-      el.loading = "lazy";
-      el.decoding = "async";
-    }
-
+    el.width = side;
+    el.height = side;
+    el.decoding = "async";
+    el.src = imageUrl({ key, width: mid, quality: quality[slot], mode, deliveryBase });
+    const srcset = srcsetFor({ key, slot, widths, quality, mode, deliveryBase });
+    if (srcset) { el.srcset = srcset; el.sizes = DEFAULT_SIZES[slot]; }
+    if (i === 0) { el.fetchPriority = "high"; el.loading = "eager"; } else { el.loading = "lazy"; }
     slide.append(el);
     track.append(slide);
 
     const dot = document.createElement("button");
+    dot.type = "button";
     dot.className = "carousel-dot";
     dot.setAttribute("aria-label", `Go to photo ${i + 1}`);
-    dot.dataset.active = i === 0 ? "true" : "false";
-    dot.addEventListener("click", () => {
-      slide.scrollIntoView();
-      setIndex(i);
-      resetAutoplay();
-    });
+    dot.addEventListener("click", () => goTo(i, true));
     dotsWrap.append(dot);
     return slide;
   });
 
-  container.append(track);
-  container.append(dotsWrap);
+  nav.append(prevBtn, dotsWrap, nextBtn);
+  wrap.append(track);
+  if (list.length > 1) wrap.append(nav);
+  container.append(wrap);
 
-  function promote(el) {
-    if (!el || el.dataset.src === undefined) return;
-    if (el.dataset.srcset) {
-      el.srcset = el.dataset.srcset;
-      delete el.dataset.srcset;
-    }
-    el.src = el.dataset.src;
-    delete el.dataset.src;
-    el.loading = "eager";
+  function paint() {
+    [...dotsWrap.children].forEach((d, i) => { d.dataset.active = i === currentIndex ? "true" : "false"; });
+    prevBtn.disabled = currentIndex === 0;
+    nextBtn.disabled = currentIndex === list.length - 1;
   }
 
-  if (typeof IntersectionObserver === "function") {
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        promote(entry.target.querySelector("img"));
-        observer.unobserve(entry.target);
-      }
-    }, { root: track, rootMargin: "200px" });
-    for (const slide of slides) observer.observe(slide);
-  } else {
-    for (const slide of slides) promote(slide.querySelector("img"));
+  function goTo(i, byUser) {
+    if (byUser) stopAutoplay(true);
+    const target = Math.min(Math.max(i, 0), list.length - 1);
+    track.scrollTo({ left: slides[target].offsetLeft, behavior: "smooth" });
+    currentIndex = target;
+    paint();
   }
 
-  function setIndex(index) {
-    currentIndex = Math.min(Math.max(index, 0), list.length - 1);
-    updateDots();
-  }
+  prevBtn.addEventListener("click", () => goTo(currentIndex - 1, true));
+  nextBtn.addEventListener("click", () => goTo(currentIndex + 1, true));
 
-  function updateDots() {
-    [...dotsWrap.children].forEach((dot, i) => {
-      dot.dataset.active = i === currentIndex ? "true" : "false";
+  // The nearest slide to the scroll position wins, so swipes, arrows and dots all agree.
+  track.addEventListener("scroll", () => {
+    let best = 0;
+    let bestDist = Infinity;
+    slides.forEach((sl, i) => {
+      const d = Math.abs(sl.offsetLeft - track.scrollLeft);
+      if (d < bestDist) { best = i; bestDist = d; }
     });
+    if (best !== currentIndex) { currentIndex = best; paint(); }
+  }, { passive: true });
+
+  // Autoplay is a courtesy, not a trap: it stops for good on the first touch, click or hover.
+  let autoplayOn = list.length > 1;
+  function stopAutoplay(forever) {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (forever) autoplayOn = false;
   }
-
-  const scrollBySlide = (delta) => {
-    const step = track.clientWidth || 0;
-    if (!step) return;
-    let target = currentIndex + delta;
-    if (target < 0) target = list.length - 1;
-    else if (target > list.length - 1) target = 0;
-    track.scrollBy({ left: (target - currentIndex) * step, behavior: "smooth" });
-    setIndex(target);
-    resetAutoplay();
-  };
-
-  prevBtn.addEventListener("click", () => scrollBySlide(-1));
-  nextBtn.addEventListener("click", () => scrollBySlide(1));
-
   function startAutoplay() {
-    stopAutoplay();
+    if (!autoplayOn || timer) return;
     timer = setTimeout(() => {
-      scrollBySlide(1);
+      timer = null;
+      goTo(currentIndex === list.length - 1 ? 0 : currentIndex + 1, false);
       startAutoplay();
     }, AUTOPLAY_MS);
   }
-
-  function stopAutoplay() {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
+  for (const ev of ["pointerdown", "touchstart", "mouseenter", "focusin"]) {
+    track.addEventListener(ev, () => stopAutoplay(true), { passive: true });
   }
+  document.addEventListener("visibilitychange", () => (document.hidden ? stopAutoplay(false) : startAutoplay()));
 
-  function resetAutoplay() {
-    stopAutoplay();
-    startAutoplay();
-  }
-
-  track.addEventListener("mouseenter", stopAutoplay);
-  track.addEventListener("mouseleave", startAutoplay);
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopAutoplay();
-    else startAutoplay();
-  });
-
-  track.addEventListener("scroll", () => {
-    const index = Math.round(track.scrollLeft / track.clientWidth);
-    setIndex(index);
-    resetAutoplay();
-  }, { passive: true });
-
-  setIndex(0);
+  paint();
   startAutoplay();
 }
 

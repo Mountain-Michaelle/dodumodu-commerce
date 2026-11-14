@@ -8,6 +8,9 @@
 // No network, no database, no framework: pure string transformation.
 // Exported as a single renderProduct(snapshot, {css, js, csp, buildId}) => html.
 import { readFileSync } from 'node:fs'
+// One URL builder for build time and browser time, so the page can never advertise a width the browser's carousel
+// would not also request (the browser then reuses the already-downloaded first photo).
+import { imageUrl, srcsetFor, DEFAULT_SIZES, DEFAULT_QUALITY, DEFAULT_WIDTHS } from '../../dodumodu_site/shared/scripts/imageUrls.js'
 
 const TEMPLATE = readFileSync(
   new URL('./product.template.html', import.meta.url),
@@ -233,14 +236,27 @@ export function renderProduct(snapshot, opts = {}) {
     ? `<meta name="twitter:image" content="${escapeUrl(ogImage)}">\n<meta name="twitter:image:alt" content="${escapeHtmlAttr(heroAlt)}">`
     : ''
 
-  // Static hero: the same file the carousel shows first, so the swap on load is not a second download.
-  const heroHtml = heroSrc
-    ? `<picture><img class="hero-fallback" src="${escapeUrl(heroSrc)}" alt="${escapeHtmlAttr(heroAlt)}" width="${Number(hero.width) || 640}" height="${Number(hero.height) || 640}" fetchpriority="high" decoding="async"></picture>`
+  // Static first photo: byte-for-byte what the carousel requests first (same src, srcset and sizes), so the
+  // script taking over later costs no second download. It is also preloaded with the same srcset.
+  const imageMode = opts.imageMode === 'derivative' ? 'derivative' : 'transform'
+  const imgOpts = { key: hero?.r2Key, slot: 'gallery', mode: imageMode, deliveryBase }
+  const widths = DEFAULT_WIDTHS.gallery
+  const midWidth = widths[Math.min(1, widths.length - 1)]
+  const heroSrcOpt = hero ? imageUrl({ ...imgOpts, width: midWidth, quality: DEFAULT_QUALITY.gallery }) : ''
+  const heroSrcset = hero ? srcsetFor(imgOpts) : ''
+  const heroHtml = heroSrcOpt
+    ? `<img class="hero-fallback" src="${escapeUrl(heroSrcOpt)}"${heroSrcset ? ` srcset="${escapeHtmlAttr(heroSrcset)}" sizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} alt="${escapeHtmlAttr(heroAlt)}" width="${widths[widths.length - 1]}" height="${widths[widths.length - 1]}" fetchpriority="high" decoding="async">`
     : ''
-  const heroOrigin = originOf(heroSrc)
+  const heroOrigin = originOf(heroSrcOpt)
   const sameOrigin = heroOrigin && heroOrigin === originOf(siteUrl)
   const preconnect = heroOrigin && !sameOrigin ? `<link rel="preconnect" href="${escapeUrl(heroOrigin)}">` : ''
-  const preload = heroSrc ? `<link rel="preload" as="image" href="${escapeUrl(heroSrc)}" fetchpriority="high">` : ''
+  const preload = heroSrcOpt
+    ? `<link rel="preload" as="image" href="${escapeUrl(heroSrcOpt)}"${heroSrcset ? ` imagesrcset="${escapeHtmlAttr(heroSrcset)}" imagesizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} fetchpriority="high">`
+    : ''
+  // The whole gallery, for the carousel to build from at once (no API round trip).
+  const carouselAttrs = images.length
+    ? ` data-gallery="${escapeHtmlAttr(JSON.stringify(images.map((i) => ({ key: i.r2Key, alt: i.altText ?? '' }))))}"`
+    : ''
 
   const ldImages = images.map((i) => absoluteUrl(mediaUrl(i.r2Key, deliveryBase), siteUrl)).filter(Boolean)
 
@@ -262,6 +278,7 @@ export function renderProduct(snapshot, opts = {}) {
     HERO_PRECONNECT: preconnect,
     HERO_PRELOAD: preload,
     HERO_HTML: heroHtml,
+    CAROUSEL_ATTRS: carouselAttrs,
     BODY_DATA_SLUG: escapeHtmlAttr(snapshot.slug),
     BODY_DATA_PRODUCT_ID: String(p.id ?? 0),
     BREADCRUMB_NAME: escapeHtml(p.name),

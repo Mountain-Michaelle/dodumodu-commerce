@@ -59,6 +59,7 @@ export function extractPageParts(html) {
     turnstileSiteKey: html.match(/data-sitekey="([^"]*)"/)?.[1] ?? '',
     apiBase: cfg('API_BASE'),
     imageDeliveryBase: cfg('IMAGE_DELIVERY_BASE'),
+    imageMode: cfg('IMAGE_MODE') || 'transform',
   }
 }
 
@@ -273,6 +274,7 @@ for (const row of products) {
     maxOrderQuantity: process.env.MAX_ORDER_QUANTITY ?? '20',
     siteUrl,
     deliveryBase: parts.imageDeliveryBase,
+    imageMode: parts.imageMode,
     sprite: parts.sprite,
     runtimeConfig: parts.runtimeConfig,
     inlineScripts: parts.inlineScripts,

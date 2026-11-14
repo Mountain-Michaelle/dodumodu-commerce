@@ -251,6 +251,15 @@ export function productsView({ shell, identity, onNavigate }) {
         adminField({ name: "seoTitle", label: "SEO title", value: product.seoTitle || "" }),
         adminField({ name: "seoDescription", label: "SEO description", value: product.seoDescription || "", type: "textarea" }),
       ] }),
+      el("div", { class: "form-section" },
+        el("h3", { class: "detail-heading", text: "Carousel images" }),
+        isNew
+          ? el("p", { class: "form-note", text: "After you create the product, the carousel image uploader opens so you can add its photos." })
+          : el("p", { class: "form-note", text: "The photos customers swipe through on the product page. The first one is the main photo. Save any changes above first: this opens a separate window." }),
+        isNew ? null : el("button", {
+          class: "button", type: "button", text: "Add or manage carousel images",
+          onclick: () => { modal.close(); openImages(product); },
+        })),
       isNew ? null : el("p", { class: "form-note" },
         "Changing the price affects only NEW orders. Every order already placed keeps the price, discount and total it was created with."),
       saveBar({
@@ -275,6 +284,7 @@ export function productsView({ shell, identity, onNavigate }) {
               toast(`Product “${created.name}” created`, "success");
               modal.close();
               load();
+              openImages(created);
             } else {
               await api.patch(`/products/${product.id}`, {
                 ...payload, expectedUpdatedAt: toWireTimestamp(product.updatedAt),

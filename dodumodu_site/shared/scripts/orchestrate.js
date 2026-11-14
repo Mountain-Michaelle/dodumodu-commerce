@@ -113,6 +113,14 @@ export function initProductPage({ slug, productId }) {
   // plain <input type="number"> until this resolves. Fetch page data (one
   // request covers product/packages/discount tiers/images/testimonials) and
   // render everything that depends on it right after.
+  // The gallery is printed into the page by the publish build, so it needs no API round trip.
+  try {
+    const gallery = JSON.parse(carouselContainer?.dataset.gallery || "null");
+    if (Array.isArray(gallery)) {
+      renderCarousel(carouselContainer, gallery.map((g) => ({ key: g.key, altText: g.alt })), imageOptions());
+    }
+  } catch (e) { /* malformed attribute: keep the static first photo */ }
+
   const __r = async () => {
     try {
       const data = await getPageData(slug);
@@ -126,19 +134,17 @@ export function initProductPage({ slug, productId }) {
       renderPackageSelector(packageSelect, packageField, pricing.packageOptions);
       rerenderPricing();
 
-      const images = (data.images && data.images.length)
-        ? data.images.map((img) => ({ url: mediaUrl(img.r2Key), altText: img.altText }))
-        : null;
-      renderCarousel(carouselContainer, images);
+      // A published page already drew its gallery from data-gallery (below). Only a page without one
+      // (local dev, the source page) builds it from the API.
+      if (!carouselContainer?.dataset.gallery) {
+        renderCarousel(carouselContainer, (data.images || []).map((img) => ({ key: img.r2Key, altText: img.altText })), imageOptions());
+      }
       renderTestimonials(testimonialsContainer, (data.testimonials || []).map((t) => ({ url: mediaUrl(t.r2Key), ...t })));
       hydrateDeliveryDates(data.deliveryOptions);
       restoreDraft();
       refreshPaymentOptions();
     } catch (err) {
-      // No backend: still render the carousel with static fallback images so the
-      // gallery works end-to-end without any API. The hero image in static HTML
-      // stays as the first slide; renderCarousel replaces it with the full set.
-      if (carouselContainer) renderCarousel(carouselContainer, null);
+      // No backend: the gallery printed into the page (or its static hero) stays as it is.
       if (quantityPriceEl) quantityPriceEl.innerHTML = "";
     }
   };
@@ -416,6 +422,10 @@ export function initProductPage({ slug, productId }) {
 // is the public origin or path in front of it. A value that is already an
 // absolute http(s) URL is used as-is, which is how a database row can point at
 // a real CDN asset instead of a storage key.
+function imageOptions() {
+  return { mode: window.IMAGE_MODE || "transform", deliveryBase: window.IMAGE_DELIVERY_BASE || "/media" };
+}
+
 function mediaUrl(r2Key) {
   if (/^https?:\/\//i.test(r2Key)) return r2Key;
   const base = window.IMAGE_DELIVERY_BASE || "/media";

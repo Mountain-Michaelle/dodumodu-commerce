@@ -143,16 +143,30 @@ test('the OG tags come before the inline CSS so a crawler that reads only the st
   assert.ok(html.indexOf('og:title') < 3000)
 })
 
-test('the static hero is the real image (same URL the carousel will use), preloaded, with its origin preconnected', () => {
+test('the static hero is the optimised image the carousel requests first, preloaded with the same srcset', () => {
   const html = rich()
-  assert.ok(html.includes('class="hero-fallback" src="https://media.example.com/uploads/hero.jpg"'))
+  const o = 'https://media.example.com/cdn-cgi/image/'
+  assert.ok(html.includes(`class="hero-fallback" src="${o}width=640,quality=75,format=auto,fit=scale-down/uploads/hero.jpg"`))
+  assert.ok(html.includes(`${o}width=320,quality=75,format=auto,fit=scale-down/uploads/hero.jpg 320w`))
   assert.ok(html.includes('alt="Serum bottle with dropper"'))
-  assert.ok(html.includes('<link rel="preload" as="image" href="https://media.example.com/uploads/hero.jpg" fetchpriority="high">'))
+  assert.match(html, /<link rel="preload" as="image" href="[^"]*width=640[^"]*" imagesrcset="[^"]*320w[^"]*960w" imagesizes="[^"]+" fetchpriority="high">/)
   assert.ok(html.includes('<link rel="preconnect" href="https://media.example.com">'))
   assert.ok(!html.includes('picsum.photos'), 'no placeholder host baked into a real page')
   assert.ok(!html.includes('image/webp'), 'the preload no longer claims a type the file does not have')
   // same origin as the site: nothing to preconnect to
   assert.ok(!rich({ deliveryBase: '/media' }).includes('rel="preconnect"'))
+  // derivative mode points at the pre-sized files instead of the edge resizer
+  assert.ok(rich({ imageMode: 'derivative' }).includes('uploads/hero.w640.jpg'))
+})
+
+test('the whole gallery is printed into the page so the carousel needs no API call', () => {
+  const html = rich()
+  const m = html.match(/<div id="carousel" data-gallery="([^"]*)">/)
+  assert.ok(m, 'carousel carries data-gallery')
+  const gallery = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
+  assert.equal(gallery[0].key, 'uploads/hero.jpg')
+  assert.ok(gallery.length >= 1)
+  assert.ok(!renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE }).includes('data-gallery'))
 })
 
 test('an empty hero alt falls back to the product name (an empty string used to win)', () => {
