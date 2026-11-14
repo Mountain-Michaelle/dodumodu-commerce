@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { ciRoute } from "./ci";
+import { served } from "../services/servedStorefront";
 import { registerDbDriver } from "../db";
 import { FakeDatabase, fakeDriver } from "../testSupport/fakeDb";
 import type { Env } from "../env";
@@ -103,15 +104,8 @@ test("mark-verified with matching markers succeeds", async () => {
   ]);
   const app = makeApp(db);
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url: URL | RequestInfo) => {
-    if (String(url).includes("/glow-serum/")) {
-      return new Response(
-        '<html><meta name="storefront-publish-id" content="pub_00000000000000000007"><meta name="storefront-build-id" content="build_test_1"></html>',
-      );
-    }
-    return new Response("Not found", { status: 404 });
-  };
+  const originalRead = served.read;
+  served.read = (slug) => (slug === "glow-serum" ? '<html><meta name="storefront-publish-id" content="pub_00000000000000000007"><meta name="storefront-build-id" content="build_test_1"></html>' : null);
   try {
     const res = await app.fetch(
       new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
@@ -124,7 +118,7 @@ test("mark-verified with matching markers succeeds", async () => {
     const body = (await res.json()) as { status: string };
     assert.equal(body.status, "verified");
   } finally {
-    globalThis.fetch = originalFetch;
+    served.read = originalRead;
   }
 });
 
@@ -214,15 +208,8 @@ test("mark-verified is idempotent when already verified", async () => {
   ]);
   const app = makeApp(db);
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url: URL | RequestInfo) => {
-    if (String(url).includes("/glow-serum/")) {
-      return new Response(
-        '<html><meta name="storefront-publish-id" content="pub_00000000000000000007"><meta name="storefront-build-id" content="build_test_1"></html>',
-      );
-    }
-    return new Response("Not found", { status: 404 });
-  };
+  const originalRead = served.read;
+  served.read = (slug) => (slug === "glow-serum" ? '<html><meta name="storefront-publish-id" content="pub_00000000000000000007"><meta name="storefront-build-id" content="build_test_1"></html>' : null);
   try {
     const res1 = await app.fetch(
       new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
@@ -245,7 +232,7 @@ test("mark-verified is idempotent when already verified", async () => {
     assert.equal(res2.status, 200, `Expected 200, got ${res2.status}`);
     assert.equal((await res2.json() as { status: string }).status, "verified");
   } finally {
-    globalThis.fetch = originalFetch;
+    served.read = originalRead;
   }
 });
 
@@ -296,16 +283,8 @@ test("mark-verified rejects marker mismatch and marks the build failed", async (
   ]);
   const app = makeApp(db);
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url: URL | RequestInfo) => {
-    if (String(url).includes("/glow-serum/")) {
-      // Public page carries a different publish id and build id.
-      return new Response(
-        '<html><meta name="storefront-publish-id" content="pub_9"><meta name="storefront-build-id" content="other_build"></html>',
-      );
-    }
-    return new Response("Not found", { status: 404 });
-  };
+  const originalRead = served.read;
+  served.read = (slug) => (slug === "glow-serum" ? '<html><meta name="storefront-publish-id" content="pub_9"><meta name="storefront-build-id" content="other_build"></html>' : null);
   try {
     const res = await app.fetch(
       new Request("https://localhost/ci/builds/build_test_1/mark-verified", {
@@ -319,7 +298,7 @@ test("mark-verified rejects marker mismatch and marks the build failed", async (
     assert.equal(body.status, "failed");
     assert.ok(Array.isArray(body.failures) && body.failures.length > 0, "expected failure reasons");
   } finally {
-    globalThis.fetch = originalFetch;
+    served.read = originalRead;
   }
 
   // The build must now be recorded as failed, never verified on a marker mismatch.

@@ -119,10 +119,10 @@ test("a 401/404 is NOT retried (retrying cannot fix a bad token or repo)", async
 test("every missing piece of Worker configuration is named, with how to fix it, and nothing is dispatched", async () => {
   let fetchCalled = false;
   await withFetch(async () => { fetchCalled = true; return new Response(null, { status: 204 }); }, async () => {
-    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "", DEPLOY_TRIGGER_SECRET: "change-me", SITE_URL: "" } as unknown as Env);
+    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "", DEPLOY_TRIGGER_SECRET: "change-me" } as unknown as Env);
     assert.equal(r.status, "pending");
     assert.equal(fetchCalled, false);
-    for (const name of ["GITHUB_DEPLOY_TOKEN", "DEPLOY_TRIGGER_SECRET", "SITE_URL"]) assert.match(r.error ?? "", new RegExp(name));
+    for (const name of ["GITHUB_DEPLOY_TOKEN", "DEPLOY_TRIGGER_SECRET"]) assert.match(r.error ?? "", new RegExp(name));
     assert.match(r.error ?? "", /wrangler secret put/);
   });
 });
