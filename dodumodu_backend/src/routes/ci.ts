@@ -6,7 +6,8 @@ import { publishesRepo } from "../data/publishesRepo";
 import { siteBuildsRepo, IN_FLIGHT, type IntendedPublication } from "../data/siteBuildsRepo";
 import { isUsableSecret, secureEqual } from "../shared/secureEqual";
 import { readBuildId, readPublishVersion } from "../services/storefrontStatus";
-import { logError, logWarn } from "../shared/logger";
+import { served } from "../services/servedStorefront";
+import { logWarn, logError } from "../shared/logger";
 
 // Everything the deploy pipeline (GitHub Actions) says to, and asks of, the Worker.
 //
@@ -148,26 +149,16 @@ ciRoute.post("/builds/:buildId/events", async (c) => {
 
 const paramBuild = (c: Context) => buildIdSchema.parse(c.req.param("buildId"));
 
-/** Fetch each intended publication page and verify both markers match the build. */
-async function verifyPublicMarkers(env: Env, intended: IntendedPublication[], buildId: string) {
-  const base = (env.SITE_URL ?? "").trim().replace(/\/+$/, "");
+/**
+ * Reads each intended publication page from what this Worker is serving and checks both markers match the build.
+ * (In-process: a Worker cannot fetch its own public URL - see services/servedStorefront.ts. The workflow has
+ * already read the real public URL from outside before it asks for this.)
+ */
+function verifyPublicMarkers(intended: IntendedPublication[], buildId: string) {
   const failures: string[] = [];
-  if (!base) return { ok: false, failures: ["SITE_URL is not configured on the Worker"] };
-
   for (const { slug, publishRef } of intended) {
-    let html: string;
-    try {
-      const res = await fetch(`${base}/${slug}/`, {
-        signal: AbortSignal.timeout(8_000),
-        headers: { "User-Agent": "dodumodu-deploy-verifier", "Cache-Control": "no-cache" },
-      });
-      if (!res.ok) { failures.push(`/${slug}/: HTTP ${res.status}`); continue; }
-      html = await res.text();
-    } catch (e) {
-      logError("publish_verify_fetch_failed", e, { slug });
-      failures.push(`/${slug}/: fetch failed`);
-      continue;
-    }
+    const html = served.read(slug);
+    if (html === null) { failures.push(`/${slug}/ is not in the storefront this Worker serves`); continue; }
     const liveVersion = readPublishVersion(html);
     const liveBuild = readBuildId(html);
     if (liveVersion !== publishRef) failures.push(`/${slug}/: live ${liveVersion ?? "(no marker)"} != expected ${publishRef}`);
@@ -212,7 +203,7 @@ ciRoute.post("/builds/:buildId/mark-verified", async (c) => {
     }, 409);
   }
 
-  const verification = await verifyPublicMarkers(c.env, existing.intendedPublications as IntendedPublication[], existing.buildId);
+  const verification = verifyPublicMarkers(existing.intendedPublications as IntendedPublication[], existing.buildId);
   if (!verification.ok) {
     const error = verification.failures.join("; ");
     await siteBuildsRepo.addEvent(db, { buildId, step: "verify", label: "Reading the live storefront", status: "failed", message: error });

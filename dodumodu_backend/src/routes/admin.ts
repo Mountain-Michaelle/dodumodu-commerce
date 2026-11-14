@@ -11,6 +11,7 @@ import { testimonialsRepo } from "../data/testimonialsRepo";
 import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
 import { deployProgress } from "../services/deployProgress";
+import { served } from "../services/servedStorefront";
 import { publishService } from "../services/publishService";
 import { notificationService } from "../services/notificationService";
 import {
@@ -666,7 +667,7 @@ adminRoute.get("/products/:id/status", async (c) => {
   if (!product) return c.json({ error: "Product not found" }, 404);
 
   const latest = await publishesRepo.latestForProduct(db, product.id);
-  const verification = await verifyStorefront(c.env, product.slug);
+  const verification = await verifyStorefront(c.env, product.slug, served.read);
   const liveVersion = verification.liveVersion;
   // The build behind the newest publish: its steps, its failure, its run link. Read fresh on every call
   // so the panel can poll it; nothing here is a stored claim that the page is live.

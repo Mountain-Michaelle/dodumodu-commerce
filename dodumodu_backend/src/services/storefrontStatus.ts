@@ -68,11 +68,22 @@ const VERIFY_TIMEOUT_MS = 8_000;
  * throws and never guesses: an unreachable storefront means LIVE is UNKNOWN, and
  * the caller turns that into "still deploying" rather than "live".
  */
-export async function verifyStorefront(env: Env, slug: string): Promise<StorefrontVerification> {
+export async function verifyStorefront(
+  env: Env, slug: string, served?: (slug: string) => string | null,
+): Promise<StorefrontVerification> {
   const base = (env.SITE_URL ?? "").trim().replace(/\/+$/, "");
   // Root-level slug route: /:slug serves the prerendered snapshot. The publish
   // version marker is read from <meta name="storefront-publish-id"> in that page.
   const url = base ? `${base}/${slug}/` : "";
+
+  // In production the Worker reads the page it is serving directly (a Worker cannot fetch its own public URL, so
+  // fetching SITE_URL from here reported a live page as 404). The URL is only used for display.
+  if (served) {
+    const html = served(slug);
+    if (html === null) return { liveVersion: null, url, reason: "no-status" };
+    const version = readPublishVersion(html);
+    return { liveVersion: version, url, reason: version ? null : "unreadable" };
+  }
 
   if (!base) {
     return { liveVersion: null, url: "", reason: "unconfigured" };

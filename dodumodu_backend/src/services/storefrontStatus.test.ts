@@ -173,3 +173,14 @@ test("a publish that was requested but the storefront cannot be reached is DEPLO
     latestPublishRef: "pub_00000000000000000005", buildStatus: "triggered", liveVersion: null,
   }), "DEPLOYING");
 });
+test("the Worker reads the page it serves in-process, never its own public URL", async () => {
+  await withFetch(async () => { throw new Error("must not fetch"); }, async () => {
+    const html = '<meta name="storefront-publish-id" content="pub_00000000000000000009">';
+    const ok = await verifyStorefront(env("https://shop.example"), "glow-serum", () => html);
+    assert.equal(ok.liveVersion, "pub_00000000000000000009");
+    assert.equal(ok.reason, null);
+    const gone = await verifyStorefront(env(""), "gone", () => null);
+    assert.equal(gone.liveVersion, null);
+    assert.equal(gone.reason, "no-status");
+  });
+});
