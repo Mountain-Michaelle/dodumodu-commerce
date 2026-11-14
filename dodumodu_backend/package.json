@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:site": "tsx scripts/build-site.mjs && tsx scripts/build-admin-pages.mjs",
+    "build:site:snapshots": "tsx scripts/build-site.mjs --snapshots && tsx scripts/build-admin-pages.mjs",
     "dev": "npm run build:site && tsx watch src/node.ts",
     "dev:worker": "wrangler dev",
     "deploy": "npm run build:site && wrangler deploy",

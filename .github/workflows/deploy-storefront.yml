@@ -99,7 +99,7 @@ jobs:
 
       - name: Render storefront from published snapshots
         id: render
-        run: node scripts/ci.mjs step render "Rendering the published pages" -- npm run build:site
+        run: node scripts/ci.mjs step render "Rendering the published pages" -- npm run build:site:snapshots
 
       - name: Typecheck
         id: typecheck

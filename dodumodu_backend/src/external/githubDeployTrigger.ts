@@ -1,4 +1,20 @@
 import type { Env } from "../env";
+import { isUsableSecret } from "../shared/secureEqual";
+
+/**
+ * What publishing needs from the Worker's own environment, checked when Publish or Retry is pressed - never at build
+ * time. A missing value is reported on the product page with the exact command to fix it.
+ *   GITHUB_DEPLOY_TOKEN   lets the Worker start the workflow
+ *   DEPLOY_TRIGGER_SECRET lets the workflow report back and fetch snapshots (/ci)
+ *   SITE_URL              where the Worker reads the live storefront to confirm a publish
+ */
+export function missingDeployConfig(env: Env): string[] {
+  const missing: string[] = [];
+  if (!isUsableSecret(env.GITHUB_DEPLOY_TOKEN)) missing.push("GITHUB_DEPLOY_TOKEN");
+  if (!isUsableSecret(env.DEPLOY_TRIGGER_SECRET)) missing.push("DEPLOY_TRIGGER_SECRET");
+  if (!(env.SITE_URL ?? "").trim()) missing.push("SITE_URL");
+  return missing;
+}
 
 /**
  * Asks GitHub Actions to run the storefront-deploy workflow via repository_dispatch.
@@ -36,14 +52,16 @@ export async function triggerGitHubDispatch(
   },
 ): Promise<DispatchResult> {
   const token = (env.GITHUB_DEPLOY_TOKEN ?? "").trim();
+  const missing = missingDeployConfig(env);
 
-  if (token === "") {
+  if (missing.length > 0) {
     // Explicit unconfigured state: the snapshot still publishes, but no deploy can be
     // triggered until the token is set. retryable: true so the admin can retry after
     // configuring the secret, rather than being stuck on a dead "pending".
     return {
       status: "pending",
-      error: "GITHUB_DEPLOY_TOKEN is not configured — deploy will not be triggered until set",
+      error: `Not configured on the Worker: ${missing.join(", ")}. The snapshot is saved; nothing was deployed. `
+        + `Set each with "wrangler secret put <NAME>" (SITE_URL is a plain variable), then press Retry.`,
       httpStatus: null,
       durationMs: 0,
       retryable: true,

@@ -137,33 +137,31 @@ async function ci(path, init = {}) {
   return res.json()
 }
 
-// Two lanes build the storefront: the GitHub Actions run a Publish dispatches, and a plain Cloudflare/git build of
-// this repo. Both must work, and neither may ever replace a published storefront with a broken one:
+// Two separate jobs, deliberately not one:
 //
-//   snapshots fetched      -> render every published product (the normal case, in both lanes)
-//   credentials not set    -> BOOTSTRAP: nothing has been published yet (or this lane was never given the
-//                             credentials), so build the empty catalog and say so loudly. The first build of a
-//                             brand-new project must succeed.
-//   Worker has no /ci yet  -> BOOTSTRAP as well: the Worker that serves snapshots is the one this very build
-//                             is about to deploy for the first time.
-//   anything else wrong    -> FAIL (unreachable, 401, 5xx). A failed build deploys nothing, so the storefront
-//                             that is live keeps serving: that is the point of failing instead of guessing.
+//   APPLICATION BUILD  (npm run build:site, and every Cloudflare/git build)
+//       Builds the app. Publishes nothing, fetches nothing, needs no credentials: it renders the empty catalog
+//       and always succeeds on its own merits. Products are not its business.
+//   PUBLISH BUILD      (npm run build:site:snapshots, run only by the deploy-storefront workflow)
+//       Renders every published product from the snapshots the Worker serves. It is strict: missing credentials or
+//       an unreachable Worker FAIL it, because a publish that silently rendered nothing would be worse than none.
+//
+// A failed publish build deploys nothing, so the storefront that is live keeps serving.
+const wantSnapshots = process.argv.includes('--snapshots')
 let snapshots = []
 let bootstrap = null
-if (!workerUrl || !ciSecret) {
-  bootstrap = 'WORKER_URL / DEPLOY_TRIGGER_SECRET are not set for this build'
+if (!wantSnapshots) {
+  bootstrap = 'this is the application build, which does not publish products'
 } else {
-  try {
-    snapshots = (await ci('/snapshots')).snapshots
-  } catch (err) {
-    if (err.status === 404) bootstrap = 'the deployed Worker has no /ci/snapshots yet (first deploy)'
-    else throw err
+  if (!workerUrl || !ciSecret) {
+    throw new Error('the publish build needs WORKER_URL and DEPLOY_TRIGGER_SECRET (GitHub Actions secrets) to fetch the published snapshots from the Worker')
   }
+  snapshots = (await ci('/snapshots')).snapshots
 }
 if (bootstrap) {
   console.warn(
-    `\nbuild-site: initial build - ${bootstrap}. Rendering the empty catalog; this build needs no credentials.\n` +
-    '  Products are published only from the admin (Publish), which rebuilds the storefront with them.\n',
+    `\nbuild-site: ${bootstrap}. Rendering the empty catalog; no credentials are used.\n` +
+    '  Products are published only from the admin (Publish), which runs the publish build.\n',
   )
 }
 

@@ -19,7 +19,7 @@ import type { Env } from "../env";
        carries the exact reason, so the admin never shows "deploying" for ever.
    Repository reads are stubbed; what is asserted is what ended up recorded. */
 
-const env = (token: string) => ({ MAX_ORDER_QUANTITY: "20", GITHUB_DEPLOY_TOKEN: token } as unknown as Env);
+const env = (token: string) => ({ MAX_ORDER_QUANTITY: "20", GITHUB_DEPLOY_TOKEN: token, DEPLOY_TRIGGER_SECRET: "ci-secret-token-123", SITE_URL: "https://shop.test" } as unknown as Env);
 
 const PRODUCT = {
   id: 1, slug: "glow-serum", name: "Radiance Glow Serum", description: "A bright serum.",
