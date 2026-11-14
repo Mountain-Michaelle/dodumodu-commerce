@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { productPageHandler } from "./productPage";
 
-const products = { "glow-serum": { html: "<html>serum</html>", etag: '"e1"', publishId: 1, publishRef: "pub_00000000000000000001" } };
+const products: Record<string, { html: string; etag: string; publishRef: string; source: "baked" }> = {
+  "glow-serum": { html: "<html>serum</html>", etag: '"e1"', publishRef: "pub_00000000000000000001", source: "baked" },
+};
 const app = new Hono();
-const handler = productPageHandler(() => products);
+const handler = productPageHandler(async (_env, slug) => products[slug] ?? null);
 app.get("/:slug", handler);
 app.get("/:slug/", handler);
 
@@ -21,4 +23,12 @@ test("an unknown slug is a 404 either way, and a matching ETag is a 304", async 
   assert.equal((await app.request("/nope/")).status, 404);
   assert.equal((await app.request("/nope")).status, 404);
   assert.equal((await app.request("/glow-serum/", { headers: { "If-None-Match": '"e1"' } })).status, 304);
+});
+
+test("a failing page lookup is a 404 (logged), never a 500 on a customer page", async () => {
+  const broken = new Hono();
+  broken.get("/:slug/", productPageHandler(async () => { throw new Error("db down"); }));
+  const original = console.error;
+  console.error = () => {};
+  try { assert.equal((await broken.request("/glow-serum/")).status, 404); } finally { console.error = original; }
 });

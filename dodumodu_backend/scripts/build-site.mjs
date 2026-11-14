@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomBytes } from 'node:crypto'
-import { renderProduct } from '../build/render-product.mjs'
+import { renderProduct, productTemplate } from '../build/render-product.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const backendRoot = resolve(__dirname, '..')
@@ -198,7 +198,7 @@ if (!wantSnapshots) {
 if (bootstrap) {
   console.warn(
     `\nbuild-site: ${bootstrap}. Rendering the empty catalog; no credentials are used.\n` +
-    '  Products are published only from the admin (Publish), which runs the publish build.\n',
+    '  Products are published only from the admin (Publish). Already-published products keep being served from their saved snapshots, so this build never removes them.\n',
   )
 }
 
@@ -311,6 +311,15 @@ const out =
   lit('INDEX_ETAG', etag(flagshipHtml)) +
   lit('PRODUCTS', JSON.stringify(PRODUCTS)) +
   lit('THANK_YOU_HTML', read('thank-you.html')) +
+  // Everything the Worker needs to render a stored snapshot at request time, with THIS build's hashed JS/CSS and CSP.
+  // This is what keeps published products alive across any rebuild, including one that never saw the database.
+  lit('PRODUCT_TEMPLATE', productTemplate()) +
+  lit('PAGE_PARTS', JSON.stringify({
+    css, jsPath, csp: CSP, buildId: BUILD_ID, siteUrl,
+    deliveryBase: parts.imageDeliveryBase, imageMode: parts.imageMode, sprite: parts.sprite,
+    runtimeConfig: parts.runtimeConfig, inlineScripts: parts.inlineScripts, turnstileSiteKey: parts.turnstileSiteKey,
+    maxOrderQuantity: process.env.MAX_ORDER_QUANTITY ?? '20',
+  })) +
   lit('APP_JS', js) +
   lit('APP_JS_PATH', jsPath) +
   lit('APP_JS_ETAG', etag(js)) +

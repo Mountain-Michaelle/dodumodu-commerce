@@ -1,9 +1,9 @@
 import type { Db } from "../db";
-import { siteBuildsRepo, IN_FLIGHT } from "../data/siteBuildsRepo";
-import { STALL_MS } from "./publishService";
+import { siteBuildsRepo, stalledReason } from "../data/siteBuildsRepo";
+
 
 /** A queued build whose run never reported in. GitHub starts a run in seconds, so this is long enough to be sure. */
-export const NEVER_STARTED_MS = 5 * 60 * 1000;
+export { NEVER_STARTED_MS } from "../data/siteBuildsRepo";
 
 // What the admin panel shows about the build behind a publish: which step it is on, which steps passed,
 // and - if it broke - exactly which step and why.
@@ -57,17 +57,12 @@ export async function deployProgress(
   let failedStep = build.failedStep ?? null;
   let stalled = false;
 
-  const idleMs = now - new Date(build.lastEventAt).getTime();
-  const neverStarted = status === "queued" && idleMs > NEVER_STARTED_MS;
-  if ((IN_FLIGHT as readonly string[]).includes(status) && (neverStarted || idleMs > STALL_MS)) {
+  const why = stalledReason(build, now);
+  if (why) {
     stalled = true;
     status = "failed";
-    failedStep = neverStarted ? "workflow" : build.currentStep ?? "stalled";
-    error = neverStarted
-      ? "GitHub accepted the request, but the workflow run never reported back. Usually: the workflow file is not on the "
-        + "default branch, or the repository's Actions secrets WORKER_URL and DEPLOY_TRIGGER_SECRET are missing or wrong "
-        + "(a run cannot report without them). Open the repository's Actions tab for the run, fix that, then retry."
-      : `No progress was reported for ${Math.round(STALL_MS / 60000)} minutes. The GitHub run was probably cancelled or crashed - check the run, then retry.`;
+    failedStep = why.failedStep;
+    error = why.error;
     await siteBuildsRepo.markFailed(db, build.buildId, error, failedStep);
   }
 

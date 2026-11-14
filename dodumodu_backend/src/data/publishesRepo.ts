@@ -1,6 +1,6 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db";
-import { productPublishes } from "../schema";
+import { productPublishes, products } from "../schema";
 
 // The publish log is append-only on purpose: nothing here updates or deletes a
 // snapshot, because a snapshot is what makes a build reproducible. If it could
@@ -36,6 +36,48 @@ export const publishesRepo = {
       .where(eq(productPublishes.id, id))
       .returning();
     return rows.length > 0;
+  },
+
+  /**
+   * What a build's outcome means for the publishes it carried. "verified" is the durable "this snapshot is live"
+   * marker the Worker serves from after any rebuild; a failure never downgrades a publish that already went live.
+   */
+  async setBuildOutcome(db: Db, publishRefs: string[], status: "verified" | "failed", error?: string | null) {
+    if (publishRefs.length === 0) return;
+    const where = status === "failed"
+      ? and(inArray(productPublishes.publishRef, publishRefs), sql`${productPublishes.buildStatus} <> 'verified'`)
+      : inArray(productPublishes.publishRef, publishRefs);
+    await db.update(productPublishes)
+      .set(status === "failed" ? { buildStatus: "failed", deployError: error ?? null } : { buildStatus: "verified", deployError: null })
+      .where(where);
+  },
+
+  async setBuildOutcomeById(db: Db, id: number, error?: string | null) {
+    await db.update(productPublishes)
+      .set({ buildStatus: "failed", deployError: error ?? null })
+      .where(and(eq(productPublishes.id, id), sql`${productPublishes.buildStatus} <> 'verified'`));
+  },
+
+  /** The newest VERIFIED snapshot of one product, by slug: what customers must keep getting after any rebuild. */
+  async latestLiveBySlug(db: Db, slug: string) {
+    const [row] = await db.select({
+      id: productPublishes.id, publishRef: productPublishes.publishRef, payload: productPublishes.payload,
+    })
+      .from(productPublishes)
+      .innerJoin(products, eq(products.id, productPublishes.productId))
+      .where(and(eq(products.slug, slug), eq(productPublishes.buildStatus, "verified")))
+      .orderBy(desc(productPublishes.id))
+      .limit(1);
+    return row ?? null;
+  },
+
+  /** Slugs that have a verified snapshot (for the sitemap). */
+  async liveSlugs(db: Db): Promise<string[]> {
+    const rows = await db.selectDistinct({ slug: products.slug })
+      .from(productPublishes)
+      .innerJoin(products, eq(products.id, productPublishes.productId))
+      .where(eq(productPublishes.buildStatus, "verified"));
+    return rows.map((r) => r.slug);
   },
 
   /** The newest publish of EVERY product: what a storefront build must render. */
