@@ -159,6 +159,16 @@ test('the static hero is the optimised image the carousel requests first, preloa
   assert.ok(rich({ imageMode: 'derivative' }).includes('uploads/hero.w640.jpg'))
 })
 
+test('without a custom domain (same-origin /media or workers.dev) photos are the plain file, never a /cdn-cgi URL that 404s', () => {
+  for (const deliveryBase of ['/media', 'https://dodumodu.example.workers.dev/media']) {
+    const html = rich({ deliveryBase })
+    assert.ok(!html.includes('cdn-cgi'), deliveryBase)
+    assert.ok(html.includes(`uploads/hero.jpg"`), deliveryBase)
+    assert.ok(!html.includes('hero-fallback" src="" '), deliveryBase)
+    assert.ok(!/class="hero-fallback"[^>]* srcset=/.test(html), 'no srcset of identical URLs')
+  }
+})
+
 test('the whole gallery is printed into the page so the carousel needs no API call', () => {
   const html = rich()
   const m = html.match(/<div id="carousel" data-gallery="([^"]*)">/)

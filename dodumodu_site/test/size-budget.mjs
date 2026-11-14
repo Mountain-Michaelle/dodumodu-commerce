@@ -212,7 +212,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // reproduces 300e2222 exactly, so that one line is the whole difference. css is unchanged.
 // Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
 // gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
-const EXPECTED_CUSTOMER = { js: "site.b596ec29.min.js", css: "site.f52b2654.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.42873d2b.min.js", css: "site.69abf2c1.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;
