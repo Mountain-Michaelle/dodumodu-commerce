@@ -33,6 +33,58 @@ const lit = (k, v) => `export const ${k} = ${JSON.stringify(v)}\n`
 const BUILD_ID = (process.env.BUILD_ID ?? '').trim() || `build_${Date.now()}_${randomBytes(4).toString('hex')}`
 
 // ---------------------------------------------------------------------------
+// Facts the published pages must reproduce EXACTLY, taken from the built page
+// (dist/products/glow-serum/index.html) that the CSP hashes are computed from.
+// Taking them from that one place means a published page can never carry a
+// different logo sprite, a different inline script, or different runtime
+// config than the page the CSP was written for.
+// ---------------------------------------------------------------------------
+export function extractPageParts(html) {
+  const runtimeConfig = html.match(/<script>window\.API_BASE=[^<]*<\/script>/)?.[0]
+  const sprite = html.match(/<svg class="dm-defs"[\s\S]*?(?=<a href="#order-form" class="skip-link">)/)?.[0]
+  const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter((m) => !/ld\+json/.test(m[1]) && !/window\.API_BASE=/.test(m[2]))
+    .map((m) => m[0])
+  if (!runtimeConfig) throw new Error('built page has no runtime config script (window.API_BASE)')
+  if (!sprite) throw new Error('built page has no logo/icon sprite before the skip link')
+  if (scripts.length === 0) throw new Error('built page has no inline scripts to carry into published pages')
+  const cfg = (name) => {
+    const m = runtimeConfig.match(new RegExp(`window\\.${name}=("(?:[^"\\\\]|\\\\.)*")`))
+    return m ? JSON.parse(m[1]) : ''
+  }
+  return {
+    runtimeConfig,
+    sprite,
+    inlineScripts: scripts.join(''),
+    turnstileSiteKey: html.match(/data-sitekey="([^"]*)"/)?.[1] ?? '',
+    apiBase: cfg('API_BASE'),
+    imageDeliveryBase: cfg('IMAGE_DELIVERY_BASE'),
+  }
+}
+
+const CF_CHALLENGES = 'https://challenges.cloudflare.com'
+const originOf = (url) => { try { return new URL(url).origin } catch { return null } }
+
+// The page CSP. Everything beyond 'self' is something the page really loads:
+// the image host (a CSP of img-src 'self' blocks the hero when media lives on
+// its own R2 domain), the API host when it is not same-origin, and Turnstile's
+// script + iframe when a site key is configured (without them no order can be
+// placed, because the server refuses an order that carries no token).
+export function buildCsp({ scriptHashes, styleHashes, imgOrigins = [], connectOrigins = [], turnstile = false }) {
+  return [
+    `default-src 'none'`,
+    `script-src 'self' ${scriptHashes.join(' ')}${turnstile ? ` ${CF_CHALLENGES}` : ''}`,
+    `style-src ${styleHashes.join(' ')}`,
+    `img-src ${["'self'", 'data:', ...imgOrigins].join(' ')}`,
+    `connect-src ${["'self'", ...connectOrigins].join(' ')}`,
+    ...(turnstile ? [`frame-src ${CF_CHALLENGES}`] : []),
+    `base-uri 'none'`,
+    `form-action 'self'`,
+    `frame-ancestors 'none'`,
+  ].join('; ')
+}
+
+// ---------------------------------------------------------------------------
 // Empty-catalog storefront root page.
 // Used when no published products exist: the build must still emit a valid
 // INDEX_HTML so the Worker can serve /, without fabricating any product data.
@@ -89,28 +141,12 @@ const js = read(jsMatch[1])
 // 1c) strict CSP validation + hashes
 const bad = baseHtml.match(/\sstyle="|\son[a-z]+="/)
 if (bad) throw new Error(`index.html still has an inline style/handler attribute: ${bad[0]}`)
-// Product images are served from the media origin (IMAGE_DELIVERY_BASE), so the page's CSP must allow it or the
-// browser silently refuses every image. Read from the environment, else from wrangler.toml's [vars].
-function mediaOrigin() {
-  let v = process.env.IMAGE_DELIVERY_BASE
-  if (!v) {
-    try { v = /^\s*IMAGE_DELIVERY_BASE\s*=\s*"([^"]*)"/m.exec(readFileSync(join(backendRoot, 'wrangler.toml'), 'utf8'))?.[1] } catch { /* none */ }
-  }
-  try { const u = new URL(v ?? ''); return u.protocol === 'https:' ? u.origin : '' } catch { return '' }
-}
 const inline = (tag) =>
   [...baseHtml.matchAll(new RegExp(`<${tag}(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)</${tag}>`, 'g'))]
     .map((m) => `'sha256-${sha(m[1], 'base64')}'`)
-const CSP = [
-  `default-src 'none'`,
-  `script-src 'self' ${inline('script').join(' ')}`,
-  `style-src ${inline('style').join(' ')}`,
-  `img-src 'self' data:${mediaOrigin() ? ' ' + mediaOrigin() : ''}`,
-  `connect-src 'self'`,
-  `base-uri 'none'`,
-  `form-action 'self'`,
-  `frame-ancestors 'none'`,
-].join('; ')
+const parts = extractPageParts(baseHtml)
+const scriptHashes = inline('script')
+const styleHashes = inline('style')
 
 // ---------------------------------------------------------------------------
 // 2) Fetch the latest published snapshot of every product from the Worker.
@@ -190,6 +226,34 @@ if (process.env.BUILD_ID && !bootstrap) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b) Deployment facts. In CI these come from the workflow environment; a build that
+//     silently fell back to the placeholder origin would publish canonical URLs and
+//     link previews that point at yoursite.com, so CI refuses to build without them.
+// ---------------------------------------------------------------------------
+const siteUrl = (process.env.SITE_URL ?? '').trim().replace(/\/+$/, '')
+if (process.env.GITHUB_ACTIONS === 'true' && (!/^https:\/\//.test(siteUrl) || /yoursite\.com/.test(siteUrl))) {
+  throw new Error('SITE_URL must be the real https:// origin of the storefront in CI (set the SITE_URL secret); refusing to publish placeholder canonical and og:url values')
+}
+
+// Absolute image URLs (demo data, or a row pointing at a CDN asset) need their origin in img-src too.
+const imgOrigins = new Set()
+const deliveryOrigin = originOf(parts.imageDeliveryBase)
+if (deliveryOrigin) imgOrigins.add(deliveryOrigin)
+for (const row of products) {
+  for (const img of [...(row.snapshot?.images ?? []), ...(row.snapshot?.testimonials ?? [])]) {
+    if (/^https?:\/\//i.test(img?.r2Key ?? '')) { const o = originOf(img.r2Key); if (o) imgOrigins.add(o) }
+  }
+}
+const apiOrigin = originOf(parts.apiBase)
+const CSP = buildCsp({
+  scriptHashes,
+  styleHashes,
+  imgOrigins: [...imgOrigins],
+  connectOrigins: apiOrigin ? [apiOrigin] : [],
+  turnstile: parts.turnstileSiteKey !== '',
+})
+
+// ---------------------------------------------------------------------------
 // 3) Render every product page from its snapshot.
 //    The flagship / is glow-serum.
 // ---------------------------------------------------------------------------
@@ -207,6 +271,12 @@ for (const row of products) {
     csp: CSP,
     buildId: BUILD_ID,
     maxOrderQuantity: process.env.MAX_ORDER_QUANTITY ?? '20',
+    siteUrl,
+    deliveryBase: parts.imageDeliveryBase,
+    sprite: parts.sprite,
+    runtimeConfig: parts.runtimeConfig,
+    inlineScripts: parts.inlineScripts,
+    turnstileSiteKey: parts.turnstileSiteKey,
   })
 
   PRODUCTS[slug] = {
@@ -238,6 +308,7 @@ const out =
   lit('INDEX_HTML', flagshipHtml) +
   lit('INDEX_ETAG', etag(flagshipHtml)) +
   lit('PRODUCTS', JSON.stringify(PRODUCTS)) +
+  lit('THANK_YOU_HTML', read('thank-you.html')) +
   lit('APP_JS', js) +
   lit('APP_JS_PATH', jsPath) +
   lit('APP_JS_ETAG', etag(js)) +
@@ -256,7 +327,7 @@ console.log(
     `  BUILD_ID ${BUILD_ID}\n` +
     `  products rendered: ${Object.keys(PRODUCTS).length} (${Object.keys(PRODUCTS).join(', ')})\n` +
     `  index.html ${kb(flagshipHtml)}  ${jsPath} ${kb(js)}\n` +
-    `  CSP hashes: ${inline('script').length} script, ${inline('style').length} style`
+    `  CSP hashes: ${scriptHashes.length} script, ${styleHashes.length} style | img origins: ${[...imgOrigins].join(', ') || 'self'}${parts.turnstileSiteKey ? ' | turnstile allowed' : ''}`
   )
 }
 

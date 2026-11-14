@@ -44,6 +44,15 @@ env:
   # The id the Worker queued for this run; a manual run makes its own.
   BUILD_ID: ${{ github.event.client_payload.build_id || format('build_{0}_{1}', github.run_id, github.run_attempt) }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  # What the storefront build bakes into every page (dodumodu_site/build/bundle.mjs reads these from
+  # its environment). Without them the CI build used the yoursite.com placeholder for canonical and
+  # og:url, an empty Turnstile site key (so no order form challenge) and the default media base.
+  # SITE_URL is the real https origin; the other three are PUBLIC values, so they are repository
+  # Variables (Settings > Secrets and variables > Actions > Variables), not secrets.
+  # SITE_URL (above) is checked: the publish build fails in CI if it is missing or still the placeholder.
+  API_BASE: ${{ vars.API_BASE }}
+  IMAGE_DELIVERY_BASE: ${{ vars.IMAGE_DELIVERY_BASE }}
+  TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
 
 jobs:
   build-and-deploy:

@@ -84,8 +84,12 @@ export function imageUrl({
 }) {
   if (typeof key !== "string" || key === "") return "";
   // An absolute key is used as-is. That is how a database row can point at a real
-  // CDN asset rather than a storage key, and it must survive untouched.
-  const absolute = /^https?:\/\//i.test(key);
+  // CDN asset rather than a storage key, and it must survive untouched. So is a
+  // root-relative path ("/media/x.jpg"): that is a key the page has ALREADY resolved
+  // against the delivery base (R2 object keys never start with a slash), and
+  // resolving it again produced /media/cdn-cgi/image/...//media/x.jpg, a 404 for every
+  // carousel candidate whenever the delivery base is same-origin (local dev, Worker-served media).
+  const absolute = /^https?:\/\//i.test(key) || key.charAt(0) === "/";
   const base = deliveryBase.replace(/\/+$/, "");
 
   if (absolute) {

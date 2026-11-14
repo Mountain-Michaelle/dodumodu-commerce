@@ -636,8 +636,17 @@ ok("reference: the server writes it in ddmd- lowercase hex form",
 ok("reference: the webhook's lookup folds case, or paid orders are never marked paid",
   /lower\(\$\{orders\.reference\}\)\s*=\s*lower\(\$\{reference\}\)/.test(backend("data/ordersRepo.ts")));
 const thankYou = readFileSync(new URL("../thank-you.html", import.meta.url), "utf8");
+// "/" and not /products/<slug>/: the Worker serves the flagship at "/" and product pages at /<slug>/,
+// it has no /products/ route, so the old target was a 404 in production.
 ok("thank-you: there is a real link back to the order page",
-  /<a class="back-link" href="\/products\/glow-serum\/">/.test(thankYou));
+  /<a class="back-link" href="\/">/.test(thankYou));
+ok("thank-you: makes no stylesheet request (the /__SITE_CSS__ link 404'd from the Worker)",
+  !/<link[^>]+rel="stylesheet"/.test(thankYou) && !thankYou.includes("__SITE_CSS__"));
+ok("thank-you: carries the current logo artwork, not the old 2030-wide one",
+  thankYou.includes('id="dm-k"') && !thankYou.includes("2030"));
+ok("thank-you: logo motion rules are present and respect prefers-reduced-motion",
+  /\.dm-run \.dm-b\{animation:dm-b/.test(thankYou) && /\.dm-run \.dm-r\{animation:dm-r/.test(thankYou)
+    && /prefers-reduced-motion:reduce\)\{\.dm-run/.test(thankYou));
 ok("thank-you: the customer is told the company will be in touch",
   /call or WhatsApp you on the number you gave us/i.test(thankYou));
 ok("thank-you: the reference is shown lowercase in its own code style",
