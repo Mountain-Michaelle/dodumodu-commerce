@@ -5,7 +5,6 @@ import type { Env } from "../env";
 
 const baseEnv: Env = {
   GITHUB_DEPLOY_TOKEN: "test-token",
-  WORKER_URL: "",
   DEPLOY_TRIGGER_SECRET: "",
 } as unknown as Env;
 

@@ -102,7 +102,6 @@ export type Env = {
   MAX_ORDER_QUANTITY: string;
   /** Comma-separated CORS allowlist. See isOriginAllowed in app.ts. */
   ALLOWED_ORIGINS: string;
-  /** Public origin of the deployed Worker, e.g. https://<your-worker>.workers.dev. */ WORKER_URL: string;
   /** OPay API root, e.g. the sandbox or production host. */
   OPAY_BASE_URL: string;
   /**

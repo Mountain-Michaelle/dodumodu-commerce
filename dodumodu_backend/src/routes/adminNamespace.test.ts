@@ -63,7 +63,6 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     SITE_URL: "https://yoursite.com",
     MAX_ORDER_QUANTITY: "20",
     ALLOWED_ORIGINS: "https://yoursite.com",
-    WORKER_URL: "https://your-worker.workers.dev",
     OPAY_BASE_URL: "https://sandboxapi.opaycheckout.com",
     ADMIN_OPERATORS: "",
     ADMIN_AUTH_V2: "0",
