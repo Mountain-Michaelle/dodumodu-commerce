@@ -121,9 +121,6 @@ const CSP = [
 // ---------------------------------------------------------------------------
 const workerUrl = (process.env.WORKER_URL ?? '').replace(/\/+$/, '')
 const ciSecret = (process.env.DEPLOY_TRIGGER_SECRET ?? '').trim()
-if (!workerUrl || !ciSecret) {
-  throw new Error('WORKER_URL and DEPLOY_TRIGGER_SECRET are required: the build fetches snapshots from the Worker (/ci/snapshots)')
-}
 
 async function ci(path, init = {}) {
   const res = await fetch(`${workerUrl}/ci${path}`, {
@@ -133,12 +130,45 @@ async function ci(path, init = {}) {
   })
   if (!res.ok) {
     const text = (await res.text().catch(() => '')).slice(0, 300)
-    throw new Error(`Worker ${init.method ?? 'GET'} /ci${path} returned HTTP ${res.status}${text ? `: ${text}` : ''}`)
+    const err = new Error(`Worker ${init.method ?? 'GET'} /ci${path} returned HTTP ${res.status}${text ? `: ${text}` : ''}`)
+    err.status = res.status
+    throw err
   }
   return res.json()
 }
 
-const { snapshots } = await ci('/snapshots')
+// Two lanes build the storefront: the GitHub Actions run a Publish dispatches, and a plain Cloudflare/git build of
+// this repo. Both must work, and neither may ever replace a published storefront with a broken one:
+//
+//   snapshots fetched      -> render every published product (the normal case, in both lanes)
+//   credentials not set    -> BOOTSTRAP: nothing has been published yet (or this lane was never given the
+//                             credentials), so build the empty catalog and say so loudly. The first build of a
+//                             brand-new project must succeed.
+//   Worker has no /ci yet  -> BOOTSTRAP as well: the Worker that serves snapshots is the one this very build
+//                             is about to deploy for the first time.
+//   anything else wrong    -> FAIL (unreachable, 401, 5xx). A failed build deploys nothing, so the storefront
+//                             that is live keeps serving: that is the point of failing instead of guessing.
+let snapshots = []
+let bootstrap = null
+if (!workerUrl || !ciSecret) {
+  bootstrap = 'WORKER_URL / DEPLOY_TRIGGER_SECRET are not set for this build'
+} else {
+  try {
+    snapshots = (await ci('/snapshots')).snapshots
+  } catch (err) {
+    if (err.status === 404) bootstrap = 'the deployed Worker has no /ci/snapshots yet (first deploy)'
+    else throw err
+  }
+}
+if (bootstrap) {
+  console.warn(
+    `\nbuild-site: BOOTSTRAP BUILD - ${bootstrap}. Rendering the empty catalog.\n` +
+    '  If products are already published, set WORKER_URL and DEPLOY_TRIGGER_SECRET as build variables for this lane\n' +
+    '  (Cloudflare: Workers & Pages -> your Worker -> Settings -> Build -> Variables and secrets) so this build\n' +
+    '  renders them instead. Publishing from the admin always rebuilds with them.\n',
+  )
+}
+
 const REF = /^pub_[0-9a-f]{20}$/
 const products = snapshots
   .filter((r) => r.payload)
@@ -148,17 +178,20 @@ const products = snapshots
       publishId: r.publishId, publishRef: r.publishRef, snapshot: r.payload }
   })
 
-// Record what this build intends to ship, BEFORE rendering, so a failure from here on is attached to a
-// build the admin can see. The id comes from the run that was dispatched (BUILD_ID) when there is one.
+// A run the Worker dispatched (BUILD_ID given) reports what it will build BEFORE rendering, so a failure from here
+// on is attached to a build the admin can see. A build nobody queued has no row to report to and records nothing:
+// the admin still sees it go LIVE, because that is decided by the page's own publish marker.
 const intendedPublications = products.map((p) => ({ slug: p.slug, publishId: p.publishId, publishRef: p.publishRef }))
-await ci(`/builds/${encodeURIComponent(BUILD_ID)}/start`, {
-  method: 'POST',
-  body: JSON.stringify({
-    intendedPublications,
-    ...(process.env.RUN_URL ? { runUrl: process.env.RUN_URL } : {}),
-  }),
-})
-console.log(`build-site: build ${BUILD_ID} recorded with ${intendedPublications.length} publication(s)`)
+if (process.env.BUILD_ID && !bootstrap) {
+  await ci(`/builds/${encodeURIComponent(BUILD_ID)}/start`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intendedPublications,
+      ...(process.env.RUN_URL ? { runUrl: process.env.RUN_URL } : {}),
+    }),
+  })
+  console.log(`build-site: build ${BUILD_ID} recorded with ${intendedPublications.length} publication(s)`)
+}
 
 // ---------------------------------------------------------------------------
 // 3) Render every product page from its snapshot.
