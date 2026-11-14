@@ -12,6 +12,7 @@ import { ordersRoute } from "./routes/orders";
 import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
 import { ciRoute } from "./routes/ci";
+import { productPageHandler } from "./routes/productPage";
 import { PUBLIC_ORIGIN_HEADER } from "./auth/public-origin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
 import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml } from "./config/adminBase";
@@ -299,29 +300,8 @@ app.get("/media/*", async (c) => {
   return c.body(object.body, 200, headers);
 });
 
-app.get("/:slug", async (c, next) => {
-  const slug = c.req.param("slug");
-  // PRODUCTS is emitted by scripts/build-site.mjs as a JSON string (see the
-  // `lit` helper), so parse it here rather than casting the module type.
-  const products = JSON.parse(site.PRODUCTS ?? "{}") as Record<
-    string,
-    { html: string; etag: string; publishId: number }
-  >;
-  const entry = products[slug ?? ""];
-  if (!entry) {
-    // Not a prerendered product page. Let the static-file middleware (mounted
-    // after the app routes in src/node.ts) serve any real file under siteDist
-    // (hashed JS/CSS, robots.txt, sitemap.xml, ...) before giving up with 404.
-    return await next();
-  }
-  // ETag revalidation: snapshot is immutable, so the ETag changes iff content
-  // changed. A matching If-None-Match means the client already has the page.
-  const inm = c.req.header("if-none-match");
-  if (inm === entry.etag) {
-    return c.body(null, 304);
-  }
-  return c.html(entry.html, 200, {
-    ETag: entry.etag,
-    "Cache-Control": "public, max-age=60, stale-while-revalidate=3600",
-  });
-});
+// Served at BOTH /slug and /slug/ (see routes/productPage.ts).
+// PRODUCTS is emitted by scripts/build-site.mjs as a JSON string, so it is parsed per request.
+const productPage = productPageHandler(() => JSON.parse(site.PRODUCTS ?? "{}"));
+app.get("/:slug", productPage);
+app.get("/:slug/", productPage);
