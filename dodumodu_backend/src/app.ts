@@ -13,6 +13,7 @@ import { paymentsRoute } from "./routes/payments";
 import { adminRoute } from "./routes/admin";
 import { ciRoute } from "./routes/ci";
 import { productPageHandler } from "./routes/productPage";
+import { livePage, liveSlugs } from "./services/livePage";
 import { PUBLIC_ORIGIN_HEADER } from "./auth/public-origin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
 import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml } from "./config/adminBase";
@@ -235,7 +236,12 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
 // CSP) and the content-hashed JS (immutable cache). Registered last so every
 // API and admin route above wins its own path first; anything else falls
 // through to mountStatic (local dev) or 404 (Worker).
-app.get("/", (c) => c.html(site.INDEX_HTML));
+// The flagship product is the home page. When this build baked no products (an application-only rebuild) it is
+// rendered from its verified snapshot, exactly like its /glow-serum/ page.
+app.get("/", async (c) => {
+  const flagship = await livePage(c.env, "glow-serum").catch(() => null);
+  return c.html(flagship?.html ?? site.INDEX_HTML);
+});
 
 // Root-level product pages: /:slug serves the prerendered snapshot captured at
 // build time. No database read happens here — every page is pre-rendered into
@@ -268,8 +274,8 @@ app.get("/robots.txt", (c) => c.text(robotsTxt(c.env.SITE_URL), 200, {
 }));
 
 // sitemap.xml — lists flagship and every published product route.
-app.get("/sitemap.xml", (c) => {
-  const products = JSON.parse(site.PRODUCTS ?? "{}") as Record<string, unknown>;
+app.get("/sitemap.xml", async (c) => {
+  const products = Object.fromEntries((await liveSlugs(c.env)).map((slug) => [slug, true])) as Record<string, unknown>;
   return c.text(sitemapXml(c.env.SITE_URL, products), 200, {
     "Content-Type": "application/xml; charset=utf-8",
     "Cache-Control": "public, max-age=3600",
@@ -304,6 +310,6 @@ app.get("/media/*", async (c) => {
 
 // Served at BOTH /slug and /slug/ (see routes/productPage.ts).
 // PRODUCTS is emitted by scripts/build-site.mjs as a JSON string, so it is parsed per request.
-const productPage = productPageHandler(() => JSON.parse(site.PRODUCTS ?? "{}"));
+const productPage = productPageHandler(livePage);
 app.get("/:slug", productPage);
 app.get("/:slug/", productPage);

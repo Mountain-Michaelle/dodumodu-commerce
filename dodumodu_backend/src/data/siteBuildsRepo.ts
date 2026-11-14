@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import type { Db } from "../db";
 import { deployEvents, siteBuilds } from "../schema";
+import { publishesRepo } from "./publishesRepo";
 
 export type IntendedPublication = { slug: string; publishId: number; publishRef: string };
 
@@ -12,6 +13,32 @@ export type IntendedPublication = { slug: string; publishId: number; publishRef:
 //   queued     the Worker asked GitHub to run; the run has not reported in yet
 //   triggered  the run started and recorded what it is building
 //   deployed   wrangler deploy finished; the storefront has not been re-read yet
+const refsOf = (v: unknown) => ((v as IntendedPublication[]) ?? []).map((p) => p.publishRef);
+
+export const STALL_MS = 20 * 60 * 1000;
+export const NEVER_STARTED_MS = 5 * 60 * 1000;
+
+/** Why a build that stopped reporting is treated as failed, or null while it is still within its allowance. */
+export function stalledReason(
+  build: { status: string; lastEventAt: Date | string; currentStep: string | null }, now = Date.now(),
+): { error: string; failedStep: string } | null {
+  if (!(IN_FLIGHT as readonly string[]).includes(build.status)) return null;
+  const idleMs = now - new Date(build.lastEventAt).getTime();
+  const neverStarted = build.status === "queued" && idleMs > NEVER_STARTED_MS;
+  if (!neverStarted && idleMs <= STALL_MS) return null;
+  return neverStarted
+    ? {
+      failedStep: "workflow",
+      error: "GitHub accepted the request, but the workflow run never reported back. Usually: the workflow file is not on the "
+        + "default branch, or the repository's Actions secrets WORKER_URL and DEPLOY_TRIGGER_SECRET are missing or wrong "
+        + "(a run cannot report without them). Open the repository's Actions tab for the run, fix that, then retry.",
+    }
+    : {
+      failedStep: build.currentStep ?? "stalled",
+      error: `No progress was reported for ${Math.round(STALL_MS / 60000)} minutes. The GitHub run was probably cancelled or crashed - check the run, then retry.`,
+    };
+}
+
 export const IN_FLIGHT = ["queued", "triggered", "deployed"] as const;
 
 export const siteBuildsRepo = {
@@ -64,6 +91,7 @@ export const siteBuildsRepo = {
     const [row] = await db.update(siteBuilds)
       .set({ status: "verified", verifiedAt: new Date(), lastEventAt: new Date(), currentStep: null })
       .where(eq(siteBuilds.buildId, buildId)).returning();
+    if (row) await publishesRepo.setBuildOutcome(db, refsOf(row.intendedPublications), "verified");
     return row ?? null;
   },
 
@@ -71,7 +99,22 @@ export const siteBuildsRepo = {
     const [row] = await db.update(siteBuilds)
       .set({ status: "failed", verificationError: error, failedStep: failedStep ?? null, lastEventAt: new Date() })
       .where(eq(siteBuilds.buildId, buildId)).returning();
+    if (row) {
+      const refs = refsOf(row.intendedPublications);
+      // A build that died before reporting what it intended still names its trigger publish.
+      await publishesRepo.setBuildOutcome(db, refs, "failed", error);
+      if (row.triggerPublishId != null) await publishesRepo.setBuildOutcomeById(db, row.triggerPublishId, error);
+    }
     return row ?? null;
+  },
+
+  /** Fails every build that stopped reporting, so no list or panel keeps saying "Deploying" about it. */
+  async failStalled(db: Db, now = Date.now()) {
+    const recent = await siteBuildsRepo.getLatest(db, 25);
+    for (const b of recent) {
+      const why = stalledReason(b, now);
+      if (why) await siteBuildsRepo.markFailed(db, b.buildId, why.error, why.failedStep);
+    }
   },
 
   async setCurrentStep(db: Db, buildId: string, step: string | null) {

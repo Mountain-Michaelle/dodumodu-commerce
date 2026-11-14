@@ -23,7 +23,8 @@ import { ProductNotFoundError } from "./catalogService";
 // the last known good page: a publish that fails half way is a publish that
 // never happened, so the previous one keeps serving.
 /** A build that has reported nothing for this long is treated as dead, not as "still running". */
-export const STALL_MS = 20 * 60 * 1000;
+export { STALL_MS } from "../data/siteBuildsRepo";
+import { STALL_MS } from "../data/siteBuildsRepo";
 
 export function newBuildId(): string {
   const rand = new Uint8Array(4);

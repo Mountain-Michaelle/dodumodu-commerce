@@ -1,3 +1,4 @@
+import { siteBuildsRepo } from "./siteBuildsRepo";
 import { eq, and, asc, desc, sql, inArray, type SQL } from "drizzle-orm";
 import type { Db } from "../db";
 import { products, productImages, categories, orders, productPublishes } from "../schema";
@@ -97,10 +98,14 @@ export const productsRepo = {
     // The page and its count are independent: one round trip of waiting instead of two.
     const [rows, [{ total }]] = await Promise.all([rowsQuery, countQuery]);
 
+    // A build that stopped reporting is failed here, so a row never says "Deploying" about a run that is gone.
+    await siteBuildsRepo.failStalled(db).catch(() => undefined);
+
     // Attach the latest publish (if any) to each row so the admin panel can
     // show per-product publication state without a second round trip per row.
     const productIds = rows.map((r) => r.id);
-    const latestByProduct = new Map<number, { id: number; buildStatus: string }>();
+    const latestByProduct = new Map<number, { id: number; buildStatus: string; hasLive: boolean }>();
+    const liveProducts = new Set<number>();
     if (productIds.length > 0) {
       const allPublishes = await db
         .select({
@@ -111,9 +116,11 @@ export const productsRepo = {
         .from(productPublishes)
         .where(inArray(productPublishes.productId, productIds))
         .orderBy(desc(productPublishes.id));
+      for (const p of allPublishes) if (p.buildStatus === "verified") liveProducts.add(p.productId);
       for (const p of allPublishes) {
         if (!latestByProduct.has(p.productId)) {
-          latestByProduct.set(p.productId, { id: p.id, buildStatus: p.buildStatus });
+          // hasLive: an earlier publish is verified, so customers still get a page while this one builds or has failed.
+          latestByProduct.set(p.productId, { id: p.id, buildStatus: p.buildStatus, hasLive: liveProducts.has(p.productId) });
         }
       }
     }

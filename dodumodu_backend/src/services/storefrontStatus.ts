@@ -69,7 +69,7 @@ const VERIFY_TIMEOUT_MS = 8_000;
  * the caller turns that into "still deploying" rather than "live".
  */
 export async function verifyStorefront(
-  env: Env, slug: string, served?: (slug: string) => string | null,
+  env: Env, slug: string, served?: (slug: string) => string | null | Promise<string | null>,
 ): Promise<StorefrontVerification> {
   const base = (env.SITE_URL ?? "").trim().replace(/\/+$/, "");
   // Root-level slug route: /:slug serves the prerendered snapshot. The publish
@@ -79,7 +79,7 @@ export async function verifyStorefront(
   // In production the Worker reads the page it is serving directly (a Worker cannot fetch its own public URL, so
   // fetching SITE_URL from here reported a live page as 404). The URL is only used for display.
   if (served) {
-    const html = served(slug);
+    const html = await served(slug);
     if (html === null) return { liveVersion: null, url, reason: "no-status" };
     const version = readPublishVersion(html);
     return { liveVersion: version, url, reason: version ? null : "unreadable" };

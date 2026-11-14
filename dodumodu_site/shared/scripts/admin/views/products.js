@@ -84,7 +84,25 @@ export function productsView({ shell, identity, onNavigate }) {
       }));
   }
 
+  // While any row is building, the list refreshes itself quietly (no spinner) until it is live or failed, so a row
+  // never keeps saying "Deploying" after the build has finished. Stops when the list leaves the screen.
+  let listTimer = null;
+  function watchBuilding(products) {
+    clearTimeout(listTimer);
+    if (!products.some((row) => row.latestPublish?.buildStatus === "triggered")) return;
+    listTimer = setTimeout(async () => {
+      if (!host?.isConnected) return;
+      try {
+        const data = await api.get(`/products${qs({
+          q: state.q, categoryId: state.categoryId, active: state.active, page: state.page, pageSize: state.pageSize,
+        })}`);
+        if (host?.isConnected) render(data);
+      } catch { watchBuilding(products); }
+    }, 4000);
+  }
+
   function render({ products, page }) {
+    watchBuilding(products);
     const showView = can("products:read"); // view storefront is a read-level action
     ui.results(
       el("div", { class: "list-summary" }, resultCount({ page, noun: "product" })),
@@ -121,12 +139,15 @@ export function productsView({ shell, identity, onNavigate }) {
               return el("span", { class: "badge badge-neutral", text: "Not published" });
             }
             const status = row.latestPublish.buildStatus ?? "pending";
-            const label = status === "pending" ? "Awaiting deploy"
-              : status === "triggered" ? "Deploying"
-              : status === "failed" ? "Deploy failed"
-              : "Published";
+            const hasLive = Boolean(row.latestPublish.hasLive);
+            // "verified" is the only state that means customers are being served this version. While a newer
+            // version builds or fails, the previous verified one stays live, and the label says so.
+            const label = status === "verified" ? "Live"
+              : status === "triggered" ? (hasLive ? "Updating (previous version live)" : "Deploying")
+              : status === "failed" ? (hasLive ? "Update failed (previous version live)" : "Deploy failed")
+              : (hasLive ? "Update not started (previous version live)" : "Awaiting deploy");
             return statusBadge(
-              status === "failed" ? "failed" : status === "triggered" ? "triggered" : "active",
+              status === "failed" ? "failed" : status === "triggered" ? "triggered" : status === "verified" ? "active" : "neutral",
               label);
           }},
           { label: "Updated", className: "col-when", render: ({ row }) => el("span", { class: "nowrap", text: formatDateTime(row.updatedAt) }) },

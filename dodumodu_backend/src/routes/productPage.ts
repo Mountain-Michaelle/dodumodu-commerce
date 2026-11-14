@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import type { Env } from "../env";
+import type { LivePage } from "../services/livePage";
 
 export type PrerenderedProduct = { html: string; etag: string; publishId: number; publishRef: string };
 
@@ -11,9 +12,14 @@ export type PrerenderedProduct = { html: string; etag: string; publishId: number
  * Mounting only /:slug once made every product page a 404 at the address that matters. A slug that is not
  * prerendered falls through (static files in local dev, 404 on the Worker).
  */
-export function productPageHandler(getProducts: () => Record<string, PrerenderedProduct>) {
+export function productPageHandler(getPage: (env: Env, slug: string) => Promise<LivePage | null>) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const entry = getProducts()[c.req.param("slug") ?? ""];
+    let entry: LivePage | null = null;
+    try {
+      entry = await getPage(c.env, c.req.param("slug") ?? "");
+    } catch (err) {
+      console.error(JSON.stringify({ event: "product_page_lookup_failed", error: String(err) }));
+    }
     if (!entry) return await next();
     // The snapshot is immutable, so the ETag changes iff content changed.
     if (c.req.header("if-none-match") === entry.etag) return c.body(null, 304);
