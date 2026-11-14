@@ -36,11 +36,9 @@ const PRODUCT = {
     "Fades dark spots, hyperpigmentation, and evens skin tone in 14 days. Pay on delivery in Lagos, Ogun, Enugu & Abuja.",
 };
 
-const IMAGES = [
-  ["https://picsum.photos/seed/glow-serum-1/640/640", "Radiance Glow Serum bottle with dropper"],
-  ["https://picsum.photos/seed/glow-serum-2/640/640", "Serum texture close-up"],
-  ["https://picsum.photos/seed/glow-serum-3/640/640", "Glow Serum on a marble surface"],
-];
+// No demo photos: carousel images are uploaded from the admin (Products > Edit > Carousel images), which stores them
+// in your R2 bucket and serves them through Cloudflare image resizing. Placeholder hosts are never seeded.
+const IMAGES = [];
 
 const TESTIMONIALS = [
   ["https://picsum.photos/seed/face-1/96/96", "Amaka O.", "Two weeks and the dark spots on my cheeks had visibly faded. Pay on delivery made it easy to trust first."],

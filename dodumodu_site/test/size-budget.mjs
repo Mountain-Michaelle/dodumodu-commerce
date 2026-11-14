@@ -210,7 +210,9 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // js moved 300e2222 -> edbcab61 on purpose: shared/scripts/imageUrls.js now passes an already-resolved
 // root-relative path ("/media/x.jpg") through untouched. Building with the previous imageUrls.js
 // reproduces 300e2222 exactly, so that one line is the whole difference. css is unchanged.
-const EXPECTED_CUSTOMER = { js: "site.edbcab61.min.js", css: "site.8ccd1ef0.min.css" };
+// Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
+// gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
+const EXPECTED_CUSTOMER = { js: "site.b596ec29.min.js", css: "site.f52b2654.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

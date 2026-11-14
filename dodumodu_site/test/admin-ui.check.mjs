@@ -1613,9 +1613,9 @@ ok("imgAttrs emits src, srcset, sizes, width and height together", () => {
   const noComments = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
   const timePromise = /1\s*[-–]\s*3\s*min/i;
 
-  ok("a failed REBUILD never says the publish failed", /Published\. Storefront rebuild FAILED\./.test(source));
-  ok("a successful publish says the rebuild is in progress, with no time estimate",
-    /Storefront rebuild in progress\./.test(source));
+  ok("a failed build start says the snapshot was published, not that publishing failed", /Published, but the build could not start\./.test(source));
+  ok("a successful publish says the build started and points at the live steps, with no time estimate",
+    /Build started\. The panel shows each step as it happens\./.test(source));
   ok("no unmeasured '1-3 minute' promise is quoted to an operator", !timePromise.test(noComments));
   ok("'triggered' is never shown raw next to a date",
     !/\(\$\{entry\.buildStatus\}\)/.test(source));
@@ -1623,8 +1623,8 @@ ok("imgAttrs emits src, srcset, sizes, width and height together", () => {
     /describeBuildStatus/.test(source) && /rebuild requested/.test(source));
   ok("a rebuild retry reuses the existing snapshot rather than publishing again",
     /redeploy/.test(source) && /retryDeploy/.test(source));
-  ok("the retry button only appears after a failed rebuild",
-    /latestPublish\.buildStatus === "failed"/.test(source));
+  ok("the retry button only appears after a failed or never-started build",
+    /\["failed", "pending"\]\.includes\(latestPublish\.buildStatus\)/.test(source));
 }
 
 /* ---- the storefront deployment panel ---- */
@@ -1647,7 +1647,8 @@ ok("imgAttrs emits src, srcset, sizes, width and height together", () => {
   ok("a stale live version is marked, not hidden", /is-stale/.test(source));
   ok("View Storefront opens the real page in a new tab", /View Storefront/.test(source)
     && /rel: "noopener noreferrer"/.test(source));
-  ok("Retry is offered only where it helps", /status.state === "FAILED" && onRetry/.test(source));
+  ok("Retry is offered only where it helps: a failed deploy, or a publish with no build running",
+    /status\.state === "FAILED" \|\| \(status\.state === "PUBLISHED" && status\.publishRef && status\.build\?\.state !== "running"\)\) && onRetry/.test(source));
   ok("an unconfigured SITE_URL is explained, never shown as a failure",
     /cannot be checked until SITE_URL is configured/.test(source));
   ok("no unmeasured time promise appears in the panel",

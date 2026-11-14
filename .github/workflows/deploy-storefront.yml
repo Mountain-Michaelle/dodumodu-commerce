@@ -52,6 +52,7 @@ env:
   # SITE_URL (above) is checked: the publish build fails in CI if it is missing or still the placeholder.
   API_BASE: ${{ vars.API_BASE }}
   IMAGE_DELIVERY_BASE: ${{ vars.IMAGE_DELIVERY_BASE }}
+  IMAGE_MODE: ${{ vars.IMAGE_MODE }}
   TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
 
 jobs:

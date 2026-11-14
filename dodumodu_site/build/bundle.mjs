@@ -47,6 +47,8 @@ const config = {
   // Where images are fetched from. Local: the /media/* the dev server serves
   // from MEDIA_DIR. Production: the R2 custom domain.
   imageDeliveryBase: trimSlash(process.env.IMAGE_DELIVERY_BASE || "/media"),
+  // "transform": Cloudflare resizes at the edge (/cdn-cgi/image). "derivative": pre-sized files in R2.
+  imageMode: process.env.IMAGE_MODE === "derivative" ? "derivative" : "transform",
   // Empty disables the widget: the page then ships an empty sitekey and
   // turnstile.js skips the challenge instead of loading a script that cannot
   // be solved. Only ever empty locally.
@@ -87,7 +89,7 @@ function normalisePublishVersion(value) {
 // inline script. They are public by definition (they are already in the HTML
 // and in the requests) — no secret is ever placed in a build or a bundle.
 function runtimeConfigScript() {
-  return `<script>window.API_BASE=${JSON.stringify(config.apiBase)};window.IMAGE_DELIVERY_BASE=${JSON.stringify(config.imageDeliveryBase)}</script>`;
+  return `<script>window.API_BASE=${JSON.stringify(config.apiBase)};window.IMAGE_DELIVERY_BASE=${JSON.stringify(config.imageDeliveryBase)};window.IMAGE_MODE=${JSON.stringify(config.imageMode)}</script>`;
 }
 
 function hashOf(content) {
