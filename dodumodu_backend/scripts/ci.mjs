@@ -7,6 +7,7 @@
 //                                                   keep the tail, report ok / failed WITH the error text
 //   node scripts/ci.mjs call <endpoint>             POST /ci/builds/:id/<endpoint> (pre-deploy, mark-deployed, ...);
 //                                                   a non-2xx answer fails the step, with the Worker's reason printed
+//   node scripts/ci.mjs event <key> "<label>" <running|ok|failed> [message]   report one step by hand
 //   node scripts/ci.mjs fail                        the last step of a failed run: names the step that broke
 //
 // Env: WORKER_URL, DEPLOY_TRIGGER_SECRET, BUILD_ID, optional RUN_URL, STEPS_JSON (the `steps` context).
@@ -114,6 +115,8 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   } else if (command === 'step') {
     const dash = args.indexOf('--')
     code = await runStep(args[0], args[1], args.slice(dash + 1))
+  } else if (command === 'event') {
+    await event(args[0], args[1], args[2], args[3])
   } else if (command === 'call') {
     code = await callEndpoint(args[0])
   } else if (command === 'fail') {

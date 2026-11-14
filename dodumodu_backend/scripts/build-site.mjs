@@ -162,10 +162,8 @@ if (!workerUrl || !ciSecret) {
 }
 if (bootstrap) {
   console.warn(
-    `\nbuild-site: BOOTSTRAP BUILD - ${bootstrap}. Rendering the empty catalog.\n` +
-    '  If products are already published, set WORKER_URL and DEPLOY_TRIGGER_SECRET as build variables for this lane\n' +
-    '  (Cloudflare: Workers & Pages -> your Worker -> Settings -> Build -> Variables and secrets) so this build\n' +
-    '  renders them instead. Publishing from the admin always rebuilds with them.\n',
+    `\nbuild-site: initial build - ${bootstrap}. Rendering the empty catalog; this build needs no credentials.\n` +
+    '  Products are published only from the admin (Publish), which rebuilds the storefront with them.\n',
   )
 }
 

@@ -65,6 +65,25 @@ jobs:
             dodumodu_backend/package-lock.json
             dodumodu_site/package-lock.json
 
+      # Missing secrets fail here, naming every one, instead of surfacing as an obscure error steps later. When the
+      # reporting pair is set, the same message reaches the admin product page.
+      - name: Check required secrets
+        id: secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for name in WORKER_URL DEPLOY_TRIGGER_SECRET SITE_URL CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            msg="GitHub Actions secrets not set:$missing. Add them in the repository's Settings -> Secrets and variables -> Actions, then retry."
+            echo "::error::$msg"
+            node scripts/ci.mjs event secrets "Checking required secrets" failed "$msg" || true
+            exit 1
+          fi
+
       # Reports in first, with nothing installed yet: scripts/ci.mjs needs only Node.
       - name: Report run started
         id: start

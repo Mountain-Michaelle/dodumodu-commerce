@@ -67,3 +67,19 @@ test("a verified build is verified", async () => {
   const s = stub(build({ status: "verified", currentStep: null }), [ev(1, "verify", "ok")]);
   try { assert.equal((await deployProgress({} as never, PUBLISH)).state, "verified"); } finally { s.restore(); }
 });
+
+test("a queued build whose run never reported in explains the usual causes after 5 minutes, not 20", async () => {
+  const s = stub(build({ status: "queued", currentStep: null, lastEventAt: new Date(Date.now() - 6 * 60_000) }), []);
+  try {
+    const p = await deployProgress({} as never, PUBLISH);
+    assert.equal(p.state, "failed");
+    assert.equal(p.failedStep, "workflow");
+    assert.match(p.error ?? "", /default branch/);
+    assert.match(p.error ?? "", /DEPLOY_TRIGGER_SECRET/);
+  } finally { s.restore(); }
+});
+
+test("a queued build is still waiting inside the first 5 minutes", async () => {
+  const s = stub(build({ status: "queued", currentStep: null, lastEventAt: new Date(Date.now() - 60_000) }), []);
+  try { assert.equal((await deployProgress({} as never, PUBLISH)).state, "running"); } finally { s.restore(); }
+});
