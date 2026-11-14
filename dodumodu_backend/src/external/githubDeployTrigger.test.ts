@@ -5,7 +5,8 @@ import type { Env } from "../env";
 
 const baseEnv: Env = {
   GITHUB_DEPLOY_TOKEN: "test-token",
-  DEPLOY_TRIGGER_SECRET: "",
+  DEPLOY_TRIGGER_SECRET: "ci-secret-token-123",
+  SITE_URL: "https://shop.test",
 } as unknown as Env;
 
 /** Runs a test with a stubbed fetch, restoring the real one afterwards. */
@@ -23,7 +24,7 @@ test("missing GITHUB_DEPLOY_TOKEN is explicit unconfigured state, never dead pen
       const result = await triggerGitHubDispatch({ ...baseEnv, GITHUB_DEPLOY_TOKEN: "" });
       assert.equal(result.status, "pending");
       assert.equal(result.retryable, true, "retryable so admin can retry after configuring the secret");
-      assert.match(result.error ?? "", /not configured/);
+      assert.match(result.error ?? "", /Not configured on the Worker: GITHUB_DEPLOY_TOKEN/);
       assert.equal(fetchCalled, false, "fetch must not be called when no token is configured");
       assert.equal(result.httpStatus, null);
     }
@@ -100,7 +101,7 @@ test("network error is failed and retryable", async () => {
 test("a transient 502 is retried once and the dispatch then succeeds", async () => {
   let n = 0;
   await withFetch(async () => { n += 1; return new Response(null, { status: n === 1 ? 502 : 204 }); }, async () => {
-    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "t" } as never);
+    const r = await triggerGitHubDispatch({ ...baseEnv, GITHUB_DEPLOY_TOKEN: "t" });
     assert.equal(r.status, "triggered");
     assert.equal(n, 2);
   });
@@ -109,8 +110,19 @@ test("a transient 502 is retried once and the dispatch then succeeds", async () 
 test("a 401/404 is NOT retried (retrying cannot fix a bad token or repo)", async () => {
   let n = 0;
   await withFetch(async () => { n += 1; return new Response(null, { status: 401 }); }, async () => {
-    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "t" } as never);
+    const r = await triggerGitHubDispatch({ ...baseEnv, GITHUB_DEPLOY_TOKEN: "t" });
     assert.equal(r.status, "failed");
     assert.equal(n, 1);
+  });
+});
+
+test("every missing piece of Worker configuration is named, with how to fix it, and nothing is dispatched", async () => {
+  let fetchCalled = false;
+  await withFetch(async () => { fetchCalled = true; return new Response(null, { status: 204 }); }, async () => {
+    const r = await triggerGitHubDispatch({ GITHUB_DEPLOY_TOKEN: "", DEPLOY_TRIGGER_SECRET: "change-me", SITE_URL: "" } as unknown as Env);
+    assert.equal(r.status, "pending");
+    assert.equal(fetchCalled, false);
+    for (const name of ["GITHUB_DEPLOY_TOKEN", "DEPLOY_TRIGGER_SECRET", "SITE_URL"]) assert.match(r.error ?? "", new RegExp(name));
+    assert.match(r.error ?? "", /wrangler secret put/);
   });
 });

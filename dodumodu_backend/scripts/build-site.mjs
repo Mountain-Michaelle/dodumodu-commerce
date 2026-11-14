@@ -121,9 +121,6 @@ const CSP = [
 // ---------------------------------------------------------------------------
 const workerUrl = (process.env.WORKER_URL ?? '').replace(/\/+$/, '')
 const ciSecret = (process.env.DEPLOY_TRIGGER_SECRET ?? '').trim()
-if (!workerUrl || !ciSecret) {
-  throw new Error('WORKER_URL and DEPLOY_TRIGGER_SECRET are required: the build fetches snapshots from the Worker (/ci/snapshots)')
-}
 
 async function ci(path, init = {}) {
   const res = await fetch(`${workerUrl}/ci${path}`, {
@@ -133,12 +130,41 @@ async function ci(path, init = {}) {
   })
   if (!res.ok) {
     const text = (await res.text().catch(() => '')).slice(0, 300)
-    throw new Error(`Worker ${init.method ?? 'GET'} /ci${path} returned HTTP ${res.status}${text ? `: ${text}` : ''}`)
+    const err = new Error(`Worker ${init.method ?? 'GET'} /ci${path} returned HTTP ${res.status}${text ? `: ${text}` : ''}`)
+    err.status = res.status
+    throw err
   }
   return res.json()
 }
 
-const { snapshots } = await ci('/snapshots')
+// Two separate jobs, deliberately not one:
+//
+//   APPLICATION BUILD  (npm run build:site, and every Cloudflare/git build)
+//       Builds the app. Publishes nothing, fetches nothing, needs no credentials: it renders the empty catalog
+//       and always succeeds on its own merits. Products are not its business.
+//   PUBLISH BUILD      (npm run build:site:snapshots, run only by the deploy-storefront workflow)
+//       Renders every published product from the snapshots the Worker serves. It is strict: missing credentials or
+//       an unreachable Worker FAIL it, because a publish that silently rendered nothing would be worse than none.
+//
+// A failed publish build deploys nothing, so the storefront that is live keeps serving.
+const wantSnapshots = process.argv.includes('--snapshots')
+let snapshots = []
+let bootstrap = null
+if (!wantSnapshots) {
+  bootstrap = 'this is the application build, which does not publish products'
+} else {
+  if (!workerUrl || !ciSecret) {
+    throw new Error('the publish build needs WORKER_URL and DEPLOY_TRIGGER_SECRET (GitHub Actions secrets) to fetch the published snapshots from the Worker')
+  }
+  snapshots = (await ci('/snapshots')).snapshots
+}
+if (bootstrap) {
+  console.warn(
+    `\nbuild-site: ${bootstrap}. Rendering the empty catalog; no credentials are used.\n` +
+    '  Products are published only from the admin (Publish), which runs the publish build.\n',
+  )
+}
+
 const REF = /^pub_[0-9a-f]{20}$/
 const products = snapshots
   .filter((r) => r.payload)
@@ -148,17 +174,20 @@ const products = snapshots
       publishId: r.publishId, publishRef: r.publishRef, snapshot: r.payload }
   })
 
-// Record what this build intends to ship, BEFORE rendering, so a failure from here on is attached to a
-// build the admin can see. The id comes from the run that was dispatched (BUILD_ID) when there is one.
+// A run the Worker dispatched (BUILD_ID given) reports what it will build BEFORE rendering, so a failure from here
+// on is attached to a build the admin can see. A build nobody queued has no row to report to and records nothing:
+// the admin still sees it go LIVE, because that is decided by the page's own publish marker.
 const intendedPublications = products.map((p) => ({ slug: p.slug, publishId: p.publishId, publishRef: p.publishRef }))
-await ci(`/builds/${encodeURIComponent(BUILD_ID)}/start`, {
-  method: 'POST',
-  body: JSON.stringify({
-    intendedPublications,
-    ...(process.env.RUN_URL ? { runUrl: process.env.RUN_URL } : {}),
-  }),
-})
-console.log(`build-site: build ${BUILD_ID} recorded with ${intendedPublications.length} publication(s)`)
+if (process.env.BUILD_ID && !bootstrap) {
+  await ci(`/builds/${encodeURIComponent(BUILD_ID)}/start`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intendedPublications,
+      ...(process.env.RUN_URL ? { runUrl: process.env.RUN_URL } : {}),
+    }),
+  })
+  console.log(`build-site: build ${BUILD_ID} recorded with ${intendedPublications.length} publication(s)`)
+}
 
 // ---------------------------------------------------------------------------
 // 3) Render every product page from its snapshot.
