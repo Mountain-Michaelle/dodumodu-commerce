@@ -140,6 +140,8 @@ export type Env = {
   OPAY_MERCHANT_ID: string;
   OPAY_WEBHOOK_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
+  /** The PUBLIC Turnstile site key. Applied to every storefront page at request time (see services/turnstileInjection.ts). */
+  TURNSTILE_SITE_KEY?: string;
   RECONCILE_CRON_SECRET: string;
 
   // admin-auth v2 secrets (Worker secrets only; see src/auth/config.ts)

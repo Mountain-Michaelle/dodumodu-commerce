@@ -1,0 +1,22 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { injectTurnstile } from "./turnstileInjection";
+
+const csp = "default-src &#39;none&#39;; script-src &#39;self&#39; &#39;sha256-x&#39;; img-src &#39;self&#39;; connect-src &#39;self&#39;; base-uri &#39;none&#39;; frame-ancestors &#39;none&#39;";
+const page = `<meta http-equiv="Content-Security-Policy" content="${csp}"><div class="cf-turnstile" id="cf-turnstile" data-sitekey="" data-callback="onTurnstileToken"></div>`;
+
+test("a page built without a site key gets the widget and a CSP that lets it load", () => {
+  const { html, injected } = injectTurnstile(page, "0x4AAAAAAAabcdef");
+  assert.ok(injected);
+  assert.ok(html.includes('data-sitekey="0x4AAAAAAAabcdef"'));
+  assert.match(html, /script-src https:\/\/challenges\.cloudflare\.com &#39;self&#39;/);
+  assert.match(html, /frame-src https:\/\/challenges\.cloudflare\.com; base-uri/);
+});
+
+test("a page that already has a key, or no key configured, or a malformed key, is left exactly as it is", () => {
+  const keyed = page.replace('data-sitekey=""', 'data-sitekey="0xREAL1234"');
+  assert.equal(injectTurnstile(keyed, "0x4AAAAAAAabcdef").html, keyed);
+  assert.equal(injectTurnstile(page, undefined).html, page);
+  assert.equal(injectTurnstile(page, "").injected, false);
+  assert.equal(injectTurnstile(page, '"><script>x</script>').injected, false);
+});

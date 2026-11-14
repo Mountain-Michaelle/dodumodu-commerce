@@ -27,6 +27,9 @@ ANALYTICS_IP_HMAC_VERSION = "1"
 ANALYTICS_WARMUP_ENABLED = "true"
 ASSIGNMENT_MODE_ENABLED = "true"
 ADMIN_AUTH_V2 = "1"
+# PUBLIC Turnstile site key (the bot check on the order form). The matching secret is TURNSTILE_SECRET_KEY, set with
+# "wrangler secret put". Put the site key here so EVERY page carries the widget, however it was built:
+# TURNSTILE_SITE_KEY = "0x4AAAAAAA..."
 
 
 # ---- image pipeline ----

@@ -14,6 +14,7 @@ import { adminRoute } from "./routes/admin";
 import { ciRoute } from "./routes/ci";
 import { productPageHandler } from "./routes/productPage";
 import { livePage, liveSlugs } from "./services/livePage";
+import { injectTurnstile } from "./services/turnstileInjection";
 import { PUBLIC_ORIGIN_HEADER } from "./auth/public-origin";
 import { authRoute as adminAuthRoute, adminRoute as adminAuthAdminRoute } from "./auth/routes";
 import { adminBasePath, isLegacyAdminPath, rewriteAdminHtml } from "./config/adminBase";
@@ -240,7 +241,7 @@ async function adminNamespaceDispatcher(c: Context<{ Bindings: Env }>, next: Nex
 // rendered from its verified snapshot, exactly like its /glow-serum/ page.
 app.get("/", async (c) => {
   const flagship = await livePage(c.env, "glow-serum").catch(() => null);
-  return c.html(flagship?.html ?? site.INDEX_HTML);
+  return c.html(injectTurnstile(flagship?.html ?? site.INDEX_HTML, c.env.TURNSTILE_SITE_KEY).html);
 });
 
 // Root-level product pages: /:slug serves the prerendered snapshot captured at
