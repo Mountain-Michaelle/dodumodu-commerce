@@ -52,12 +52,12 @@ export const PATCHES = [
     id: "route-scoped-shell",
     applied: (js) => /let __aaK=window\.__aaRoute=/.test(js),
     find(js) {
-      const m = /let t=(\w+)\[a\]\(\{shell:(\w+),identity:(\w+),onNavigate:(\w+)\}\)/.exec(js);
+      const m = /let (\w+)=(\w+)\[(\w+)\]\(\{shell:(\w+),identity:(\w+),onNavigate:(\w+)\}\)/.exec(js);
       if (!m) return null;
-      const [from, views, shell, ident, nav] = m;
+      const [from, out, views, key, shell, ident, nav] = m;
       return {
         from,
-        to: `let __aaK=window.__aaRoute=(window.__aaRoute||0)+1,__aaTb=document.createElement("div"),__aaCt=document.createElement("div"),__aaSh=Object.create(${shell},{toolbar:{get:()=>__aaK===window.__aaRoute?${shell}.toolbar:__aaTb},content:{get:()=>__aaK===window.__aaRoute?${shell}.content:__aaCt}}),t=${views}[a]({shell:__aaSh,identity:${ident},onNavigate:${nav}})`,
+        to: `let __aaK=window.__aaRoute=(window.__aaRoute||0)+1,__aaTb=document.createElement("div"),__aaCt=document.createElement("div"),__aaSh=Object.create(${shell},{toolbar:{get:()=>__aaK===window.__aaRoute?${shell}.toolbar:__aaTb},content:{get:()=>__aaK===window.__aaRoute?${shell}.content:__aaCt}}),${out}=${views}[${key}]({shell:__aaSh,identity:${ident},onNavigate:${nav}})`,
       };
     },
   },
@@ -90,13 +90,19 @@ export function gateNav(js) {
   const ident = /function \w+\(\{[^}]*identity:(\w+)\}\)\{/.exec(js)?.[1];
   if (!list || !ident) return null;
   const sidebarFrom = `e("nav",{class:"sidebar-nav","aria-label":"Sections"},${list}.map(h=>e("div",{class:"nav-group"},e("h2",{class:"nav-group-title",text:h.group}),e("ul",{class:"nav-list"},h.items.map(f=>{`;
-  const routeFrom = "{content:r,toolbar:u,titleFor(h){";
+  // The shell object the console returns; its two element names change with every site build, so read them.
+  // On a bundle that already carries this step the object is `{isHidden:...,content:X,toolbar:Y,titleFor(h){`.
+  const shell = /\{content:(\w+),toolbar:(\w+),titleFor\(h\)\{/.exec(js)
+    ?? /firstVisible:\(\)=>\{.*?\},content:(\w+),toolbar:(\w+),titleFor\(h\)\{/.exec(js);
+  if (!shell) return null;
+  const [, content, toolbar] = shell;
+  const routeFrom = `{content:${content},toolbar:${toolbar},titleFor(h){`;
   const steps = [
     ['{id:"media",label:"Media"}', '{id:"media",label:"Media",perm:"media.view"}'],
     ['{id:"blocks",label:"Blocked"}', '{id:"blocks",label:"Blocked",perm:"blocks.manage"}'],
     ['{id:"discounts",label:"Discount tiers"},{id:"payment",label:"Payment rules"}', '{id:"discounts",label:"Discount tiers",perm:"settings.manage"},{id:"payment",label:"Payment rules",perm:"settings.manage"}'],
     [sidebarFrom, sidebarFrom.replace(`${list}.map(h=>e(`, `${list}.map(h=>({...h,items:h.items.filter(f=>__aaAllowed(${ident},f))})).filter(h=>h.items.length).map(h=>e(`)],
-    [routeFrom, `{isHidden:h=>{try{let f=${list}.flatMap(g=>g.items).find(g=>g.id===h);return!!f&&!__aaAllowed(${ident},f)}catch{return!1}},firstVisible:()=>{try{let f=${list}.flatMap(g=>g.items).find(g=>__aaAllowed(${ident},g));return f&&f.id}catch{return void 0}},content:r,toolbar:u,titleFor(h){`],
+    [routeFrom, `{isHidden:h=>{try{let f=${list}.flatMap(g=>g.items).find(g=>g.id===h);return!!f&&!__aaAllowed(${ident},f)}catch{return!1}},firstVisible:()=>{try{let f=${list}.flatMap(g=>g.items).find(g=>__aaAllowed(${ident},g));return f&&f.id}catch{return void 0}},content:${content},toolbar:${toolbar},titleFor(h){`],
     [`var ${list}=[{group:"Catalogue"`, `function __aaAllowed(i,f){try{return!f.perm||!i||i.role==="admin"||!Array.isArray(i.v2perms)||i.v2perms.includes(f.perm)}catch{return!0}}var ${list}=[{group:"Catalogue"`],
   ];
   let out = js;

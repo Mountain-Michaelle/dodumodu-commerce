@@ -90,8 +90,6 @@ export type Env = {
    * in the image path.
    */
   IMAGE_DELIVERY_BASE: string;
-  /** Cloudflare Pages deploy hook fired by the admin's Publish action. */
-  PAGES_DEPLOY_HOOK: string;
   /**
    * The PUBLIC storefront origin, e.g. https://yoursite.com.
    *

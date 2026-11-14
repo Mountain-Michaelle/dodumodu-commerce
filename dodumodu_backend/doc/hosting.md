@@ -124,7 +124,6 @@ ENVIRONMENT = "production"
 ALLOWED_ORIGINS = "https://yoursite.com,..."
 R2_BUCKET_NAME = "skincare-media"
 IMAGE_DELIVERY_BASE = "https://media.yoursite.com"
-PAGES_DEPLOY_HOOK = "..."   # optional
 RATE_LIMIT_API_PER_MINUTE, RATE_LIMIT_ADMIN_PER_MINUTE, RATE_LIMIT_ADMIN_WRITES_PER_MINUTE
 ```
 

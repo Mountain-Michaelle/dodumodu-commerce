@@ -78,7 +78,6 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     CATALOG_EDGE_TTL: "300",
     CATALOG_EDGE_SWR: "3600",
     IMAGE_DELIVERY_BASE: "/media",
-    PAGES_DEPLOY_HOOK: "",
     SITE_URL: "https://yoursite.com",
     MAX_ORDER_QUANTITY: "20",
     ALLOWED_ORIGINS: "https://yoursite.com",

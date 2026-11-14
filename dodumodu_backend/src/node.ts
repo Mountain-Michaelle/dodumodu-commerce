@@ -73,7 +73,6 @@ const env: Env = {
   // Locally the dev server serves /media itself. In production this is the R2
   // custom domain - never a Worker route.
   IMAGE_DELIVERY_BASE: process.env.IMAGE_DELIVERY_BASE ?? "/media",
-  PAGES_DEPLOY_HOOK: process.env.PAGES_DEPLOY_HOOK ?? "",
   // Public origin of the deployed Worker; CI reaches build-status endpoints here.
   WORKER_URL: process.env.WORKER_URL ?? "",
   // Build-deploy secrets. Empty locally; publish degrades gracefully until set.
