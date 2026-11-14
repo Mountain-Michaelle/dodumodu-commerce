@@ -26,7 +26,7 @@
     "test:ui:browser": "node --test src/auth-ui/login.browser.spec.mjs",
     "test:ui": "node --test src/auth-ui/*.test.mjs",
     "check:config": "node scripts/check-config.mjs",
-    "test:deploy": "tsx --test src/services/publishService.test.ts src/services/storefrontStatus.test.ts src/services/deployProgress.test.ts src/routes/ci.test.ts src/external/githubDeployTrigger.test.ts scripts/build-site.test.ts"
+    "test:deploy": "tsx --test src/services/publishService.test.ts src/services/storefrontStatus.test.ts src/services/deployProgress.test.ts src/routes/ci.test.ts src/routes/productPage.test.ts src/external/githubDeployTrigger.test.ts scripts/build-site.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
