@@ -24,9 +24,21 @@ globalThis.document = {
 };
 globalThis.requestIdleCallback = (fn) => fn();
 
+// The challenge starts on INTENT, not at page load: nothing is requested until the form is near the screen or touched.
+let observe = null;
+globalThis.IntersectionObserver = class { constructor(cb) { observe = cb; } observe() {} disconnect() {} };
+const formListeners = {};
+const formEl = { addEventListener(ev, fn) { formListeners[ev] = fn; }, removeEventListener() {} };
+globalThis.document.addEventListener = () => {};
+globalThis.document.removeEventListener = () => {};
+
 const { armTurnstile, ensureToken } = await import("../shared/scripts/turnstile.js");
-armTurnstile({ addEventListener() {} });
-assert.equal(scripts.length, 1, "the challenge script is requested once the page has loaded");
+armTurnstile(formEl);
+assert.equal(scripts.length, 0, "nothing is requested while the customer is still at the top of the page");
+observe([{ isIntersecting: false }]);
+assert.equal(scripts.length, 0, "and not while the form is far away");
+observe([{ isIntersecting: true }]); // the form is about two screens away
+assert.equal(scripts.length, 1, "the challenge script is requested when the form is approaching");
 assert.ok(/onload=__turnstileLoaded/.test(scripts[0].src), "api.js is told to call us when it is ready");
 
 window.__turnstileLoaded(); // what api.js does when it has loaded

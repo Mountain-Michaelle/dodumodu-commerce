@@ -1,10 +1,9 @@
 // The bot check (Cloudflare Turnstile), built so a customer never waits for it and never sees it unless Cloudflare
 // itself needs a tap.
 //
-// WHEN IT LOADS. It is requested at the earlier of: the page's `load` event plus an idle moment (so the first paint and
-// the hero image are never competing with it, but it is already solving long before anyone reaches the button), or the
-// first touch of a field. Before, it waited for the form to be near the screen, which on a slow phone meant the whole
-// download-and-solve happened while the customer was filling the form and was often still running at "Place order".
+// WHEN IT LOADS. On intent, not at page load: when the order form is about two screens away, when a field is touched,
+// or when an order button jumps to the form. Loading it with the page made small Android phones laggy while the hero and
+// the first scroll were still happening; filling the form takes the customer long enough for the solve to finish first.
 //
 // WHAT THE CUSTOMER SEES. Nothing (`appearance: interaction-only`): the challenge runs invisibly and the box appears only
 // if Cloudflare decides it needs a tap. The container is never display:none (a hidden iframe can stall the solve); it is
@@ -113,6 +112,7 @@ function loadScript() {
   script.src = API_SRC;
   script.async = true;
   script.defer = true;
+  script.fetchPriority = "low"; // never compete with the photo or the page script
   script.onerror = () => {
     script.remove?.();
     if (loadAttempts <= LOAD_RETRIES) return void setTimeout(loadScript, 1500 * loadAttempts); // dropped mobile data
@@ -139,13 +139,31 @@ export function armTurnstile(formEl) {
   if (!turnstileConfigured()) return; // no challenge in this build, nothing to arm
   armed = true;
 
-  // 1. After the page itself has finished, in an idle moment: the normal path, early and invisible.
-  const afterLoad = () => whenIdle(arm);
-  if (document.readyState === "complete") afterLoad();
-  else window.addEventListener?.("load", afterLoad, { once: true });
-
-  // 2. Sooner, on intent: the customer touches a field before the page has finished loading.
-  formEl?.addEventListener("focusin", arm, { once: true, passive: true });
+  // The solve is real work (an iframe, crypto, network). Running it while a phone is still loading and scrolling the
+  // top of the page made the whole page feel heavy, so it starts on INTENT instead of at load, and still well before
+  // the button: the customer needs 10+ seconds to fill the form.
+  let io = null;
+  const go = () => {
+    io?.disconnect();
+    for (const ev of ["focusin", "pointerdown"]) formEl?.removeEventListener?.(ev, go);
+    document.removeEventListener?.("click", onAnchor, true);
+    arm();
+  };
+  // 1. The customer touches the form.
+  for (const ev of ["focusin", "pointerdown"]) formEl?.addEventListener?.(ev, go, { once: true, passive: true });
+  // 2. The form is about to come into view (about two screens away).
+  if (formEl && typeof IntersectionObserver === "function") {
+    io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) go(); }, { rootMargin: "1200px 0px" });
+    io.observe(formEl);
+  } else {
+    whenIdle(arm); // no observer support: fall back to after-load idle
+  }
+  // 3. They jump straight to the form from an order button.
+  function onAnchor(e) {
+    const a = e.target?.closest?.('a[href^="#order"]');
+    if (a) go();
+  }
+  document.addEventListener?.("click", onAnchor, true);
 }
 
 /**

@@ -1420,9 +1420,9 @@ for (const [file, subject] of [
 // path into the library with different numbers would undo that silently.
 {
   const source = readFileSync(join(siteRoot, "shared", "scripts", "admin", "ui.js"), "utf8");
-  ok("the resize measure is unchanged: one MAX_EDGE, one quality, one shrink()",
-    (source.match(/const MAX_EDGE = 1400;/g) || []).length === 1
-      && (source.match(/const JPEG_QUALITY = 0\.82;/g) || []).length === 1
+  ok("the resize measure is single-sourced: one MAX_EDGE, one WebP quality, one shrink()",
+    (source.match(/const MAX_EDGE = 1200;/g) || []).length === 1
+      && (source.match(/const WEBP_QUALITY = 0\.8;/g) || []).length === 1
       && (source.match(/async function shrink\(/g) || []).length === 1,
     "the picker's uploads must go through the same shrink as every other upload");
 }
@@ -1559,30 +1559,22 @@ ok("imgAttrs emits src, srcset, sizes, width and height together", () => {
 {
   const { planImageOutput } = await import("../shared/scripts/admin/ui.js");
 
-  ok("an opaque image still goes out as JPEG at 0.82 - byte-identical to before", () => {
-    const opaque = planImageOutput({ hasAlpha: false });
-    ok("still JPEG", opaque.type === "image/jpeg");
-    ok("still .jpg", opaque.extension === "jpg");
-    ok("still quality 0.82", opaque.quality === 0.82, `got ${opaque.quality}`);
+  ok("every image goes out as WebP, opaque or transparent", () => {
+    for (const hasAlpha of [false, true, null]) {
+      const out = planImageOutput({ hasAlpha });
+      ok(`WebP (alpha=${hasAlpha})`, out.type === "image/webp" && out.extension === "webp");
+      ok("at quality 0.8", out.quality === 0.8, `got ${out.quality}`);
+    }
   });
 
-  ok("an image with real transparency goes out as PNG", () => {
-    const alpha = planImageOutput({ hasAlpha: true });
-    ok("PNG, because transparency cannot survive JPEG", alpha.type === "image/png");
-    ok("with a .png extension", alpha.extension === "png");
-    ok("and no lossy quality, because PNG ignores it", alpha.quality === undefined);
+  ok("a browser that cannot encode WebP falls back to JPEG, or PNG for real transparency", () => {
+    const opaque = planImageOutput({ hasAlpha: false, webp: false });
+    ok("JPEG", opaque.type === "image/jpeg" && opaque.extension === "jpg" && opaque.quality === 0.82);
+    const alpha = planImageOutput({ hasAlpha: true, webp: false });
+    ok("PNG", alpha.type === "image/png" && alpha.extension === "png" && alpha.quality === undefined);
   });
 
-  ok("an unreadable alpha channel falls back to the old JPEG path, not to a guess", () => {
-    // A tainted canvas cannot be read. Choosing PNG there would balloon every
-    // product photo; guessing the other way would flatten a logo. Falling back to
-    // the previous behaviour is the conservative answer.
-    const refused = planImageOutput({ hasAlpha: null });
-    ok("falls back to JPEG", refused.type === "image/jpeg");
-    ok("at the original quality", refused.quality === 0.82);
-  });
-
-  ok("the alpha path is the ONLY difference - there is still exactly one shrink()", () => {
+  ok("there is still exactly one shrink()", () => {
     const source = readFileSync(join(siteRoot, "shared", "scripts", "admin", "ui.js"), "utf8");
     const shrinks = source.match(/async function shrink\(/g) || [];
     ok("exactly one shrink()", shrinks.length === 1, `got ${shrinks.length}`);

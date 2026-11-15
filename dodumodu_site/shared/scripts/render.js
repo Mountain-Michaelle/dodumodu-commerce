@@ -112,12 +112,9 @@ export function renderCarousel(container, images, options = {}) {
 
   // The nearest slide to the scroll position wins, so swipes, arrows and dots all agree.
   track.addEventListener("scroll", () => {
-    let best = 0;
-    let bestDist = Infinity;
-    slides.forEach((sl, i) => {
-      const d = Math.abs(sl.offsetLeft - track.scrollLeft);
-      if (d < bestDist) { best = i; bestDist = d; }
-    });
+    // One division, not a layout read per slide on every scroll frame.
+    const stride = slides.length > 1 ? slides[1].offsetLeft - slides[0].offsetLeft : 1;
+    const best = Math.min(slides.length - 1, Math.max(0, Math.round(track.scrollLeft / (stride || 1))));
     if (best !== currentIndex) { currentIndex = best; paint(); }
   }, { passive: true });
 
@@ -140,8 +137,17 @@ export function renderCarousel(container, images, options = {}) {
   }
   document.addEventListener("visibilitychange", () => (document.hidden ? stopAutoplay(false) : startAutoplay()));
 
+  // The slides only auto-advance while the carousel is on screen. Left running while the customer reads further down, the
+  // timer kept scrolling, decoding and repainting an invisible track every few seconds - on a small Android phone that
+  // is what left the hero stale or blank when they scrolled back up.
+  if (typeof IntersectionObserver === "function") {
+    new IntersectionObserver((entries) => {
+      for (const e of entries) (e.isIntersecting ? startAutoplay() : stopAutoplay(false));
+    }).observe(track);
+  } else {
+    startAutoplay();
+  }
   paint();
-  startAutoplay();
 }
 
 export function renderTestimonials(container, testimonials) {
