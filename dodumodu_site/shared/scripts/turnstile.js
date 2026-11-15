@@ -77,6 +77,18 @@ function renderWidget() {
       showBox(false);
       settle(null);
     },
+    // A configuration problem (bad/disabled site key, hostname not allowed) can never fix itself: say so at once
+    // instead of waiting out the clock.
+    "error-callback"(code) {
+      if (/^(110[0-9]{3}|4000[0-9]{2})$/.test(String(code))) {
+        state = "failed";
+        const err = new Error(`Challenge is not set up for this site (${code})`);
+        err.code = "turnstile_config";
+        settle(err);
+        return true;
+      }
+      return false; // transient: Cloudflare retries (retry: "auto")
+    },
     "expired-callback": clearToken, // Cloudflare retries errors itself (retry: auto); WAIT_MS is the only give-up
     // The challenge needs a tap: show the box, and if someone is already waiting, bring it into view.
     "before-interactive-callback"() {
@@ -90,9 +102,12 @@ function renderWidget() {
 function loadScript() {
   loadAttempts += 1;
   state = "loading";
+  // `onload` fires once api.js has defined window.turnstile, so render straight away. turnstile.ready() must NOT be used
+  // here: it never calls back for a script that was added with async/defer, so the widget was never created and the
+  // customer waited the full timeout at "Place order" with nothing ever loading.
   window.__turnstileLoaded = () => {
     state = "ready";
-    window.turnstile.ready(renderWidget);
+    try { renderWidget(); } catch (e) { state = "failed"; settle(new Error("Challenge could not start")); }
   };
   const script = document.createElement("script");
   script.src = API_SRC;
