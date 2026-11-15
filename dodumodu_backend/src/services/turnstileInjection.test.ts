@@ -13,7 +13,7 @@ test("a page built without a site key gets the widget and a CSP that lets it loa
   assert.match(html, /frame-src https:\/\/challenges\.cloudflare\.com; base-uri/);
   // Regression: the page's CSP is HTML-escaped (&#39; contains a ';'). An edit to connect-src that split on ';' cut the quote
   // in half and left the page unable to POST /create-order. connect-src must come out byte-for-byte unchanged.
-  assert.ok(html.includes("connect-src &#39;self&#39;; base-uri"));
+  assert.ok(html.includes("connect-src &#39;self&#39;; frame-src"));
 });
 
 test("a page that already has a key, or no key configured, or a malformed key, is left exactly as it is", () => {
