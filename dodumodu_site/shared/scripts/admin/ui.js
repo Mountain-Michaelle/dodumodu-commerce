@@ -962,8 +962,13 @@ async function sha256Of(blob) {
   }
 }
 
-const MAX_EDGE = 1400;
-const JPEG_QUALITY = 0.82;
+// 1200 is the widest any layout slot draws (the hero); every storefront width is derived from it, so more pixels are
+// paid for and never seen.
+const MAX_EDGE = 1200;
+// WebP, lossy. 0.8 keeps product colour, brightness and label text intact at roughly a third of the JPEG bytes at the
+// same look. Transparent images stay transparent (WebP has an alpha channel), so there is one format for everything.
+const WEBP_QUALITY = 0.8;
+const JPEG_QUALITY = 0.82; // only the fallback for a browser that cannot encode WebP
 
 /**
  * Whether an image has pixels that are actually transparent.
@@ -1002,24 +1007,44 @@ async function hasRealAlpha(bitmap) {
 }
 
 /**
- * The output format for a resize.
- *
- * Opaque images keep the JPEG path EXACTLY as it was. That is a hard requirement,
- * not an accident: JPEG at 0.82 is what every existing upload already produced, so
- * changing it would alter bytes for images that need no help and invalidate
- * whatever visual tuning has been done against them.
- *
- * Only an image with real transparency takes the lossless path, and even then the
- * choice is PNG rather than WebP: the spec keeps PNG for genuine transparency and
- * flat graphics, and an image with alpha is by definition not a photograph.
+ * The output format for a resize: WebP for every image (opaque or transparent), because it is the smallest format every
+ * customer phone decodes, and the one the storefront delivers. A browser that cannot ENCODE WebP (older Safari) hands back
+ * PNG from toBlob; shrink() then falls back to JPEG, or PNG for real transparency, so an upload never fails over format.
  */
-export function planImageOutput({ hasAlpha }) {
+export function planImageOutput({ hasAlpha, webp = true } = {}) {
+  if (webp) return { type: "image/webp", extension: "webp", quality: WEBP_QUALITY };
   if (hasAlpha === true) return { type: "image/png", extension: "png", quality: undefined };
   return { type: "image/jpeg", extension: "jpg", quality: JPEG_QUALITY };
 }
 
+/** Draws `bitmap` at width x height. Large reductions go in halving steps: one big jump aliases and turns label text mushy. */
+function drawScaled(bitmap, width, height) {
+  let source = bitmap;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  while (w / 2 > width) {
+    const step = document.createElement("canvas");
+    w = Math.max(width, Math.round(w / 2));
+    h = Math.max(height, Math.round(h / 2));
+    step.width = w;
+    step.height = h;
+    const sctx = step.getContext("2d");
+    sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(source, 0, 0, w, h);
+    source = step;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, 0, 0, width, height);
+  return canvas;
+}
+
 async function shrink(file, maxEdge = MAX_EDGE) {
-  // Only images the browser can actually decode are resized. An SVG or a HEIC that
+  // Only images the browser can actually decode are converted. An SVG or a HEIC that
   // fails to decode is passed through untouched rather than being silently lost -
   // the server still validates the type and size.
   const bitmap = await createImageBitmap(file).catch(() => null);
@@ -1033,31 +1058,32 @@ async function shrink(file, maxEdge = MAX_EDGE) {
   const sourceHeight = bitmap.height;
   const width = Math.max(1, Math.round(sourceWidth * scale));
   const height = Math.max(1, Math.round(sourceHeight * scale));
+  const unchanged = { blob: file, width: sourceWidth, height: sourceHeight, resized: false };
 
-  if (scale === 1) {
+  // Already a WebP that fits: re-encoding would only lose quality.
+  if (scale === 1 && file.type === "image/webp") {
     bitmap.close();
-    return { blob: file, width: sourceWidth, height: sourceHeight, resized: false };
+    return unchanged;
   }
 
-  // Alpha is decided BEFORE the canvas is drawn, because the decision determines
-  // what the canvas is encoded as.
-  const alpha = await hasRealAlpha(bitmap);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
+  const canvas = drawScaled(bitmap, width, height);
+  if (!canvas) {
     bitmap.close();
-    return { blob: file, width: sourceWidth, height: sourceHeight, resized: false };
+    return unchanged;
   }
-  ctx.drawImage(bitmap, 0, 0, width, height);
+  // The alpha check only matters for the old-browser fallback, so it is asked only when WebP could not be produced.
+  let output = planImageOutput();
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, output.type, output.quality));
+  if (blob && blob.type !== output.type) {
+    // This browser cannot encode WebP (it returned PNG). JPEG, or PNG when pixels are really transparent.
+    output = planImageOutput({ hasAlpha: await hasRealAlpha(bitmap), webp: false });
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, output.type, output.quality));
+  }
   bitmap.close();
-
-  const output = planImageOutput({ hasAlpha: alpha });
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, output.type, output.quality));
-  if (!blob) return { blob: file, width: sourceWidth, height: sourceHeight, resized: false };
-  return { blob, width, height, resized: true, alpha: alpha === true };
+  if (!blob) return unchanged;
+  // Never make a file bigger: a small, already-optimised JPEG/WebP that did not need resizing stays as it was.
+  if (scale === 1 && blob.size >= file.size && /^image\/(jpeg|webp)$/.test(file.type)) return unchanged;
+  return { blob, width, height, resized: true };
 }
 
 /**
