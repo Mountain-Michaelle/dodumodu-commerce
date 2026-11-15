@@ -149,7 +149,7 @@ test("a refused token is answered with a machine-readable code so the page can f
   turnstile("reject");
   const res = await post(payload(crypto.randomUUID(), "tok-CODE"));
   assert.equal(res.status, 400);
-  assert.deepEqual(await res.json(), { error: "Bot verification failed", code: "turnstile_failed" });
+  assert.deepEqual(await res.json(), { error: "Bot verification failed", code: "turnstile_failed", detail: "" });
 });
 
 test("an unseen key is verified, so a bot cannot skip Turnstile by sending a made-up key", async () => {

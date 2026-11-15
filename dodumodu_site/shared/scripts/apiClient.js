@@ -26,6 +26,7 @@ export async function createOrder(payload, idempotencyKey) {
     err.status = res.status;
     err.fields = data?.fields;
     err.code = data?.code;
+    err.detail = data?.detail;
     throw err;
   }
   return data;
