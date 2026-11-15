@@ -25,7 +25,7 @@ export type TurnstileOutcome = "ok" | "failed" | "unavailable";
 const TURNSTILE_TIMEOUT_MS = 8_000;
 
 export async function verifyTurnstileOutcome(
-  env: Env, token: string, remoteIp: string, idempotencyKey?: string,
+  env: Env, token: string, remoteIp: string, idempotencyKey?: string, detail?: { codes?: string[] },
 ): Promise<TurnstileOutcome> {
   // Local development has no Turnstile secret: there is no widget to solve
   // offline, so verification is skipped - and only there. With
@@ -52,14 +52,21 @@ export async function verifyTurnstileOutcome(
         ...(idempotencyKey && /^[0-9A-Za-z-]{8,36}$/.test(idempotencyKey) ? { idempotency_key: idempotencyKey } : {}),
       }),
     });
-    if (res.status >= 500) return "unavailable";
-    const data = await res.json<{ success: boolean }>();
+    if (res.status >= 500) { if (detail) detail.codes = [`http-${res.status}`]; return "unavailable"; }
+    const data = await res.json<{ success: boolean; "error-codes"?: string[] }>();
+    if (!data.success) {
+      // Cloudflare says WHY (invalid-input-secret = wrong secret key, timeout-or-duplicate = token reused/expired,
+      // invalid-input-response = bad token). Logged and handed back so a refusal is never a mystery.
+      if (detail) detail.codes = data["error-codes"] ?? [];
+      console.warn(JSON.stringify({ event: "turnstile_refused", codes: data["error-codes"] ?? [] }));
+    }
     return data.success ? "ok" : "failed";
   } catch (err) {
     console.warn(JSON.stringify({
       event: "turnstile_unavailable",
       reason: err instanceof Error ? err.name : "unknown",
     }));
+    if (detail) detail.codes = [err instanceof Error ? err.name : "unknown"];
     return "unavailable";
   }
 }
@@ -98,15 +105,17 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
   // answer "Bot verification failed" for an order that was in fact placed.
   const isReplay = (c.get("prefetchedOrder") ?? null) !== null;
   if (!isReplay) {
-    const outcome = await verifyTurnstileOutcome(c.env, parsed.data.turnstileToken, remoteIp, parsed.data.idempotencyKey);
+    const why: { codes?: string[] } = {};
+    const outcome = await verifyTurnstileOutcome(c.env, parsed.data.turnstileToken, remoteIp, parsed.data.idempotencyKey, why);
+    const detail = (why.codes ?? []).join(",").slice(0, 120);
     if (outcome === "unavailable") {
       // Our verifier is the problem, not the customer: say so, and ask for a retry.
       c.header("Retry-After", "2");
-      return c.json({ error: "Verification is temporarily unavailable. Please try again in a moment." }, 503);
+      return c.json({ error: "Verification is temporarily unavailable. Please try again in a moment.", code: "turnstile_unavailable", detail }, 503);
     }
     if (outcome !== "ok") {
       await noteOrderOutcome(c, "turnstile_failed");
-      return c.json({ error: "Bot verification failed", code: "turnstile_failed" }, 400);
+      return c.json({ error: "Bot verification failed", code: "turnstile_failed", detail }, 400);
     }
   }
 

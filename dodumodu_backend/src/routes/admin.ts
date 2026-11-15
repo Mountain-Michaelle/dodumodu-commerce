@@ -751,3 +751,30 @@ adminRoute.get("/products/:id/publishes", async (c) => {
   if (!product) return c.json({ error: "Product not found" }, 404);
   return c.json({ publishes: await publishesRepo.listForProduct(db, product.id) });
 });
+
+// Is the bot check configured so that it can work? Asks Cloudflare to verify a deliberately fake token: the answer
+// tells whether TURNSTILE_SECRET_KEY is a real secret ("invalid-input-response" = the secret is accepted; "invalid-input-secret"
+// = wrong or missing secret) and whether the Worker can reach Cloudflare at all. Reveals no key.
+adminRoute.get("/turnstile-check", async (c) => {
+  const out: Record<string, unknown> = {
+    siteKeyOnWorker: Boolean((c.env.TURNSTILE_SITE_KEY ?? "").trim()),
+    secretOnWorker: Boolean(c.env.TURNSTILE_SECRET_KEY),
+  };
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      signal: AbortSignal.timeout(8000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: c.env.TURNSTILE_SECRET_KEY ?? "", response: "diagnostic-token" }),
+    });
+    const data = await res.json<{ "error-codes"?: string[] }>();
+    const codes = data["error-codes"] ?? [];
+    out.cloudflareReachable = true;
+    out.errorCodes = codes;
+    out.secretAccepted = codes.includes("invalid-input-response") && !codes.includes("invalid-input-secret");
+  } catch (err) {
+    out.cloudflareReachable = false;
+    out.error = err instanceof Error ? err.name : "unknown";
+  }
+  return c.json(out);
+});

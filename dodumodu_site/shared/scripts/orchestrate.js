@@ -376,6 +376,7 @@ export function initProductPage({ slug, productId }) {
 
   async function submitWithRetry(payload, idempotencyKey, ui) {
     let botCheckRetried = false;
+    let lastErr = null; // why the last attempt failed, so the final message is the true one
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await createOrder(payload, idempotencyKey);
@@ -394,6 +395,7 @@ export function initProductPage({ slug, productId }) {
         window.location.href = "/thank-you.html";
         return;
       } catch (err) {
+        lastErr = err;
         // 429 and 503 are the server asking for a retry (rate limit; verifier or database briefly unavailable).
         if (err.status && err.status !== 429 && err.status !== 503) {
           // The server has now seen this token, so it is spent whatever the answer was: solve a new one in the
@@ -428,7 +430,7 @@ export function initProductPage({ slug, productId }) {
               if (message) setFieldError(field, message);
             }
           }
-          ui.statusEl.textContent = err.message || "Something went wrong.";
+          ui.statusEl.textContent = (err.message || "Something went wrong.") + (err.code === "turnstile_failed" && err.detail ? ` (${err.detail})` : "");
           ui.submitButton.disabled = false;
           ui.submitButton.dataset.loading = "false";
           return;
@@ -440,7 +442,10 @@ export function initProductPage({ slug, productId }) {
       }
     }
     // Idempotency makes retries safe, but we still don't hammer a dead connection forever.
-    ui.statusEl.textContent = "";
+    // The server DID answer (503/429): say what it said instead of blaming the customer's connection.
+    ui.statusEl.textContent = lastErr?.status
+      ? `${lastErr.message}${lastErr.detail ? ` (${lastErr.detail})` : ""}`
+      : "";
     ui.retryBanner.dataset.visible = "true";
     ui.submitButton.disabled = false;
     ui.submitButton.dataset.loading = "false";
