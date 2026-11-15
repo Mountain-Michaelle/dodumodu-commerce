@@ -339,7 +339,7 @@ export function initProductPage({ slug, productId }) {
     // this resolves at once. On a slow link we wait for it here (up to 45s, and say so) rather than posting a token
     // the API would refuse.
     const slowNote = setTimeout(() => {
-      statusEl.textContent = "Confirming you are human... slow connection, please wait.";
+      statusEl.textContent = "Confirming you are human... one moment.";
     }, 2500);
     try {
       await ensureToken();
@@ -348,7 +348,9 @@ export function initProductPage({ slug, productId }) {
       resetTurnstile(); // the next tap starts a clean attempt
       submitButton.disabled = false;
       submitButton.dataset.loading = "false";
-      statusEl.textContent = "We could not finish the security check (weak connection?). Tap Place order to try again.";
+      statusEl.textContent = err?.code === "turnstile_config"
+        ? "Orders are temporarily unavailable. Please message us on WhatsApp to order."
+        : "The security check did not finish. Tap Place order to try again.";
       return;
     }
     clearTimeout(slowNote);
