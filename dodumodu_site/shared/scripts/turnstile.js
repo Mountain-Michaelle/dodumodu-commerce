@@ -1,134 +1,176 @@
-// Loads Cloudflare Turnstile only when it can matter.
+// The bot check (Cloudflare Turnstile), built so a customer never waits for it and never sees it unless Cloudflare
+// itself needs a tap.
 //
-// Turnstile is 100-200 KB of third-party JavaScript plus a cross-origin TLS
-// handshake, and it is only needed once a human is about to submit. Loading it
-// on first paint put it in the critical path on exactly the poor connections
-// where losing a customer hurts most, so it is armed instead when the form is
-// about to be on screen (IntersectionObserver) or the moment any field takes
-// focus — and, at worst, on submit, where we wait for it rather than fail.
+// WHEN IT LOADS. It is requested at the earlier of: the page's `load` event plus an idle moment (so the first paint and
+// the hero image are never competing with it, but it is already solving long before anyone reaches the button), or the
+// first touch of a field. Before, it waited for the form to be near the screen, which on a slow phone meant the whole
+// download-and-solve happened while the customer was filling the form and was often still running at "Place order".
 //
-// The widget container is `display:none` until the script is in, so no layout
-// shift is possible: the box only ever appears below the fold of the form.
+// WHAT THE CUSTOMER SEES. Nothing (`appearance: interaction-only`): the challenge runs invisibly and the box appears only
+// if Cloudflare decides it needs a tap. The container is never display:none (a hidden iframe can stall the solve); it is
+// collapsed to zero height until a tap is actually needed.
 //
-// The page's own `onTurnstileToken` global calls window.__turnstileTokenReceived,
-// which is how ensureToken() knows the customer solved the challenge rather than
-// merely downloaded the script.
+// TOKENS. A token is valid for 5 minutes and works once. So: a token older than 4.5 minutes is dropped and re-solved in
+// the background, a token the server spent (any answered order attempt) is dropped by resetTurnstile() so the next click
+// has a fresh one waiting, and Cloudflare is told to refresh an expired token on its own.
 //
-// No site key means the challenge is not configured for this build — local
-// development, where the widget cannot be solved and the server skips
-// verification too. In that case nothing is requested at all and ensureToken()
-// resolves immediately, instead of loading a third-party script that can never
-// hand back a usable token.
-const API_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
-const TOKEN_TIMEOUT_MS = 10_000;
+// SLOW LINKS. The script load is retried, the wait at "Place order" is 45s (not 10s) with an honest message from the page,
+// and the order is never posted with a token that cannot verify.
+//
+// No site key means the challenge is not configured for this build (local development, where the server skips
+// verification too): nothing is requested and ensureToken() resolves at once.
+const ORIGIN = "https://challenges.cloudflare.com";
+const API_SRC = `${ORIGIN}/turnstile/v0/api.js?render=explicit&onload=__turnstileLoaded`;
+const WAIT_MS = 45_000;
+const TOKEN_FRESH_MS = 270_000;
+const LOAD_RETRIES = 2;
 
 let state = "idle"; // idle -> loading -> ready | failed
-let pending = null; // { resolve, reject, timer }
+let widgetId = null;
+let issuedAt = 0;
+let loadAttempts = 0;
+let armed = false;
+let waiters = []; // [{ resolve, reject, timer }]
+
+const hostEl = () => document.getElementById("cf-turnstile");
+const inputEl = () => document.querySelector('input[name="turnstileToken"]');
 
 function turnstileConfigured() {
-  const host = document.getElementById("cf-turnstile");
-  return Boolean(host?.dataset.sitekey);
+  return Boolean(hostEl()?.dataset.sitekey);
 }
 
 function settle(error) {
-  const waiter = pending;
-  pending = null;
-  if (!waiter) return;
-  clearTimeout(waiter.timer);
-  if (error) waiter.reject(error);
-  else waiter.resolve();
+  const list = waiters;
+  waiters = [];
+  for (const w of list) {
+    clearTimeout(w.timer);
+    if (error) w.reject(error);
+    else w.resolve();
+  }
 }
 
-function arm() {
-  if (state !== "idle") return;
-  const host = document.getElementById("cf-turnstile");
-  if (!host) return;
-  if (!turnstileConfigured()) return; // nothing to load; the widget stays hidden
-  state = "loading";
+function tokenIsFresh() {
+  const value = inputEl()?.value;
+  return Boolean(value) && Date.now() - issuedAt < TOKEN_FRESH_MS;
+}
 
+function clearToken() {
+  const input = inputEl();
+  if (input) input.value = "";
+  issuedAt = 0;
+}
+
+const showBox = (visible) => { hostEl().dataset.ready = String(visible); };
+
+function renderWidget() {
+  const host = hostEl();
+  if (!host || !window.turnstile || widgetId !== null) return;
+  widgetId = window.turnstile.render(host, {
+    sitekey: host.dataset.sitekey,
+    appearance: "interaction-only",
+    retry: "auto",
+    "refresh-expired": "auto",
+    callback(token) {
+      const input = inputEl();
+      if (input) input.value = token;
+      issuedAt = Date.now();
+      showBox(false);
+      settle(null);
+    },
+    "expired-callback": clearToken, // Cloudflare retries errors itself (retry: auto); WAIT_MS is the only give-up
+    // The challenge needs a tap: show the box, and if someone is already waiting, bring it into view.
+    "before-interactive-callback"() {
+      showBox(true);
+      if (waiters.length) hostEl()?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    },
+    "after-interactive-callback"() { showBox(false); },
+  });
+}
+
+function loadScript() {
+  loadAttempts += 1;
+  state = "loading";
+  window.__turnstileLoaded = () => {
+    state = "ready";
+    window.turnstile.ready(renderWidget);
+  };
   const script = document.createElement("script");
   script.src = API_SRC;
   script.async = true;
   script.defer = true;
-  script.onload = () => {
-    state = "ready";
-    host.dataset.ready = "true"; // reveals the widget; no CLS, it sits below the fold
-  };
   script.onerror = () => {
+    script.remove?.();
+    if (loadAttempts <= LOAD_RETRIES) return void setTimeout(loadScript, 1500 * loadAttempts); // dropped mobile data
     state = "failed";
-    // Fail open in the browser: the server still verifies whatever token
-    // arrived (possibly none) and is the only real gate. Blocking checkout
-    // because a third-party CDN is down would cost more than it protects.
     settle(new Error("Challenge could not load"));
   };
   document.head.appendChild(script);
 }
 
-export function armTurnstile(formEl) {
+function arm() {
+  if (!turnstileConfigured()) return;
+  if (state === "failed") { state = "idle"; loadAttempts = 0; } // a later click gets a fresh try
   if (state !== "idle") return;
-  window.__turnstileTokenReceived = () => settle(null);
-  if (!turnstileConfigured()) return; // no challenge in this build — nothing to arm
+  loadScript();
+}
 
-  const trigger = () => arm();
-  if ("IntersectionObserver" in window && formEl) {
-    // Start downloading just before the form scrolls into view, so by the time
-    // the customer reaches the submit button the widget is usually there.
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        trigger();
-        observer.disconnect();
-      }
-    }, { rootMargin: "600px" });
-    observer.observe(formEl);
-  }
+const whenIdle = (fn) => {
+  if (typeof requestIdleCallback === "function") requestIdleCallback(fn, { timeout: 2000 });
+  else setTimeout(fn, 300);
+};
 
-  // Older WebViews with no IntersectionObserver still get it on first touch.
-  formEl?.addEventListener("focusin", trigger, { once: true, passive: true });
+export function armTurnstile(formEl) {
+  if (armed) return;
+  if (!turnstileConfigured()) return; // no challenge in this build, nothing to arm
+  armed = true;
+
+  // 1. After the page itself has finished, in an idle moment: the normal path, early and invisible.
+  const afterLoad = () => whenIdle(arm);
+  if (document.readyState === "complete") afterLoad();
+  else window.addEventListener?.("load", afterLoad, { once: true });
+
+  // 2. Sooner, on intent: the customer touches a field before the page has finished loading.
+  formEl?.addEventListener("focusin", arm, { once: true, passive: true });
 }
 
 /**
- * Load the challenge (if it is not already up) and wait for the customer's
- * token. Resolves on success; rejects on failure or timeout so the caller can
- * explain itself rather than posting an order the API will refuse.
+ * Resolves when a fresh, unspent token is in the form; rejects if there is none after WAIT_MS or the challenge cannot
+ * load. Normally the token has been there for a while and this returns at once.
  */
 export function ensureToken() {
-  if (document.querySelector('input[name="turnstileToken"]')?.value) return Promise.resolve();
-  if (!turnstileConfigured()) return Promise.resolve(); // no challenge configured
+  if (!turnstileConfigured()) return Promise.resolve();
+  if (tokenIsFresh()) return Promise.resolve();
+
+  // A token that is present but old would be refused by the server: re-solve it instead of sending it.
+  if (inputEl()?.value) {
+    clearToken();
+    if (widgetId !== null) try { window.turnstile.reset(widgetId); } catch { /* still loading */ }
+  }
   arm();
   if (state === "failed") return Promise.reject(new Error("Challenge could not load"));
-  if (pending) return new Promise((resolve, reject) => { pending.resolve = resolve; pending.reject = reject; });
 
   return new Promise((resolve, reject) => {
-    pending = { resolve, reject };
-    pending.timer = setTimeout(() => {
-      pending = null;
+    const waiter = { resolve, reject };
+    waiter.timer = setTimeout(() => {
+      waiters = waiters.filter((w) => w !== waiter);
       reject(new Error("Challenge timed out"));
-    }, TOKEN_TIMEOUT_MS);
+    }, WAIT_MS);
+    waiters.push(waiter);
   });
 }
 
 /**
- * Drops a spent token so the next submit asks Cloudflare for a fresh one.
+ * Drops a token that has been (or may have been) spent and starts solving a new one in the background, so the next
+ * click already has one. Called after any answered order attempt, and when a page comes back from the back/forward cache.
  *
- * Turnstile tokens are single-use, and arm() deliberately refuses to run again
- * once the script has loaded (state !== "idle"). A page restored from the
- * back/forward cache after placing an order therefore still holds the token it
- * just redeemed: ensureToken() would short-circuit on it and hand the API
- * something that can never verify, so instead of an honest 400 the customer
- * would sit through TOKEN_TIMEOUT_MS and be told the check failed.
+ * Turnstile tokens are single-use. A token the server has seen must never be sent again: it can only fail, and the
+ * customer would be told the bot check failed for an order that was fine.
  */
 export function resetTurnstile() {
-  const input = document.querySelector('input[name="turnstileToken"]');
-  if (input) input.value = "";
-  const host = document.getElementById("cf-turnstile");
-  if (host && window.turnstile) {
-    try {
-      window.turnstile.reset(host);
-    } catch {
-      /* the widget is still loading — there is nothing to reset */
-    }
+  clearToken();
+  if (widgetId !== null && window.turnstile) {
+    try { window.turnstile.reset(widgetId); } catch { /* the widget is still loading: nothing to reset */ }
   }
-  // A waiter parked on the old token can never settle now, so fail it rather
-  // than leaving that promise hanging.
+  // Anyone parked on the old token can never be satisfied by it.
   settle(new Error("Challenge was reset"));
 }

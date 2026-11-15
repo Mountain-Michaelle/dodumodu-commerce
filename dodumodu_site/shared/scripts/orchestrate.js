@@ -104,9 +104,9 @@ export function initProductPage({ slug, productId }) {
     refreshPaymentOptions();
   }
 
-  // Download the anti-spam challenge only as the customer approaches the form.
-  // Free on the critical path: the first paint, the hero image and the scroll
-  // down to the form all happen before a single byte of Turnstile is requested.
+  // Start the anti-spam challenge once the page itself has finished loading (and sooner if the customer heads for the
+  // form), so a fresh token is already waiting at "Place order". It is invisible unless Cloudflare needs a tap, and it
+  // never competes with the first paint or the hero image. See turnstile.js.
   armTurnstile(form);
 
   // First paint already happened from static HTML — the quantity input is a
@@ -330,19 +330,24 @@ export function initProductPage({ slug, productId }) {
     retryBanner.dataset.visible = "false";
     statusEl.textContent = "Placing your order...";
 
-    // The challenge is only downloaded when the form is near the viewport or
-    // the customer touches a field, so on a fast connection the token is
-    // usually already sitting in the hidden input and this resolves at once.
-    // On a slow one we wait for it here rather than posting an empty token the
-    // API would reject with a 400 the customer cannot act on.
+    // The challenge starts when the page finishes loading, so the token is normally already in the hidden input and
+    // this resolves at once. On a slow link we wait for it here (up to 45s, and say so) rather than posting a token
+    // the API would refuse.
+    const slowNote = setTimeout(() => {
+      statusEl.textContent = "Confirming you are human... slow connection, please wait.";
+    }, 2500);
     try {
       await ensureToken();
     } catch (err) {
+      clearTimeout(slowNote);
+      resetTurnstile(); // the next tap starts a clean attempt
       submitButton.disabled = false;
       submitButton.dataset.loading = "false";
-      statusEl.textContent = "Security check failed. Tap Place order again.";
+      statusEl.textContent = "We could not finish the security check (weak connection?). Tap Place order to try again.";
       return;
     }
+    clearTimeout(slowNote);
+    statusEl.textContent = "Placing your order...";
 
     const idempotencyKey = getOrCreateIdempotencyKey();
     const payload = collectOrderPayload(form, productId);
@@ -363,6 +368,7 @@ export function initProductPage({ slug, productId }) {
   });
 
   async function submitWithRetry(payload, idempotencyKey, ui) {
+    let botCheckRetried = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await createOrder(payload, idempotencyKey);
@@ -381,7 +387,24 @@ export function initProductPage({ slug, productId }) {
         window.location.href = "/thank-you.html";
         return;
       } catch (err) {
-        if (err.status && err.status !== 429) {
+        // 429 and 503 are the server asking for a retry (rate limit; verifier or database briefly unavailable).
+        if (err.status && err.status !== 429 && err.status !== 503) {
+          // The server has now seen this token, so it is spent whatever the answer was: solve a new one in the
+          // background so the customer's next tap already has one.
+          if (err.code === "turnstile_failed" && !botCheckRetried) {
+            // The token expired or was refused. Nothing was created, so get a fresh token and send the SAME order
+            // again, once, without making the customer do anything.
+            botCheckRetried = true;
+            resetTurnstile();
+            try {
+              ui.statusEl.textContent = "Confirming you are human...";
+              await ensureToken();
+              payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
+              attempt = -1;
+              continue;
+            } catch { /* fall through to the normal message below */ }
+          }
+          resetTurnstile();
           // A real validation/business error (including 500s the server chose
           // to return as a response) — retrying won't help.
           //

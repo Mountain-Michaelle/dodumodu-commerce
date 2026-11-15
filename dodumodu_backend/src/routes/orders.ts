@@ -24,7 +24,9 @@ export type TurnstileOutcome = "ok" | "failed" | "unavailable";
 // retryable 503. It still FAILS CLOSED - an unverified order is never accepted.
 const TURNSTILE_TIMEOUT_MS = 8_000;
 
-export async function verifyTurnstileOutcome(env: Env, token: string, remoteIp: string): Promise<TurnstileOutcome> {
+export async function verifyTurnstileOutcome(
+  env: Env, token: string, remoteIp: string, idempotencyKey?: string,
+): Promise<TurnstileOutcome> {
   // Local development has no Turnstile secret: there is no widget to solve
   // offline, so verification is skipped - and only there. With
   // ENVIRONMENT=production a missing secret fails closed, exactly like a bad
@@ -42,7 +44,13 @@ export async function verifyTurnstileOutcome(env: Env, token: string, remoteIp: 
       method: "POST",
       signal: AbortSignal.timeout(TURNSTILE_TIMEOUT_MS),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: remoteIp }),
+      // idempotency_key lets Cloudflare answer the SAME token again for the SAME order: a customer's automatic retry after
+      // a dropped connection or a 503 reuses the token, and without this it would be refused as already spent.
+      // (Cloudflare accepts at most 36 characters; anything else is simply not sent.)
+      body: JSON.stringify({
+        secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: remoteIp,
+        ...(idempotencyKey && /^[0-9A-Za-z-]{8,36}$/.test(idempotencyKey) ? { idempotency_key: idempotencyKey } : {}),
+      }),
     });
     if (res.status >= 500) return "unavailable";
     const data = await res.json<{ success: boolean }>();
@@ -90,7 +98,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
   // answer "Bot verification failed" for an order that was in fact placed.
   const isReplay = (c.get("prefetchedOrder") ?? null) !== null;
   if (!isReplay) {
-    const outcome = await verifyTurnstileOutcome(c.env, parsed.data.turnstileToken, remoteIp);
+    const outcome = await verifyTurnstileOutcome(c.env, parsed.data.turnstileToken, remoteIp, parsed.data.idempotencyKey);
     if (outcome === "unavailable") {
       // Our verifier is the problem, not the customer: say so, and ask for a retry.
       c.header("Retry-After", "2");
@@ -98,7 +106,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     }
     if (outcome !== "ok") {
       await noteOrderOutcome(c, "turnstile_failed");
-      return c.json({ error: "Bot verification failed" }, 400);
+      return c.json({ error: "Bot verification failed", code: "turnstile_failed" }, 400);
     }
   }
 

@@ -239,19 +239,15 @@ details.faq-item p { margin: 10px 0 0; font-size: 0.85rem; color: var(--color-te
   flex-wrap: wrap;
 }
 
-/* Turnstile's iframe is fixed-width; let it shrink instead of overflowing.
-   display:none keeps the container out of the layout until Cloudflare has
-   actually rendered the widget (it sets data-ready), so an unconfigured build -
-   where turnstile.js never loads anything - cannot ship a visible empty box,
-   and a configured one cannot reserve a hole it may never fill. These two
-   rules used to live only in the page's inline copy; they are here so the
-   preview and the built site agree. */
+/* The bot check runs invisibly (appearance: interaction-only), so this container is normally empty. It is NOT
+   display:none - a hidden iframe can stall the challenge - it is collapsed to zero height and only opens (data-ready)
+   in the rare case Cloudflare needs a tap. Turnstile's iframe is fixed-width; let it shrink instead of overflowing. */
 .cf-turnstile {
-  display: none;
   max-width: 100%;
   overflow: hidden;
+  height: 0;
 }
-.cf-turnstile[data-ready="true"] { display: block; }
+.cf-turnstile[data-ready="true"] { height: auto; min-height: 65px; margin: 0 0 12px; }
 
 /* ---- Payment method hint (COD availability, driven by codRules.js) ---- */
 .cod-hint { font-size: 0.78rem; color: var(--color-text-muted); line-height: 1.4; min-height: 1em; }
