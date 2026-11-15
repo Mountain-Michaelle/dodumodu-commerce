@@ -114,6 +114,14 @@ export function renderDeploymentStatus(status, { onRetry } = {}) {
         class: "button button-primary", type: "button", text: "Retry Deployment",
         onclick: onRetry,
       })
+      : null,
+    // A live page can still be on an OLDER storefront build (code fixes ship with a rebuild, not with a content edit).
+    status.state === "LIVE" && status.build?.state !== "running" && onRetry
+      ? el("button", {
+        class: "button", type: "button", text: "Rebuild storefront",
+        title: "Rebuild with the latest storefront code. Content is unchanged and the live page keeps serving meanwhile.",
+        onclick: onRetry,
+      })
       : null);
 
   return el("div", { class: "deploy-panel" },
