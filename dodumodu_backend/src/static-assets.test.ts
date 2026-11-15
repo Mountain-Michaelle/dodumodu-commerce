@@ -21,6 +21,7 @@ const env = {
       body: new Uint8Array([1, 2, 3]),
       httpMetadata: { contentType: "image/jpeg", cacheControl: "public, max-age=31536000" },
     },
+    "brand/logo.png": { body: new Uint8Array([7]), httpMetadata: { contentType: "image/png" } },
     "uploads/test.webp": {
       body: new Uint8Array([4, 5, 6]),
       httpMetadata: { contentType: "image/webp" },
@@ -130,11 +131,17 @@ test("media serves known object with content type and cache headers", async () =
   assert.deepEqual([...new Uint8Array(body)], [1, 2, 3]);
 });
 
-test("media serves object with content type but no cache control defaults to no-cache", async () => {
+test("an uploaded photo with no stored cache control is cached for a year (its name is unique per upload)", async () => {
   const res = await fetchApp("/media/uploads/test.webp");
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("Content-Type"), "image/webp");
-  assert.equal(res.headers.get("Cache-Control"), "no-cache");
+  assert.equal(res.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+});
+
+test("a media key outside the uploads prefix only gets a short cache, since its name can be reused", async () => {
+  const res = await fetchApp("/media/brand/logo.png");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Cache-Control"), "public, max-age=3600");
 });
 
 test("media returns 404 for missing object", async () => {

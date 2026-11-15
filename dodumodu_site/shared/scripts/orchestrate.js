@@ -121,9 +121,14 @@ export function initProductPage({ slug, productId }) {
     }
   } catch (e) { /* malformed attribute: keep the static first photo */ }
 
+  // Ask for the pricing data NOW (the script has just run), not at the next idle moment: on a slow phone that gap is
+  // hundreds of milliseconds of a quantity box with no price beside it. Rendering still waits for idle.
+  const pageDataRequest = getPageData(slug);
+  pageDataRequest.catch(() => {}); // handled where it is awaited; this only prevents an "unhandled" report
+
   const __r = async () => {
     try {
-      const data = await getPageData(slug);
+      const data = await pageDataRequest;
       pricing.product = data.product;
       pricing.packageOptions = data.product.packageOptions || [];
       pricing.discountTiers = data.discountTiers;
