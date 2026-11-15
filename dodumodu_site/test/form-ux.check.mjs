@@ -564,8 +564,9 @@ ok("turnstile: the page no longer hardcodes an eager challenges.cloudflare.com s
   !/<script[^>]+src="[^"]*challenges\.cloudflare\.com/i.test(html));
 ok("turnstile: the token callback bridges the page's global to the lazy loader",
   /window\.__turnstileTokenReceived/.test(html));
-ok("turnstile: the widget stays hidden until it loads, so it cannot shift layout",
-  hasRule(".cf-turnstile{display:none") && hasRule('.cf-turnstile[data-ready="true"]{display:block}'));
+ok("turnstile: the widget is collapsed (not display:none, which can stall the challenge) until a tap is needed",
+  hasRule(".cf-turnstile{max-width:100%;overflow:hidden;height:0}") && !hasRule(".cf-turnstile{display:none")
+    && hasRule('.cf-turnstile[data-ready="true"]{height:auto;min-height:65px;margin:0 0 12px}'));
 
 /* With no site key the widget is disabled, so ensureToken() resolves with nothing
    and the payload carries an empty token. That is CORRECT, and the server has to

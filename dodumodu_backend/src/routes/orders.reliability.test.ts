@@ -61,9 +61,11 @@ after(async () => {
 function turnstile(mode: "single-use" | "down" | "reject") {
   const used = new Set<string>();
   let calls = 0;
+  const bodies: Record<string, unknown>[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!String(input).includes("challenges.cloudflare.com")) return realFetch(input, init);
     calls += 1;
+    bodies.push(JSON.parse(String(init?.body)));
     if (mode === "down") throw new Error("network down");
     if (mode === "reject") return new Response(JSON.stringify({ success: false }), { headers: { "Content-Type": "application/json" } });
     const token = JSON.parse(String(init?.body)).response as string;
@@ -71,7 +73,7 @@ function turnstile(mode: "single-use" | "down" | "reject") {
     used.add(token);
     return new Response(JSON.stringify({ success: ok }), { headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
-  return { calls: () => calls };
+  return { calls: () => calls, bodies };
 }
 
 const payload = (key: string, token = "tok-1") => ({
@@ -134,6 +136,20 @@ test("a genuinely failed Turnstile check still fails closed: 400 and no order", 
   const res = await post(payload(key, "tok-C"));
   assert.equal(res.status, 400);
   assert.equal(await countFor(key), 0);
+});
+
+test("the order's idempotency key is sent to Cloudflare, so an automatic retry of the same order can reuse its token", async () => {
+  const cf = turnstile("single-use");
+  const key = crypto.randomUUID();
+  assert.equal((await post(payload(key, "tok-IDEM"))).status, 200);
+  assert.equal(cf.bodies[0].idempotency_key, key);
+});
+
+test("a refused token is answered with a machine-readable code so the page can fetch a fresh one by itself", async () => {
+  turnstile("reject");
+  const res = await post(payload(crypto.randomUUID(), "tok-CODE"));
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "Bot verification failed", code: "turnstile_failed" });
 });
 
 test("an unseen key is verified, so a bot cannot skip Turnstile by sending a made-up key", async () => {

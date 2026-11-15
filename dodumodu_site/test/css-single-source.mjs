@@ -139,13 +139,13 @@ for (const [selector, declaration] of CONTRACT) {
 /* The Turnstile container is display:none until Cloudflare sets data-ready, and
    these two rules used to live ONLY in the page's inline copy - so the served
    page shipped without them. They belong to shared/styles now. */
-ok("Turnstile stays hidden until Cloudflare renders it", ruleHas(canonical, ".cf-turnstile", "display:none"));
-ok("Turnstile is revealed once it is ready", ruleHas(canonical, '.cf-turnstile[data-ready="true"]', "display:block"));
+ok("Turnstile is collapsed (zero height, never display:none) until a tap is needed", ruleHas(canonical, ".cf-turnstile", "height:0") && !ruleHas(canonical, ".cf-turnstile", "display:none"));
+ok("Turnstile opens only when Cloudflare asks for interaction", ruleHas(canonical, '.cf-turnstile[data-ready="true"]', "height:auto"));
 
 const productCss = readFileSync(join(siteRoot, "shared", "styles", "product.css"), "utf8");
 ok("the Turnstile visibility contract lives in shared/styles, not in the page",
-  /\.cf-turnstile \{[^}]*display: none/.test(productCss)
-  && /\.cf-turnstile\[data-ready="true"\] \{ display: block; \}/.test(productCss));
+  /\.cf-turnstile \{[^}]*height: 0;/.test(productCss) && !/\.cf-turnstile \{[^}]*display: none/.test(productCss)
+  && /\.cf-turnstile\[data-ready="true"\] \{ height: auto;/.test(productCss));
 
 console.log(
   `\n${failures === 0 ? "OK" : "FAILED"}  ${canonical.length}B of CSS, one copy in shared/styles, `
