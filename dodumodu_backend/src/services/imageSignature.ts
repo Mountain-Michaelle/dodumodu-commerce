@@ -116,9 +116,10 @@ function readUint16(b: Uint8Array, offset: number, littleEndian = false): number
     : (b[offset] << 8) | b[offset + 1];
 }
 
+/** A 24-bit LITTLE-endian read (WebP's VP8X canvas size). Read big-endian, a 1080px image arrives as 3,605,505px. */
 function readUint24(b: Uint8Array, offset: number): number {
   if (offset + 3 > b.length) return 0;
-  return (b[offset] << 16) | (b[offset + 1] << 8) | b[offset + 2];
+  return b[offset] | (b[offset + 1] << 8) | (b[offset + 2] << 16);
 }
 
 export type Dimensions = { width: number; height: number };

@@ -67,6 +67,19 @@ export function webpLossyBytes(width: number, height: number, size = 64): Uint8A
   return b;
 }
 
+/** WebP extended (VP8X): what browsers' canvas.toBlob("image/webp") produces. 24-bit little-endian width-1 / height-1. */
+export function webpExtendedBytes(width: number, height: number, size = 64): Uint8Array {
+  const b = new Uint8Array(Math.max(size, 40));
+  b.set([0x52, 0x49, 0x46, 0x46], 0);   // "RIFF"
+  b.set([0x57, 0x45, 0x42, 0x50], 8);   // "WEBP"
+  b.set([0x56, 0x50, 0x38, 0x58], 12);  // "VP8X"
+  b[16] = 10;                           // chunk size
+  const w = width - 1, h = height - 1;
+  b.set([w & 0xff, (w >> 8) & 0xff, (w >> 16) & 0xff], 24);
+  b.set([h & 0xff, (h >> 8) & 0xff, (h >> 16) & 0xff], 27);
+  return b;
+}
+
 /** WebP lossless: a 0x2F signature byte, then 14-bit width-1 / height-1. */
 export function webpLosslessBytes(width: number, height: number, size = 64): Uint8Array {
   const b = new Uint8Array(size);
@@ -128,6 +141,9 @@ test("each accepted format reports its pixel dimensions", () => {
   assert.deepEqual(readImageDimensions(gifBytes(320, 240)), { width: 320, height: 240 });
   assert.deepEqual(readImageDimensions(webpLossyBytes(640, 480)), { width: 640, height: 480 });
   assert.deepEqual(readImageDimensions(webpLosslessBytes(200, 100)), { width: 200, height: 100 });
+  // Regression: a 1080x1080 browser-made WebP was read as 3605505x3605505 and refused as "limit is 12000px".
+  assert.deepEqual(readImageDimensions(webpExtendedBytes(1080, 1080)), { width: 1080, height: 1080 });
+  assert.deepEqual(readImageDimensions(webpExtendedBytes(1200, 800)), { width: 1200, height: 800 });
   assert.deepEqual(readImageDimensions(avifBytes(1200, 900)), { width: 1200, height: 900 });
 });
 
