@@ -445,7 +445,7 @@ export function initProductPage({ slug, productId }) {
     // The server DID answer (503/429): say what it said instead of blaming the customer's connection.
     ui.statusEl.textContent = lastErr?.status
       ? `${lastErr.message}${lastErr.detail ? ` (${lastErr.detail})` : ""}`
-      : "";
+      : lastErr ? `Could not send the order (${lastErr.name}: ${String(lastErr.message).slice(0, 80)}).` : "";
     ui.retryBanner.dataset.visible = "true";
     ui.submitButton.disabled = false;
     ui.submitButton.dataset.loading = "false";

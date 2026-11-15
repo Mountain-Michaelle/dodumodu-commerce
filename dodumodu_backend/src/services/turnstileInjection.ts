@@ -24,8 +24,6 @@ export function injectTurnstile(html: string, siteKey: string | undefined): { ht
         ? next.replace("frame-src ", `frame-src ${CHALLENGES} `)
         : next.replace("; base-uri", `; frame-src ${CHALLENGES}; base-uri`);
     }
-    // Cloudflare's widget page also talks to its own origin; allow it so a strict connect-src never starves the challenge.
-    next = next.replace(/connect-src ([^;]*)/, (m, v: string) => (v.includes(CHALLENGES) ? m : `connect-src ${v} ${CHALLENGES}`));
     return open + next + close;
   });
   return { html: out, injected: true };
