@@ -297,16 +297,33 @@ function mediaKeyFromPath(pathname: string): string | null {
   return key;
 }
 
+// Uploaded photos have a unique name per upload (timestamp + uuid), so a given key never changes: cache it for a year,
+// in the browser and (on a custom domain, where the Cache API exists) at Cloudflare's edge, so a repeat view costs no
+// Worker run and no R2 read. Anything outside the uploads prefix keeps a short cache, because its name can be reused.
+const MEDIA_IMMUTABLE = "public, max-age=31536000, immutable";
+const MEDIA_SHORT = "public, max-age=3600";
+
 app.get("/media/*", async (c) => {
   const key = mediaKeyFromPath(c.req.path);
   if (!key) return c.text("Not found", 404);
+
+  const edge = typeof caches !== "undefined" ? (caches as unknown as { default?: Cache }).default : undefined;
+  const cacheKey = new Request(c.req.url, { method: "GET" });
+  if (edge) {
+    const hit = await edge.match(cacheKey).catch(() => undefined);
+    if (hit) return hit;
+  }
+
   const object = await c.env.MEDIA_BUCKET.get(key);
   if (!object) return c.text("Not found", 404);
-  const headers: Record<string, string> = {};
-  if (object.httpMetadata?.contentType) headers["Content-Type"] = object.httpMetadata.contentType;
-  if (object.httpMetadata?.cacheControl) headers["Cache-Control"] = object.httpMetadata.cacheControl;
-  else headers["Cache-Control"] = "no-cache";
-  return c.body(object.body, 200, headers);
+  const headers = new Headers();
+  if (object.httpMetadata?.contentType) headers.set("Content-Type", object.httpMetadata.contentType);
+  headers.set("Cache-Control", object.httpMetadata?.cacheControl
+    ?? (key.startsWith(`${c.env.IMAGE_KEY_PREFIX ?? "uploads"}/`) ? MEDIA_IMMUTABLE : MEDIA_SHORT));
+  if (object.httpEtag) headers.set("ETag", object.httpEtag);
+  const response = new Response(object.body, { status: 200, headers });
+  if (edge) c.executionCtx?.waitUntil(edge.put(cacheKey, response.clone()).catch(() => undefined));
+  return response;
 });
 
 // Served at BOTH /slug and /slug/ (see routes/productPage.ts).
