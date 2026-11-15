@@ -77,7 +77,7 @@ export function buildCsp({ scriptHashes, styleHashes, imgOrigins = [], connectOr
     `script-src 'self' ${scriptHashes.join(' ')}${turnstile ? ` ${CF_CHALLENGES}` : ''}`,
     `style-src ${styleHashes.join(' ')}`,
     `img-src ${["'self'", 'data:', ...imgOrigins].join(' ')}`,
-    `connect-src ${["'self'", ...connectOrigins, ...(turnstile ? [CF_CHALLENGES] : [])].join(' ')}`,
+    `connect-src ${["'self'", ...connectOrigins].join(' ')}`,
     ...(turnstile ? [`frame-src ${CF_CHALLENGES}`] : []),
     `base-uri 'none'`,
     `form-action 'self'`,

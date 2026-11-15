@@ -124,6 +124,9 @@ test("buildCsp lets Turnstile and an off-origin image host load, and nothing els
   assert.match(csp, /script-src 'self' 'sha256-a' https:\/\/challenges\.cloudflare\.com;/);
   assert.match(csp, /frame-src https:\/\/challenges\.cloudflare\.com;/);
   assert.match(csp, /img-src 'self' data: https:\/\/media\.example\.com;/);
-  assert.match(csp, /connect-src 'self' https:\/\/api\.example\.com https:\/\/challenges\.cloudflare\.com;/);
+  assert.match(csp, /connect-src 'self' https:\/\/api\.example\.com;/);
   assert.match(csp, /default-src 'none'/);
+  // Turnstile needs only script-src and frame-src. connect-src stays exactly as the page needs it: antivirus software
+  // (Kaspersky) rewrites this directive in the page, and an extra origin there made it drop 'self' and block /create-order.
+  assert.ok(!/connect-src[^;]*challenges\.cloudflare\.com/.test(csp));
 });
