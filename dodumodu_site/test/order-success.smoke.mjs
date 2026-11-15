@@ -231,7 +231,7 @@ const naira = (amount) => `₦${amount.toLocaleString("en-NG")}`;
   // refreshed or shared thank-you page, and guarantees nothing about the form.
   const back = doc.querySelector("a.back-link");
   assert.ok(back, "the thank-you page offers a way back");
-  assert.equal(back.getAttribute("href"), "/products/glow-serum/", "it goes to the order page");
+  assert.equal(back.getAttribute("href"), "/", "it goes back to the store");
   assert.ok(back.textContent.trim().length > 0, "the control is labelled, not a bare arrow");
 
   // Informational: what kind of order this is, and what happens next.
