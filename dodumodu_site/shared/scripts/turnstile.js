@@ -29,6 +29,7 @@ let widgetId = null;
 let issuedAt = 0;
 let loadAttempts = 0;
 let armed = false;
+let solveAt = 0; // when the current solve began, so a stalled one can be restarted
 let waiters = []; // [{ resolve, reject, timer }]
 
 const hostEl = () => document.getElementById("cf-turnstile");
@@ -64,6 +65,7 @@ const showBox = (visible) => { hostEl().dataset.ready = String(visible); };
 function renderWidget() {
   const host = hostEl();
   if (!host || !window.turnstile || widgetId !== null) return;
+  solveAt = Date.now();
   widgetId = window.turnstile.render(host, {
     sitekey: host.dataset.sitekey,
     appearance: "interaction-only",
@@ -88,6 +90,8 @@ function renderWidget() {
       }
       return false; // transient: Cloudflare retries (retry: "auto")
     },
+    // The tap-to-verify box timed out unanswered: start over instead of leaving a dead box behind.
+    "timeout-callback"() { clearToken(); try { window.turnstile.reset(widgetId); solveAt = Date.now(); } catch { /* gone */ } },
     "expired-callback": clearToken, // Cloudflare retries errors itself (retry: auto); WAIT_MS is the only give-up
     // The challenge needs a tap: show the box, and if someone is already waiting, bring it into view.
     "before-interactive-callback"() {
@@ -134,6 +138,16 @@ const whenIdle = (fn) => {
   else setTimeout(fn, 300);
 };
 
+// A phone that lost signal, slept, or came back to this tab must not be left holding a failed or stalled check.
+function wake() {
+  if (!turnstileConfigured() || document.visibilityState === "hidden") return;
+  if (state === "failed") return void arm();
+  if (widgetId !== null && !tokenIsFresh() && Date.now() - solveAt > 20_000) {
+    clearToken();
+    try { window.turnstile.reset(widgetId); solveAt = Date.now(); } catch { /* still loading */ }
+  }
+}
+
 export function armTurnstile(formEl) {
   if (armed) return;
   if (!turnstileConfigured()) return; // no challenge in this build, nothing to arm
@@ -164,13 +178,15 @@ export function armTurnstile(formEl) {
     if (a) go();
   }
   document.addEventListener?.("click", onAnchor, true);
+  window.addEventListener?.("online", wake);
+  document.addEventListener?.("visibilitychange", wake);
 }
 
 /**
  * Resolves when a fresh, unspent token is in the form; rejects if there is none after WAIT_MS or the challenge cannot
  * load. Normally the token has been there for a while and this returns at once.
  */
-export function ensureToken() {
+export function ensureToken(ms = WAIT_MS) {
   if (!turnstileConfigured()) return Promise.resolve();
   if (tokenIsFresh()) return Promise.resolve();
 
@@ -187,10 +203,16 @@ export function ensureToken() {
     waiter.timer = setTimeout(() => {
       waiters = waiters.filter((w) => w !== waiter);
       reject(new Error("Challenge timed out"));
-    }, WAIT_MS);
+    }, ms);
     waiters.push(waiter);
   });
 }
+
+/** The token if it is there (or arrives within `ms`), else "". Never rejects: the order goes either way. */
+export const quickToken = (ms) => ensureToken(ms).then(() => inputEl()?.value || "", () => "");
+
+/** True when a token is (or becomes, within `ms`) available. Used to upgrade an order that went through without one. */
+export const waitForToken = (ms) => ensureToken(ms).then(() => Boolean(inputEl()?.value), () => false);
 
 /**
  * Drops a token that has been (or may have been) spent and starts solving a new one in the background, so the next

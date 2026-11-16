@@ -16,6 +16,7 @@ const ADMIN_ONLY = new Set([
   "POST /categories/bulk-action", "DELETE /media",
   // site-wide settings and moderation
   "GET /blocks", "GET /blocks/history", "POST /blocks", "POST /blocks/1/release",
+  "GET /turnstile-check", // bot-check diagnostic: administrators only
   // blocking and flagging are administrator decisions, never grantable
   "POST /spam/flag", "POST /spam/1/revert",
   "GET /abuse/summary", "GET /abuse/held", "POST /abuse/held/1/release", "POST /abuse/held/1/dismiss",

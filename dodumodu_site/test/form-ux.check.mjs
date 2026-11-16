@@ -579,13 +579,13 @@ const orchestrateSource = readFileSync(new URL("../shared/scripts/orchestrate.js
 const orderSchemaSource = backend("validation/orderSchema.ts");
 ok("turnstile: the payload always carries the field, empty included, so the server decides",
   /payload\.turnstileToken\s*=\s*form\.elements\[.turnstileToken.\]\?\.value\s*\|\|\s*""/.test(orchestrateSource));
-ok("turnstile: orchestrate waits for a token instead of posting a blank one when configured",
-  /await ensureToken\(\)/.test(orchestrateSource));
+ok("turnstile: the bot check never blocks sending - a token is used if there (or a moment away), otherwise the order goes without",
+  /payload\.turnstileToken = await quickToken\(/.test(orchestrateSource));
 ok("turnstile: the server's shape check accepts the blank token this build sends",
   !/turnstileToken:\s*z\.string\(\)\.min\(1\)/.test(orderSchemaSource)
     && /turnstileToken:\s*z\.string\(\)/.test(orderSchemaSource));
 ok("turnstile: the server keeps a real gate for the token, it is just not the schema's job",
-  /verifyTurnstile\(/.test(backend("routes/orders.ts")));
+  /verifyTurnstileOutcome\(/.test(backend("routes/orders.ts")));
 
 /* Copy must not promise pay on delivery where the gate now refuses it. */
 ok("copy: nothing on the page still claims pay on delivery is nationwide",

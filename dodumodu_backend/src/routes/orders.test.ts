@@ -16,7 +16,7 @@ function envWith(over: Partial<Env>): Env {
 }
 
 function stubCloudflare(success: boolean) {
-  globalThis.fetch = (async () => new Response(JSON.stringify({ success }), {
+  globalThis.fetch = (async () => new Response(JSON.stringify(success ? { success } : { success, "error-codes": ["invalid-input-response"] }), {
     headers: { "Content-Type": "application/json" },
   })) as typeof fetch;
 }

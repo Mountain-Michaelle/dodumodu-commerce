@@ -58,7 +58,7 @@ before(async () => {
     const url = String(i);
     if (url.includes("challenges.cloudflare.com")) {
       const ok = JSON.parse(String(init?.body)).response !== "bad";
-      return new Response(JSON.stringify({ success: ok }), { headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(ok ? { success: ok } : { success: ok, "error-codes": ["invalid-input-response"] }), { headers: { "Content-Type": "application/json" } });
     }
     if (url.includes("api.resend.com")) {
       const b = JSON.parse(String(init?.body));

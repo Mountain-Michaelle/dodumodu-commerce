@@ -43,6 +43,14 @@ export function orderBadges(order) {
   if (order.spamFlagged) {
     badges.push(el("span", { class: `badge ${TONE.spam}`, text: "Spam flagged" }));
   }
+  // The bot check did not complete for this order (blocked script, slow phone, Cloudflare unreachable). It is a real
+  // order; "pending" until the customer's page finishes the check, so worth a confirming message before shipping.
+  if (order.botCheck === "missing" || order.botCheck === "unverified") {
+    badges.push(el("span", {
+      class: `badge ${TONE.activity}`, text: "Bot check pending",
+      title: order.botCheck === "missing" ? "No bot-check result arrived with this order" : "The bot check result could not be confirmed",
+    }));
+  }
   if (order.reordering) {
     badges.push(el("span", { class: `badge ${TONE.repeat}`, text: "Reordering customer" }));
   }

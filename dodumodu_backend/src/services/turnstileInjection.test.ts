@@ -23,3 +23,14 @@ test("a page that already has a key, or no key configured, or a malformed key, i
   assert.equal(injectTurnstile(page, "").injected, false);
   assert.equal(injectTurnstile(page, '"><script>x</script>').injected, false);
 });
+
+test("a product with the bot check off has any baked-in site key removed, so the page asks for no challenge", async () => {
+  const { stripTurnstile } = await import("./turnstileInjection");
+  const baked = '<div id="cf-turnstile" data-sitekey="0x4AAAAAAAbaked"></div>';
+  const out = stripTurnstile(baked);
+  assert.equal(out.stripped, true);
+  assert.equal(out.html, '<div id="cf-turnstile" data-sitekey=""></div>');
+  // Nothing baked: nothing to strip, and the page is returned untouched.
+  const bare = stripTurnstile('<div id="cf-turnstile" data-sitekey=""></div>');
+  assert.equal(bare.stripped, false);
+});
