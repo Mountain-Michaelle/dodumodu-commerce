@@ -5,7 +5,8 @@ import { createDb } from "../db";
 import { orderGuard, noteOrderOutcome } from "../middleware/orderGuard";
 import { orderSchema } from "../validation/orderSchema";
 import { orderService, ProductNotFoundError, PackageNotFoundError, InvalidQuantityError, PaymentUnavailableError, PaymentMethodMismatchError } from "../services/orderService";
-import type { OrderRow } from "../data/ordersRepo";
+import { ordersRepo, type OrderRow } from "../data/ordersRepo";
+import { productsRepo } from "../data/productsRepo";
 import { CodNotAvailableError } from "../services/codPolicyService";
 import { sendInBackground, sendOrderBackup, sendOrderFailureAlert } from "../services/orderBackupMailer";
 import { swallow } from "../shared/logger";
@@ -20,9 +21,14 @@ export type TurnstileOutcome = "ok" | "failed" | "unavailable";
 // Cloudflare's verifier is reached from the Worker, not from the customer's phone, but
 // it can still be slow or briefly down. A hung or erroring verifier must never become
 // an unhandled 500 that the storefront reads as "your order failed": it is bounded by a
-// timeout and reported as its own outcome ("unavailable") so the route can answer a
-// retryable 503. It still FAILS CLOSED - an unverified order is never accepted.
-const TURNSTILE_TIMEOUT_MS = 8_000;
+// timeout and reported as its own outcome ("unavailable"). The route FAILS OPEN on it: the order is accepted and flagged
+// "unverified" for review, because losing a real customer to a verifier problem costs more than reviewing one order.
+// Only a definitive refusal ("failed": the token is not one Cloudflare issued) is rejected.
+const TURNSTILE_TIMEOUT_MS = 3_000;
+
+const SOFT_CODES = new Set([
+  "timeout-or-duplicate", "internal-error", "invalid-input-secret", "missing-input-secret", "bad-request", "invalid-widget-id",
+]);
 
 export async function verifyTurnstileOutcome(
   env: Env, token: string, remoteIp: string, idempotencyKey?: string, detail?: { codes?: string[] },
@@ -33,7 +39,8 @@ export async function verifyTurnstileOutcome(
   // token does, because production must never silently accept an unverified
   // order. Same code both ways; only the configuration differs.
   if (!env.TURNSTILE_SECRET_KEY) {
-    if (env.ENVIRONMENT === "production") return "failed";
+    // Fail open (flagged): a missing secret is OUR configuration problem, never a reason to refuse a customer.
+    if (env.ENVIRONMENT === "production") return "unavailable";
     console.warn(JSON.stringify({
       event: "turnstile_skipped", reason: "TURNSTILE_SECRET_KEY is not set (non-production only)",
     }));
@@ -60,7 +67,12 @@ export async function verifyTurnstileOutcome(
       if (detail) detail.codes = data["error-codes"] ?? [];
       console.warn(JSON.stringify({ event: "turnstile_refused", codes: data["error-codes"] ?? [] }));
     }
-    return data.success ? "ok" : "failed";
+    if (data.success) return "ok";
+    // An EXPIRED or already-spent token, a Cloudflare-side error, or our own wrong secret says nothing about the customer
+    // being a bot: soft. Only a token Cloudflare does not recognise at all is a definitive refusal.
+    const codes = data["error-codes"] ?? [];
+    const soft = codes.length === 0 || codes.some((x) => SOFT_CODES.has(x));
+    return soft ? "unavailable" : "failed";
   } catch (err) {
     console.warn(JSON.stringify({
       event: "turnstile_unavailable",
@@ -85,6 +97,7 @@ export async function verifyTurnstile(env: Env, token: string, remoteIp: string)
 // behaves exactly as it did before the abuse layer existed.
 // A held order has no row in `orders`; this offset keeps the id the storefront is handed clearly apart from real ones.
 const HELD_ORDER_ID_BASE = 1_000_000_000;
+const UNVERIFIED_PER_IP_PER_HOUR = 8;
 
 ordersRoute.post("/create-order", orderGuard, async (c) => {
   const body = c.get("parsedBody");
@@ -98,28 +111,57 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
   }
 
   const remoteIp = c.req.header("cf-connecting-ip") ?? "";
-  // A REPLAY of an order that already exists (the guard found it by idempotency key)
-  // creates nothing, so there is nothing for a bot check to protect - and a Turnstile
-  // token is single-use. A customer on a bad connection whose first request succeeded
-  // but whose response was lost retries with the SAME token; re-verifying it would
-  // answer "Bot verification failed" for an order that was in fact placed.
-  const isReplay = (c.get("prefetchedOrder") ?? null) !== null;
-  if (!isReplay) {
-    const why: { codes?: string[] } = {};
-    const outcome = await verifyTurnstileOutcome(c.env, parsed.data.turnstileToken, remoteIp, parsed.data.idempotencyKey, why);
-    const detail = (why.codes ?? []).join(",").slice(0, 120);
-    if (outcome === "unavailable") {
-      // Our verifier is the problem, not the customer: say so, and ask for a retry.
-      c.header("Retry-After", "2");
-      return c.json({ error: "Verification is temporarily unavailable. Please try again in a moment.", code: "turnstile_unavailable", detail }, 503);
-    }
-    if (outcome !== "ok") {
-      await noteOrderOutcome(c, "turnstile_failed");
-      return c.json({ error: "Bot verification failed", code: "turnstile_failed", detail }, 400);
-    }
+  const db = createDb(c.env.DATABASE_URL);
+  const prefetched = c.get("prefetchedOrder") ?? null;
+  // A REPLAY of an order that already exists (the guard found it by idempotency key) creates nothing. If that order went
+  // through flagged (no token yet) and this retry brings a token, the token is checked and the SAME order is upgraded to
+  // "verified" - the customer's page then proceeds to the thank-you page. Nothing is ever created twice.
+  const isReplay = prefetched !== null;
+
+  // Honeypot: a field no person can see. A bot that fills every input is dropped here, and gets a plausible answer so it
+  // learns nothing. (Counted in the abuse observations; nothing is stored.)
+  if ((parsed.data.website ?? "").trim() !== "") {
+    await noteOrderOutcome(c, "validation_failed");
+    return c.json({
+      orderId: HELD_ORDER_ID_BASE, reference: "", status: "confirmed_cod", flaggedLate: false, packageId: parsed.data.packageId ?? null,
+      quantity: parsed.data.quantity, unitPrice: 0, subtotal: 0, discountPercent: 0, discountAmount: 0, amount: 0, botCheck: "verified",
+    });
   }
 
-  const db = createDb(c.env.DATABASE_URL);
+  const product = await productsRepo.findById(db, parsed.data.productId).catch(() => null);
+  const checkEnabled = product?.botCheckEnabled !== false;
+  const token = parsed.data.turnstileToken;
+
+  let botCheck: "verified" | "missing" | "unverified" | "off" = "off";
+  if (checkEnabled && (!isReplay || (prefetched.botCheck !== "verified" && prefetched.botCheck !== "off"))) {
+    if (!token) {
+      botCheck = "missing";
+    } else {
+      const why: { codes?: string[] } = {};
+      const outcome = await verifyTurnstileOutcome(c.env, token, remoteIp, parsed.data.idempotencyKey, why);
+      const detail = (why.codes ?? []).join(",").slice(0, 120);
+      if (outcome === "failed") {
+        // A token Cloudflare does not recognise. The page treats this as "no token" and sends the order once more without
+        // one, so a real customer is never stranded here; a bot gains nothing it did not already have by omitting it.
+        await noteOrderOutcome(c, "turnstile_failed");
+        return c.json({ error: "Bot verification failed", code: "turnstile_failed", detail }, 400);
+      }
+      botCheck = outcome === "ok" ? "verified" : "unverified";
+    }
+  } else if (isReplay) {
+    botCheck = (prefetched.botCheck as typeof botCheck | null) ?? "off";
+  }
+
+  // Fail-open needs brakes: one address cannot push unlimited unverified orders through. (Generous, because many phones
+  // share one mobile-network address; the honeypot, the spam rules below and a person reviewing flagged orders do the rest.)
+  if (!isReplay && (botCheck === "missing" || botCheck === "unverified") && remoteIp) {
+    const recent = await ordersRepo.unverifiedFromIpInLastHour(db, remoteIp).catch(() => 0);
+    if (recent >= UNVERIFIED_PER_IP_PER_HOUR) {
+      await noteOrderOutcome(c, "validation_failed");
+      c.header("Retry-After", "600");
+      return c.json({ error: "Too many orders from this connection. Please message us on WhatsApp to order.", code: "rate_limited" }, 429);
+    }
+  }
   const reqMeta = { ip: remoteIp || null, deviceId: c.get("deviceId") ?? null, clientKind: c.get("clientKind") ?? null, browser: c.get("browser") ?? null };
 
   // Verified spam (one unproven phone flooding the form) is HELD instead of stored: the customer still sees the normal
@@ -138,6 +180,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
           flaggedLate: view.flaggedLate, packageId: view.packageId, quantity: view.quantity, unitPrice: view.unitPrice,
           subtotal: view.subtotal, discountPercent: view.discountPercent, discountAmount: view.discountAmount, amount: view.amount,
           checkoutUrl: undefined,
+          botCheck: "verified", // held spam is finished as far as the page is concerned: never loops on a bot check
         });
       }
     } catch (err) {
@@ -166,10 +209,14 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       // stored on the order is exactly the one that was observed.
       deviceId: c.get("deviceId") ?? null,
       clientKind: c.get("clientKind") ?? null,
+      botCheck,
     // Legitimate progression is the negative evidence that disarms the abuse rules
     });
     // for this address, recorded from the order the server actually created.
     created = true;
+    if (isReplay && botCheck === "verified" && order.botCheck !== "verified") {
+      await ordersRepo.setBotCheck(db, order.id, "verified").catch(swallow("orders_best_effort_failed"));
+    }
     // Bookkeeping must never turn a saved order into a failure for the customer.
     await noteOrderOutcome(c, "created", { status: order.status, id: order.id }).catch(swallow("orders_best_effort_failed"));
     // A device or address spreading orders over many different phones is raised as an alert for a person to judge;
@@ -191,6 +238,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       discountAmount: order.discountAmount,
       amount: order.amount,
       checkoutUrl,
+      botCheck,
     });
   } catch (err) {
     const failed = (reason: string) => {

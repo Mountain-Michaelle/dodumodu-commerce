@@ -38,6 +38,8 @@ const productUpsertSchema = z.object({
   seoTitle: z.string().trim().max(200).nullish(),
   seoDescription: z.string().trim().max(300).nullish(),
   active: z.boolean().default(true),
+  // Live switch for the Cloudflare bot check on this product's order form. Omitted = unchanged.
+  botCheckEnabled: z.boolean().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).nullish(),
 });
 

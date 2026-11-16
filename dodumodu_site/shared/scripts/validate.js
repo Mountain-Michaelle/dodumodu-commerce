@@ -39,5 +39,6 @@ export function collectOrderPayload(formEl, productId) {
     deliveryDate: get("deliveryDate"),
     paymentMethod: get("paymentMethod"),
     questionNotes: get("questionNotes") || undefined,
+    website: get("website") || undefined, // honeypot: empty for every real customer
   };
 }

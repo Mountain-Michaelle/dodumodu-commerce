@@ -7,7 +7,7 @@ import { validateOrderForm, collectOrderPayload } from "./validate.js";
 import { parsePaymentRules, decideCod, codHint } from "./codRules.js";
 import { deliveryChoices } from "./deliveryOptions.js";
 import { saveDraft, loadDraft, applyDraft, clearDraft } from "./draftStore.js";
-import { armTurnstile, ensureToken, resetTurnstile } from "./turnstile.js";
+import { armTurnstile, quickToken, waitForToken, resetTurnstile } from "./turnstile.js";
 
 import "./stick.js";
 
@@ -335,30 +335,13 @@ export function initProductPage({ slug, productId }) {
     retryBanner.dataset.visible = "false";
     statusEl.textContent = "Placing your order...";
 
-    // The challenge starts when the page finishes loading, so the token is normally already in the hidden input and
-    // this resolves at once. On a slow link we wait for it here (up to 45s, and say so) rather than posting a token
-    // the API would refuse.
-    const slowNote = setTimeout(() => {
-      statusEl.textContent = "Confirming you are human... one moment.";
-    }, 2500);
-    try {
-      await ensureToken();
-    } catch (err) {
-      clearTimeout(slowNote);
-      resetTurnstile(); // the next tap starts a clean attempt
-      submitButton.disabled = false;
-      submitButton.dataset.loading = "false";
-      statusEl.textContent = err?.code === "turnstile_config"
-        ? "Orders are temporarily unavailable. Please message us on WhatsApp to order."
-        : "The security check did not finish. Tap Place order to try again.";
-      return;
-    }
-    clearTimeout(slowNote);
+    // The bot check never decides whether an order is sent. A token that is already there (the normal case) goes with
+    // the order; one that is a moment away is waited for briefly; otherwise the order goes without it and the server
+    // records it as unconfirmed. The page then keeps the check going and completes the SAME order when it arrives.
     statusEl.textContent = "Placing your order...";
-
     const idempotencyKey = getOrCreateIdempotencyKey();
     const payload = collectOrderPayload(form, productId);
-    payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
+    payload.turnstileToken = await quickToken(2500);
     lastAttemptPayload = payload;
 
     await submitWithRetry(payload, idempotencyKey, { statusEl, retryBanner, submitButton });
@@ -374,12 +357,30 @@ export function initProductPage({ slug, productId }) {
     manualRetryButton.disabled = false;
   });
 
+  let pendingRounds = 0;
   async function submitWithRetry(payload, idempotencyKey, ui) {
     let botCheckRetried = false;
     let lastErr = null; // why the last attempt failed, so the final message is the true one
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await createOrder(payload, idempotencyKey);
+        // Recorded, but the bot check did not complete: keep trying it in the background and finish the same order when
+        // it does. No thank-you page until then (it is also the page that counts a conversion).
+        if (result.botCheck === "missing" || result.botCheck === "unverified") {
+          ui.statusEl.textContent = "Confirming your order...";
+          if (payload.turnstileToken) resetTurnstile(); // that token was spent or expired; with none sent, the solve already running is kept
+          if (!(await waitForToken(pendingRounds++ ? 12000 : 20000))) {
+            ui.submitButton.disabled = pendingRounds > 1;
+            ui.submitButton.dataset.loading = "false";
+            ui.statusEl.textContent = pendingRounds > 1
+              ? "Thanks! We have your order and will confirm on WhatsApp shortly."
+              : "Almost done. Tap Place order once more to finish.";
+            return;
+          }
+          payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
+          attempt = -1;
+          continue;
+        }
         clearIdempotencyKey();
         // The order exists — the draft of the same details must not come back
         // on the next visit and re-fill a second order for the same person.
@@ -398,20 +399,14 @@ export function initProductPage({ slug, productId }) {
         lastErr = err;
         // 429 and 503 are the server asking for a retry (rate limit; verifier or database briefly unavailable).
         if (err.status && err.status !== 429 && err.status !== 503) {
-          // The server has now seen this token, so it is spent whatever the answer was: solve a new one in the
-          // background so the customer's next tap already has one.
           if (err.code === "turnstile_failed" && !botCheckRetried) {
-            // The token expired or was refused. Nothing was created, so get a fresh token and send the SAME order
-            // again, once, without making the customer do anything.
+            // Cloudflare did not recognise the token. Nothing was created: send the SAME order again without it, once;
+            // the server accepts it as unconfirmed and the check is retried afterwards. A customer is never stranded.
             botCheckRetried = true;
             resetTurnstile();
-            try {
-              ui.statusEl.textContent = "Confirming you are human...";
-              await ensureToken();
-              payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
-              attempt = -1;
-              continue;
-            } catch { /* fall through to the normal message below */ }
+            payload.turnstileToken = "";
+            attempt = -1;
+            continue;
           }
           resetTurnstile();
           // A real validation/business error (including 500s the server chose
@@ -445,7 +440,7 @@ export function initProductPage({ slug, productId }) {
     // The server DID answer (503/429): say what it said instead of blaming the customer's connection.
     ui.statusEl.textContent = lastErr?.status
       ? `${lastErr.message}${lastErr.detail ? ` (${lastErr.detail})` : ""}`
-      : lastErr ? `Could not send the order (${lastErr.name}: ${String(lastErr.message).slice(0, 80)}).` : "";
+      : lastErr ? `Could not send (${lastErr.name}).` : "";
     ui.retryBanner.dataset.visible = "true";
     ui.submitButton.disabled = false;
     ui.submitButton.dataset.loading = "false";

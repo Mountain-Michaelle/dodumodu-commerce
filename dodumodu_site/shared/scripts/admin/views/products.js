@@ -267,6 +267,10 @@ export function productsView({ shell, identity, onNavigate }) {
           options: [{ value: "", label: "— none —" }, ...categories.map((c) => ({ value: c.id, label: c.name }))],
         }),
         adminField({ name: "active", label: "Active (visible on the storefront)", type: "checkbox", value: product.active !== false }),
+        adminField({
+          name: "botCheckEnabled", label: "Bot check on the order form (Cloudflare)", type: "checkbox", value: product.botCheckEnabled !== false,
+          hint: "Takes effect within a minute, no rebuild. Off: customers are never asked to verify; spam protection then relies on the hidden field and the spam rules. Orders that skipped the check are marked in the order list.",
+        }),
       ] }),
       fieldset({ legend: "Search engine listing", columns: 2, fields: [
         adminField({ name: "seoTitle", label: "SEO title", value: product.seoTitle || "" }),
@@ -298,6 +302,7 @@ export function productsView({ shell, identity, onNavigate }) {
             seoTitle: values.seoTitle || null,
             seoDescription: values.seoDescription || null,
             active: values.active,
+            botCheckEnabled: values.botCheckEnabled,
           };
           try {
             if (isNew) {

@@ -35,6 +35,7 @@ export type ProductInput = {
   seoTitle?: string | null;
   seoDescription?: string | null;
   active: boolean;
+  botCheckEnabled?: boolean;
 };
 
 export const productService = {
@@ -86,6 +87,7 @@ export const productService = {
       seoTitle: input.seoTitle?.trim() || null,
       seoDescription: input.seoDescription?.trim() || null,
       active: input.active,
+      ...(input.botCheckEnabled === undefined ? {} : { botCheckEnabled: input.botCheckEnabled }),
     };
   },
 

@@ -72,6 +72,8 @@ export const orderService = {
       clientKind?: string | null;
       /** The operator who entered this order by hand (admin console). Null/absent for a storefront order. */
       createdBy?: string | null;
+      /** verified | missing | unverified | off: what the bot check concluded for this order. Null for hand-entered orders. */
+      botCheck?: string | null;
     } = {},
   ): Promise<{ order: OrderRow; checkoutUrl?: string }> {
     // Fast path for an obvious retry. This is an optimization, NOT the protection —
@@ -175,6 +177,7 @@ export const orderService = {
         // order. It is not an identity and never a restriction key; the console
         // shows it masked. Null when the header was absent.
         createdFromIp: options.ip ?? null,
+        botCheck: options.botCheck ?? null,
         // The client-declared device token, validated at the edge (see
         // readDeviceId in orderGuard). Null when absent or unusable, which excludes
         // the row from V1 - it is evidence about a machine, not about a person.

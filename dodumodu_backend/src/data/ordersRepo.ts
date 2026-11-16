@@ -66,6 +66,20 @@ export const ordersRepo = {
    * the UNIQUE constraint on idempotency_key rejects the loser — the caller
    * (orderService) catches that and re-fetches the winner's row.
    */
+  /** A flagged order whose bot check later succeeded (same idempotency key): upgrade it. Never downgrades. */
+  async setBotCheck(db: Db, id: number, status: "verified"): Promise<void> {
+    await db.update(orders).set({ botCheck: status }).where(eq(orders.id, id));
+  },
+
+  /** Orders from this address in the last hour that went through without a verified bot check. */
+  async unverifiedFromIpInLastHour(db: Db, ip: string): Promise<number> {
+    const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(orders)
+      .where(and(eq(orders.createdFromIp, ip), inArray(orders.botCheck, ["missing", "unverified"]),
+        // In SQL, so the window and created_at (defaultNow) are measured by the same clock.
+        sql`${orders.createdAt} >= now() - interval '1 hour'`));
+    return row?.n ?? 0;
+  },
+
   async insert(db: Db, input: typeof orders.$inferInsert): Promise<OrderRow> {
     const [row] = await db.insert(orders).values(input).returning();
     return row;

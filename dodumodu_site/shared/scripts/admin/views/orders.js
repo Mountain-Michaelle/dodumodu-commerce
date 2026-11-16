@@ -808,6 +808,7 @@ export function ordersView({ shell, identity }) {
           ["Customer", order.customerName],
           ["Phone", el("span", { class: "mono", text: order.phone })],
           ["WhatsApp", el("span", { class: "mono", text: order.whatsapp })],
+          ...(order.botCheck ? [["Bot check", { verified: "Verified", off: "Off for this product", missing: "Pending (no result received)", unverified: "Pending (could not be confirmed)" }[order.botCheck] || order.botCheck]] : []),
           ["Address", el("div", { class: "stack" },
             el("span", { text: order.address }),
             el("span", { class: "muted", text: order.state }))],

@@ -48,6 +48,9 @@ export const products = pgTable("products", {
   seoTitle: text("seo_title"),
   seoDescription: text("seo_description"),
   active: boolean("active").notNull().default(true),
+  // Cloudflare bot check on this product's order form. Read live (not part of a publish), so it can be flipped to compare
+  // conversion with and without it.
+  botCheckEnabled: boolean("bot_check_enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -140,6 +143,8 @@ export const orders = pgTable("orders", {
   // only asks "in-app or not", and retaining a full UA on every order would be
   // personal data kept for no benefit.
   clientKind: text("client_kind"),
+  // verified | missing | unverified | off. See migrations/0033. NULL: placed before this existed, or by hand.
+  botCheck: text("bot_check"),
   whatsapp: text("whatsapp").notNull(),
   address: text("address").notNull(),
   state: text("state").notNull(),

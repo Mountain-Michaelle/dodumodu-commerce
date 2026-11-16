@@ -37,6 +37,8 @@ export const orderSchema = z.object({
   // customer could do nothing about, and never reached the check that matters.
   // The cap stays: it is a real token, not a free-text field.
   turnstileToken: z.string().trim().max(2048).default(""),
+  // Honeypot: rendered off-screen, never filled by a person. Anything in it marks the request as automated.
+  website: z.string().max(200).optional(),
   productId: z.number().int().positive(),
   packageId: z.string().min(1).optional(),
   quantity: z.number().int(), // upper bound (MAX_ORDER_QUANTITY) is checked in orderService — it's env-driven, not a static schema constant

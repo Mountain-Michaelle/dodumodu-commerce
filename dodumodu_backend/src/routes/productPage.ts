@@ -1,7 +1,8 @@
 import type { Context, Next } from "hono";
 import type { Env } from "../env";
 import type { LivePage } from "../services/livePage";
-import { injectTurnstile } from "../services/turnstileInjection";
+import { injectTurnstile, stripTurnstile } from "../services/turnstileInjection";
+import { botCheckEnabled } from "../services/botCheckSwitch";
 
 export type PrerenderedProduct = { html: string; etag: string; publishId: number; publishRef: string };
 
@@ -23,8 +24,13 @@ export function productPageHandler(getPage: (env: Env, slug: string) => Promise<
     }
     if (!entry) return await next();
     // The public site key is applied here, so the widget exists on every page whichever build made it.
-    const { html, injected } = injectTurnstile(entry.html, c.env?.TURNSTILE_SITE_KEY);
-    const etag = injected ? entry.etag.replace(/"$/, '-t"') : entry.etag;
+    // A product with the check switched off in admin gets no site key: no widget, no challenge, no script.
+    const on = await botCheckEnabled(c.env, c.req.param("slug") ?? "");
+    const injectedPage = on ? injectTurnstile(entry.html, c.env?.TURNSTILE_SITE_KEY) : null;
+    const strippedPage = on ? null : stripTurnstile(entry.html);
+    const html = injectedPage?.html ?? strippedPage?.html ?? entry.html;
+    const etag = injectedPage?.injected ? entry.etag.replace(/"$/, '-t"')
+      : strippedPage?.stripped ? entry.etag.replace(/"$/, '-n"') : entry.etag;
     // The snapshot is immutable, so the ETag changes iff content changed.
     if (c.req.header("if-none-match") === etag) return c.body(null, 304);
     return c.html(html, 200, {

@@ -28,3 +28,13 @@ export function injectTurnstile(html: string, siteKey: string | undefined): { ht
   });
   return { html: out, injected: true };
 }
+
+/**
+ * The product has the bot check switched off: whatever key the build baked in is blanked, so the page asks for no
+ * challenge at all (the page script treats an empty key as "no challenge in this build"). The CSP is left as it is:
+ * allowing an origin nothing loads from costs nothing.
+ */
+export function stripTurnstile(html: string): { html: string; stripped: boolean } {
+  const out = html.replace(/id="cf-turnstile" data-sitekey="[^"]+"/, 'id="cf-turnstile" data-sitekey=""');
+  return { html: out, stripped: out !== html };
+}
