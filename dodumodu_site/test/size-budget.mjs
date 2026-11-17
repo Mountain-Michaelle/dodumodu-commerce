@@ -26,13 +26,13 @@ if (!existsSync(distDir)) {
 const BUDGETS = {
   page: 10.5 * 1024,   // HTML document, preview script included (CSS is linked)
   css: 5.1 * 1024,     // the whole stylesheet (includes brand-motion.css keyframes)
-  // 9.0 (was 8.9: connection warm-up and a safety-net start for the bot check; was 8.7: the order is never blocked by the bot check - sent with or without a token, finished later when it arrives; was 8.4; +error codes so a refusal is never a mystery; before that 7.8): the bot check now renders explicitly, refreshes expired/spent tokens, retries a dropped script load
+  // 9.5 (was 9.0: the bot check restarts itself after an error or a stall, keeps its box visible when a tap failed, and finishes a recorded order by itself when the check returns late; was 8.9: connection warm-up and a safety-net start for the bot check; was 8.7: the order is never blocked by the bot check - sent with or without a token, finished later when it arrives; was 8.4; +error codes so a refusal is never a mystery; before that 7.8): the bot check now renders explicitly, refreshes expired/spent tokens, retries a dropped script load
   // and recovers from a refused token by itself (+0.6 KB gzipped). That is what stops orders failing on slow phones.
-  js: 9.0 * 1024,      // the whole customer bundle
+  js: 9.5 * 1024,      // the whole customer bundle
   // Everything the first paint needs, excluding the hero image (which is a
   // separate, cacheable, content-negotiated request). This is the number that
   // decides whether a customer on a poor connection sees the product.
-  criticalPath: 23.7 * 1024,  // 22.8 + the same 0.6 KB of bot-check logic
+  criticalPath: 24.2 * 1024,  // 22.8 + 1.0 KB of bot-check logic (self-restart, late completion)
 };
 
 // The built page carries NO inline CSS: the source page's <style> is generated
@@ -214,7 +214,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // reproduces 300e2222 exactly, so that one line is the whole difference. css is unchanged.
 // Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
 // gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
-const EXPECTED_CUSTOMER = { js: "site.a1c7195e.min.js", css: "site.664e2e14.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.d7e1ef0c.min.js", css: "site.664e2e14.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

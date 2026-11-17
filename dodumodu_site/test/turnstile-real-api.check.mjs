@@ -7,11 +7,12 @@ const input = { value: "" };
 const host = { dataset: { sitekey: "0x4AAAAAAAtestkey" }, scrollIntoView() {} };
 const scripts = [];
 let rendered = null;
+let resets = 0;
 globalThis.window = {
   turnstile: {
     ready() { /* real api.js: never calls back for async/defer scripts */ },
     render(_el, opts) { rendered = opts; return "w1"; },
-    reset() { input.value = ""; },
+    reset() { resets += 1; input.value = ""; },
   },
   addEventListener() {},
 };
@@ -32,7 +33,7 @@ const formEl = { addEventListener(ev, fn) { formListeners[ev] = fn; }, removeEve
 globalThis.document.addEventListener = () => {};
 globalThis.document.removeEventListener = () => {};
 
-const { armTurnstile, ensureToken } = await import("../shared/scripts/turnstile.js");
+const { armTurnstile, ensureToken, checkFailed, onNextToken } = await import("../shared/scripts/turnstile.js");
 armTurnstile(formEl);
 assert.equal(scripts.length, 0, "nothing is requested while the customer is still at the top of the page");
 observe([{ isIntersecting: false }]);
@@ -50,6 +51,39 @@ rendered.callback("tok-123"); // Cloudflare solved the challenge
 await pending;
 assert.equal(input.value, "tok-123", "the token is in the form");
 
+// A transient widget error while a customer waits: the box is shown (so Cloudflare's own message and Retry are reachable)
+// and the solve is restarted by the page within about a second, not left dead behind an invisible widget.
+input.value = "";
+host.dataset.ready = "false";
+const waiting = ensureToken(5000);
+const resetsBefore = resets;
+assert.equal(rendered["error-callback"]("300030"), false, "transient errors are left to Cloudflare as well");
+assert.equal(host.dataset.ready, "true", "a customer who is waiting can see the box after an error");
+await new Promise((r) => setTimeout(r, 1500));
+assert.ok(resets > resetsBefore, "the page restarted the solve by itself after the error");
+rendered.callback("tok-after-error");
+await waiting;
+assert.equal(input.value, "tok-after-error");
+assert.equal(host.dataset.ready, "false", "the box is hidden again once a token arrives");
+
+// A round of waiting that failed starts the check over at once, and again at the customer's next tap.
+input.value = "";
+const beforeFail = resets;
+checkFailed();
+assert.ok(resets > beforeFail, "a failed round restarts the check immediately");
+const beforeTap = resets;
+const tap = ensureToken(300);
+assert.ok(resets > beforeTap, "the next tap restarts it again when there is still no token");
+await assert.rejects(tap);
+
+// A token that arrives with nobody waiting still reaches whoever asked to be told (finishing a recorded order).
+let heard = "";
+onNextToken((t) => { heard = t; });
+rendered.callback("tok-late");
+assert.equal(heard, "tok-late");
+rendered.callback("tok-later");
+assert.equal(heard, "tok-late", "a listener is called once");
+
 // A configuration error (bad key, hostname not allowed) fails at once with a distinct code, not after the timeout.
 input.value = "";
 const second = ensureToken();
@@ -57,5 +91,5 @@ assert.equal(rendered["error-callback"]("110200"), true);
 await assert.rejects(second, (e) => e.code === "turnstile_config");
 
 process.on("exit", () => {});
-console.log("PASS  turnstile renders from onload and reports configuration errors immediately");
+console.log("PASS  turnstile renders from onload, restarts after errors, and reports configuration errors immediately");
 process.exit(0); // the 8-second safety-net timer is not waited for

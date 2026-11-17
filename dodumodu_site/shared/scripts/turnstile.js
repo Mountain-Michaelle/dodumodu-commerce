@@ -23,6 +23,11 @@ const API_SRC = `${ORIGIN}/turnstile/v0/api.js?render=explicit&onload=__turnstil
 const WAIT_MS = 45_000;
 const TOKEN_FRESH_MS = 270_000;
 const LOAD_RETRIES = 2;
+// How soon a failed solve is started over. Cloudflare's own default is 8s; on a slow link that is most of the wait.
+const RESTART_AFTER_ERROR_MS = 1200;
+// A solve that has produced neither a token nor an error for this long is treated as stalled and restarted. Long on
+// purpose: on a very slow link a working solve can take a while, and restarting it early would throw that progress away.
+const STALL_MS = 20_000;
 
 let state = "idle"; // idle -> loading -> ready | failed
 let widgetId = null;
@@ -31,6 +36,12 @@ let loadAttempts = 0;
 let armed = false;
 let solveAt = 0; // when the current solve began, so a stalled one can be restarted
 let waiters = []; // [{ resolve, reject, timer }]
+let errors = 0; // transient widget errors in a row since the last token
+let interacted = false; // the customer was shown the tap box, so a failure afterwards must be visible to them
+let restartTimer = null;
+let tapRestart = false; // a whole round of waiting failed: the next tap on Place order starts the solve over
+let watchdog = null;
+let tokenListeners = [];
 
 const hostEl = () => document.getElementById("cf-turnstile");
 const inputEl = () => document.querySelector('input[name="turnstileToken"]');
@@ -60,7 +71,48 @@ function clearToken() {
   issuedAt = 0;
 }
 
-const showBox = (visible) => { hostEl().dataset.ready = String(visible); };
+const showBox = (visible) => { const h = hostEl(); if (h) h.dataset.ready = String(visible); };
+
+/**
+ * Starts the solve over. A plain reset() is enough for a stalled or errored solve; if the widget cannot be reset (or has
+ * kept failing) it is torn down and drawn again from scratch, and if the script itself never arrived it is requested again.
+ */
+function restartSolve(hard = false) {
+  clearTimeout(restartTimer);
+  restartTimer = null;
+  clearToken();
+  solveAt = Date.now();
+  if (state === "failed") return void arm();
+  if (widgetId === null || !window.turnstile) return;
+  try {
+    if (hard && typeof window.turnstile.remove === "function") {
+      window.turnstile.remove(widgetId);
+      widgetId = null;
+      renderWidget();
+    } else {
+      window.turnstile.reset(widgetId);
+    }
+  } catch {
+    // reset() threw (widget half-built): draw a fresh one
+    try { widgetId = null; renderWidget(); } catch { /* the next wake or tap tries again */ }
+  }
+}
+
+// After an error: start over soon, and back off if Cloudflare keeps failing so a bad network is not hammered.
+function scheduleRestart() {
+  if (restartTimer) return;
+  const delay = errors > 6 ? 8000 : errors > 3 ? 3000 : RESTART_AFTER_ERROR_MS;
+  restartTimer = setTimeout(() => { restartTimer = null; restartSolve(errors % 3 === 0); }, delay);
+}
+
+// While a customer waits on the check, notice a solve that has gone quiet and start it over.
+function startWatchdog() {
+  if (watchdog) return;
+  watchdog = setInterval(() => {
+    if (!waiters.length) { clearInterval(watchdog); watchdog = null; return; }
+    if (!tokenIsFresh() && Date.now() - solveAt > STALL_MS) restartSolve(false);
+  }, 3000);
+}
 
 function renderWidget() {
   const host = hostEl();
@@ -70,13 +122,22 @@ function renderWidget() {
     sitekey: host.dataset.sitekey,
     appearance: "interaction-only",
     retry: "auto",
+    "retry-interval": 2500,
     "refresh-expired": "auto",
     callback(token) {
       const input = inputEl();
       if (input) input.value = token;
       issuedAt = Date.now();
+      errors = 0;
+      interacted = false;
+      tapRestart = false;
+      clearTimeout(restartTimer);
+      restartTimer = null;
       showBox(false);
       settle(null);
+      const list = tokenListeners;
+      tokenListeners = [];
+      for (const fn of list) { try { fn(token); } catch { /* a listener must never break the solve */ } }
     },
     // A configuration problem (bad/disabled site key, hostname not allowed) can never fix itself: say so at once
     // instead of waiting out the clock.
@@ -88,13 +149,28 @@ function renderWidget() {
         settle(err);
         return true;
       }
-      return false; // transient: Cloudflare retries (retry: "auto")
+      // Transient (a dropped connection, a challenge that failed). Never leave the customer with a silent, invisible
+      // widget: if they are waiting, or had just tapped the box, show it (so Cloudflare's own message and Retry are
+      // reachable), and start the solve over without waiting out Cloudflare's slower retry.
+      errors += 1;
+      clearToken();
+      if (waiters.length || interacted) showBox(true);
+      scheduleRestart();
+      return false;
+    },
+    "unsupported-callback"() {
+      state = "failed";
+      const err = new Error("This browser cannot run the challenge");
+      err.code = "turnstile_config";
+      settle(err);
+      return true;
     },
     // The tap-to-verify box timed out unanswered: start over instead of leaving a dead box behind.
-    "timeout-callback"() { clearToken(); try { window.turnstile.reset(widgetId); solveAt = Date.now(); } catch { /* gone */ } },
+    "timeout-callback"() { restartSolve(false); },
     "expired-callback": clearToken, // Cloudflare retries errors itself (retry: auto); WAIT_MS is the only give-up
     // The challenge needs a tap: show the box, and if someone is already waiting, bring it into view.
     "before-interactive-callback"() {
+      interacted = true;
       showBox(true);
       if (waiters.length) hostEl()?.scrollIntoView?.({ block: "center", behavior: "smooth" });
     },
@@ -142,10 +218,7 @@ const whenIdle = (fn) => {
 function wake() {
   if (!turnstileConfigured() || document.visibilityState === "hidden") return;
   if (state === "failed") return void arm();
-  if (widgetId !== null && !tokenIsFresh() && Date.now() - solveAt > 20_000) {
-    clearToken();
-    try { window.turnstile.reset(widgetId); solveAt = Date.now(); } catch { /* still loading */ }
-  }
+  if (widgetId !== null && !tokenIsFresh() && (errors > 0 || Date.now() - solveAt > STALL_MS)) restartSolve(errors > 2);
 }
 
 export function armTurnstile(formEl) {
@@ -208,6 +281,13 @@ export function ensureToken(ms = WAIT_MS) {
   }
   arm();
   if (state === "failed") return Promise.reject(new Error("Challenge could not load"));
+  // The customer needs a token NOW. A solve that errored, or has been quiet for a while, will not get there by itself in
+  // time: start it over at this moment (the tap on Place order) instead of letting them repeat the same wait.
+  if (widgetId !== null && (tapRestart || errors > 0 || Date.now() - solveAt > STALL_MS)) {
+    const hard = tapRestart || errors > 2;
+    tapRestart = false;
+    restartSolve(hard);
+  }
 
   return new Promise((resolve, reject) => {
     const waiter = { resolve, reject };
@@ -216,7 +296,27 @@ export function ensureToken(ms = WAIT_MS) {
       reject(new Error("Challenge timed out"));
     }, ms);
     waiters.push(waiter);
+    startWatchdog();
   });
+}
+
+/**
+ * A whole round of waiting ended without a token. Start the solve over now, from scratch, so a fresh attempt is already
+ * running (and may even have finished) while the customer reads "tap once more"; and start over again at that tap if there
+ * is still no token, because that tap is the customer explicitly trying again.
+ */
+export function checkFailed() {
+  tapRestart = true;
+  restartSolve(true);
+}
+
+/**
+ * Calls `fn(token)` once, the next time a token arrives, even if nobody is waiting at that moment. Used to finish an
+ * order that was recorded while the check was still running. Returns a function that cancels it.
+ */
+export function onNextToken(fn) {
+  tokenListeners.push(fn);
+  return () => { tokenListeners = tokenListeners.filter((f) => f !== fn); };
 }
 
 /** The token if it is there (or arrives within `ms`), else "". Never rejects: the order goes either way. */
