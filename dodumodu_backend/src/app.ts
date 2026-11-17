@@ -3,6 +3,7 @@
 // local Node), so there is exactly one copy of the routing, the middleware and
 // the services in the repository, and switching environments switches the
 // entry point and the config — never this file.
+import { isSchemaBehind } from "./shared/schemaDrift";
 import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env";
@@ -71,7 +72,8 @@ app.onError((err, c) => {
   if (err instanceof HTTPException) return err.getResponse();
   let path = "";
   try { path = new URL(c.req.url).pathname; } catch { /* malformed URL: log without it */ }
-  logError("unhandled_error", err, { method: c.req.method, path, ray: c.req.header("cf-ray") ?? null });
+  if (isSchemaBehind(err)) logError("schema_behind", err, { method: c.req.method, path });
+  else logError("unhandled_error", err, { method: c.req.method, path, ray: c.req.header("cf-ray") ?? null });
   return c.text("Internal Server Error", 500);
 });
 
