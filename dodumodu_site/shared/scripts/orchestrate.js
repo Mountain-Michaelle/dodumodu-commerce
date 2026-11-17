@@ -7,7 +7,7 @@ import { validateOrderForm, collectOrderPayload } from "./validate.js";
 import { parsePaymentRules, decideCod, codHint } from "./codRules.js";
 import { deliveryChoices } from "./deliveryOptions.js";
 import { saveDraft, loadDraft, applyDraft, clearDraft } from "./draftStore.js";
-import { armTurnstile, quickToken, waitForToken, resetTurnstile } from "./turnstile.js";
+import { armTurnstile, quickToken, waitForToken, resetTurnstile, onNextToken, checkFailed } from "./turnstile.js";
 
 import "./stick.js";
 
@@ -334,6 +334,10 @@ export function initProductPage({ slug, productId }) {
     submitButton.dataset.loading = "true";
     retryBanner.dataset.visible = "false";
     statusEl.textContent = "Placing your order...";
+    // This tap now owns the order: a token that arrives while it waits is picked up by it, not by the late-finish listener.
+    busy = true;
+    cancelLate?.();
+    cancelLate = null;
 
     // The bot check never decides whether an order is sent. A token that is already there (the normal case) goes with
     // the order; one that is a moment away is waited for briefly; otherwise the order goes without it and the server
@@ -353,12 +357,47 @@ export function initProductPage({ slug, productId }) {
     retryBanner.dataset.visible = "false";
     submitButton.disabled = true;
     submitButton.dataset.loading = "true";
+    busy = true;
+    cancelLate?.();
+    cancelLate = null;
     await submitWithRetry(lastAttemptPayload, getOrCreateIdempotencyKey(), { statusEl, retryBanner, submitButton });
     manualRetryButton.disabled = false;
   });
 
   let pendingRounds = 0;
+  let busy = false; // a submit is in flight: a late token must not start a second one beside it
+  let cancelLate = null;
+
+  /**
+   * The order is recorded but the bot check has not finished, and the customer has been told to wait or tap again. If the
+   * check comes back on its own later (signal returns, the tab wakes), finish that SAME order then, without asking them to
+   * do anything. The server upgrades the order on the same idempotency key, so this can never create a second order.
+   */
+  function finishWhenCheckArrives(payload, idempotencyKey, ui) {
+    cancelLate?.();
+    cancelLate = onNextToken((token) => {
+      cancelLate = null;
+      if (busy) return; // the customer tapped meanwhile; that attempt picks the token up itself
+      payload.turnstileToken = token;
+      ui.submitButton.disabled = true;
+      ui.submitButton.dataset.loading = "true";
+      ui.statusEl.textContent = "Confirming your order...";
+      submitWithRetry(payload, idempotencyKey, ui);
+    });
+  }
+
   async function submitWithRetry(payload, idempotencyKey, ui) {
+    cancelLate?.();
+    cancelLate = null;
+    busy = true;
+    try {
+      await runSubmit(payload, idempotencyKey, ui);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function runSubmit(payload, idempotencyKey, ui) {
     let botCheckRetried = false;
     let lastErr = null; // why the last attempt failed, so the final message is the true one
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -375,6 +414,8 @@ export function initProductPage({ slug, productId }) {
             ui.statusEl.textContent = pendingRounds > 1
               ? "Thanks! We have your order and will confirm on WhatsApp shortly."
               : "Almost done. Tap Place order once more to finish.";
+            checkFailed();
+            finishWhenCheckArrives(payload, idempotencyKey, ui);
             return;
           }
           payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
