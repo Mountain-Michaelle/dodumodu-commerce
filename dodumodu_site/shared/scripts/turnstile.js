@@ -178,6 +178,17 @@ export function armTurnstile(formEl) {
     if (a) go();
   }
   document.addEventListener?.("click", onAnchor, true);
+  // 4. Safety nets, so the check is never first requested by the Place order tap itself (the slowest moment for it):
+  //    - the moment the customer first scrolls or touches the page, only the CONNECTION to Cloudflare is opened (DNS and
+  //      TLS are most of the wait on a slow link, and this costs the page next to nothing);
+  //    - and if nothing above has started it a few seconds after the page settled, it starts anyway.
+  const warm = () => {
+    const link = Object.assign(document.createElement("link"), { rel: "preconnect", href: ORIGIN });
+    document.head.appendChild(link);
+  };
+  for (const ev of ["scroll", "pointerdown"]) window.addEventListener?.(ev, warm, { once: true, passive: true });
+  const late = () => setTimeout(go, 8000);
+  if (document.readyState === "complete") late(); else window.addEventListener?.("load", late, { once: true });
   window.addEventListener?.("online", wake);
   document.addEventListener?.("visibilitychange", wake);
 }

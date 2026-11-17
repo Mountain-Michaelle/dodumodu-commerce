@@ -371,3 +371,34 @@ test("the flag rides the env, so Assignment Mode needs no deploy to switch on", 
   const body = await res.json() as { assignmentEnabled?: boolean };
   assert.equal(body.assignmentEnabled, true);
 });
+
+test("a database that has not been migrated is a 503 that says so, not an anonymous 500", async () => {
+  const original = ordersRepo.listForAdmin;
+  ordersRepo.listForAdmin = async () => {
+    throw Object.assign(new Error("Failed query: select ... from orders"), {
+      cause: Object.assign(new Error('column "bot_check" does not exist'), { code: "42703" }),
+    });
+  };
+  try {
+    const res = await call("/admin/orders");
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    assert.equal(body.error.code, "DATABASE_OUT_OF_DATE");
+    assert.match(body.error.message, /db:migrate/);
+    assert.ok(!/bot_check|select/i.test(JSON.stringify(body)), "no query or column text leaks to the client");
+  } finally {
+    ordersRepo.listForAdmin = original;
+  }
+});
+
+test("an ordinary unexpected fault is still the plain 500", async () => {
+  const original = ordersRepo.listForAdmin;
+  ordersRepo.listForAdmin = async () => { throw new Error("connection reset"); };
+  try {
+    const res = await call("/admin/orders");
+    assert.equal(res.status, 500);
+    assert.equal(((await res.json()) as { error: { code: string } }).error.code, "INTERNAL_ERROR");
+  } finally {
+    ordersRepo.listForAdmin = original;
+  }
+});

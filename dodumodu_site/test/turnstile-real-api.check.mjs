@@ -56,4 +56,6 @@ const second = ensureToken();
 assert.equal(rendered["error-callback"]("110200"), true);
 await assert.rejects(second, (e) => e.code === "turnstile_config");
 
+process.on("exit", () => {});
 console.log("PASS  turnstile renders from onload and reports configuration errors immediately");
+process.exit(0); // the 8-second safety-net timer is not waited for

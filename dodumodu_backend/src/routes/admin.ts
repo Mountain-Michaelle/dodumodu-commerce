@@ -1,3 +1,4 @@
+import { isSchemaBehind, SCHEMA_BEHIND_MESSAGE } from "../shared/schemaDrift";
 import { abuseRoutes } from "./admin/abuse";
 import { isNonProduction } from "../config/environment";
 import { isUsableSecret, secureEqual } from "../shared/secureEqual";
@@ -334,6 +335,11 @@ function adminError(err: unknown) {
   }
   if (code === "ForbiddenError") {
     return Response.json({ error: { code: "FORBIDDEN", message: "You do not have permission to do that" } }, { status: 403 });
+  }
+
+  if (isSchemaBehind(err)) {
+    logError("admin_schema_behind", err);
+    return Response.json({ error: { code: "DATABASE_OUT_OF_DATE", message: SCHEMA_BEHIND_MESSAGE } }, { status: 503 });
   }
 
   logError("admin_unhandled_error", err);
