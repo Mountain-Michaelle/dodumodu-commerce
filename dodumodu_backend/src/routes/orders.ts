@@ -9,7 +9,11 @@ import { ordersRepo, type OrderRow } from "../data/ordersRepo";
 import { productsRepo } from "../data/productsRepo";
 import { CodNotAvailableError } from "../services/codPolicyService";
 import { sendInBackground, sendOrderBackup, sendOrderFailureAlert } from "../services/orderBackupMailer";
-import { swallow } from "../shared/logger";
+import { swallow, logError } from "../shared/logger";
+import { findDuplicates } from "../abuse/duplicateOrders";
+import { normalizePhone } from "../shared/normalizePhone";
+import type { Db } from "../db";
+import type { OrderInput } from "../validation/orderSchema";
 
 export const ordersRoute = new Hono<{ Bindings: Env; Variables: { parsedBody: unknown; prefetchedOrder?: OrderRow | null } }>();
 
@@ -124,7 +128,7 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     await noteOrderOutcome(c, "validation_failed");
     return c.json({
       orderId: HELD_ORDER_ID_BASE, reference: "", status: "confirmed_cod", flaggedLate: false, packageId: parsed.data.packageId ?? null,
-      quantity: parsed.data.quantity, unitPrice: 0, subtotal: 0, discountPercent: 0, discountAmount: 0, amount: 0, botCheck: "verified",
+      quantity: parsed.data.quantity, unitPrice: 0, subtotal: 0, discountPercent: 0, discountAmount: 0, amount: 0,
     });
   }
 
@@ -132,7 +136,9 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
   const checkEnabled = product?.botCheckEnabled !== false;
   const token = parsed.data.turnstileToken;
 
-  let botCheck: "verified" | "missing" | "unverified" | "off" = "off";
+  // INTERNAL ONLY. What the verification said is a note for whoever reviews the order. It never changes whether the order is
+  // stored and it is never part of any response: a customer is told their order was received, whatever this says.
+  let botCheck: "verified" | "missing" | "unverified" | "failed" | "off" = "off";
   if (checkEnabled && (!isReplay || (prefetched.botCheck !== "verified" && prefetched.botCheck !== "off"))) {
     if (!token) {
       botCheck = "missing";
@@ -141,26 +147,28 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       const outcome = await verifyTurnstileOutcome(c.env, token, remoteIp, parsed.data.idempotencyKey, why);
       const detail = (why.codes ?? []).join(",").slice(0, 120);
       if (outcome === "failed") {
-        // A token Cloudflare does not recognise. The page treats this as "no token" and sends the order once more without
-        // one, so a real customer is never stranded here; a bot gains nothing it did not already have by omitting it.
+        // A token Cloudflare does not recognise. It is counted as abuse evidence and the order is flagged, but it is STORED:
+        // a refusal here lost orders for real customers (a token that expired on a slow phone, a retry, a blocked script's
+        // leftover value), and what a bot gains from a stored, flagged order is nothing a person reviewing it cannot see.
         await noteOrderOutcome(c, "turnstile_failed");
-        return c.json({ error: "Bot verification failed", code: "turnstile_failed", detail }, 400);
+        console.warn(JSON.stringify({ event: "order_stored_despite_refused_token", detail }));
+        botCheck = "failed";
+      } else {
+        botCheck = outcome === "ok" ? "verified" : "unverified";
       }
-      botCheck = outcome === "ok" ? "verified" : "unverified";
     }
   } else if (isReplay) {
     botCheck = (prefetched.botCheck as typeof botCheck | null) ?? "off";
   }
 
-  // Fail-open needs brakes: one address cannot push unlimited unverified orders through. (Generous, because many phones
-  // share one mobile-network address; the honeypot, the spam rules below and a person reviewing flagged orders do the rest.)
-  if (!isReplay && (botCheck === "missing" || botCheck === "unverified") && remoteIp) {
+  // Fail-open needs brakes, but a brake that REFUSES loses real orders: many phones share one mobile-network address in
+  // Nigeria, so a burst from one address is not evidence of a bot. The order is stored and flagged for a person instead
+  // (the honeypot and the spam rules below remain the automatic defences).
+  const riskFlags: string[] = [];
+  if (botCheck === "failed") riskFlags.push("bot_check_failed");
+  if (!isReplay && (botCheck === "missing" || botCheck === "unverified" || botCheck === "failed") && remoteIp) {
     const recent = await ordersRepo.unverifiedFromIpInLastHour(db, remoteIp).catch(() => 0);
-    if (recent >= UNVERIFIED_PER_IP_PER_HOUR) {
-      await noteOrderOutcome(c, "validation_failed");
-      c.header("Retry-After", "600");
-      return c.json({ error: "Too many orders from this connection. Please message us on WhatsApp to order.", code: "rate_limited" }, 429);
-    }
+    if (recent >= UNVERIFIED_PER_IP_PER_HOUR) riskFlags.push("unverified_burst");
   }
   const reqMeta = { ip: remoteIp || null, deviceId: c.get("deviceId") ?? null, clientKind: c.get("clientKind") ?? null, browser: c.get("browser") ?? null };
 
@@ -180,7 +188,6 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
           flaggedLate: view.flaggedLate, packageId: view.packageId, quantity: view.quantity, unitPrice: view.unitPrice,
           subtotal: view.subtotal, discountPercent: view.discountPercent, discountAmount: view.discountAmount, amount: view.amount,
           checkoutUrl: undefined,
-          botCheck: "verified", // held spam is finished as far as the page is concerned: never loops on a bot check
         });
       }
     } catch (err) {
@@ -210,10 +217,13 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       deviceId: c.get("deviceId") ?? null,
       clientKind: c.get("clientKind") ?? null,
       botCheck,
-    // Legitimate progression is the negative evidence that disarms the abuse rules
     });
-    // for this address, recorded from the order the server actually created.
     created = true;
+    if (!isReplay) {
+      // Internal review labels. Best effort and after the order exists: nothing here can fail or slow the customer's order.
+      const labels = await reviewLabels(db, order, parsed.data, riskFlags).catch((err) => { logError("order_risk_labelling_failed", err); return null; });
+      if (labels) await ordersRepo.addRisk(db, order.id, labels).catch(swallow("orders_best_effort_failed"));
+    }
     if (isReplay && botCheck === "verified" && order.botCheck !== "verified") {
       await ordersRepo.setBotCheck(db, order.id, "verified").catch(swallow("orders_best_effort_failed"));
     }
@@ -238,7 +248,6 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
       discountAmount: order.discountAmount,
       amount: order.amount,
       checkoutUrl,
-      botCheck,
     });
   } catch (err) {
     const failed = (reason: string) => {
@@ -283,3 +292,22 @@ ordersRoute.post("/create-order", orderGuard, async (c) => {
     throw err;
   }
 });
+
+
+/**
+ * What a person reviewing this order should know: the flags decided above plus any earlier open order it looks like a repeat
+ * of. Pure labelling - see src/abuse/duplicateOrders.ts for why it is narrow and why it can never refuse anyone.
+ */
+async function reviewLabels(db: Db, order: OrderRow, input: OrderInput, flags: string[]) {
+  const numbers = [normalizePhone(input.phone), normalizePhone(input.whatsapp)].filter((n): n is string => Boolean(n));
+  const candidates = await ordersRepo.duplicateCandidates(db, {
+    productId: order.productId, excludeId: order.id, since: new Date(order.createdAt.getTime() - 24 * 3_600_000),
+    numbers: [...new Set(numbers)], rawNumbers: [...new Set([input.phone, input.whatsapp])],
+    nameLower: input.customerName.trim().toLowerCase(), addressLower: input.address.trim().toLowerCase(),
+  });
+  const refs = findDuplicates(
+    { productId: order.productId, phone: input.phone, whatsapp: input.whatsapp, customerName: input.customerName, address: input.address, createdAt: order.createdAt },
+    candidates.map((c) => ({ id: c.id, reference: c.reference, productId: c.productId, phone: c.phone, whatsapp: c.whatsapp, customerName: c.customerName, address: c.address, status: c.status, createdAt: c.createdAt })),
+  );
+  return { flags: refs.length ? [...flags, "probable_duplicate"] : flags, duplicateRefs: refs };
+}

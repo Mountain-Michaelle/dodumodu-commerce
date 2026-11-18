@@ -71,10 +71,50 @@ export const ordersRepo = {
     await db.update(orders).set({ botCheck: status }).where(eq(orders.id, id));
   },
 
+  /**
+   * Internal review labels for an order. Adds to what is there, never removes, and never touches anything the customer sees.
+   * `duplicateRefs` is written only when given (a probable-duplicate pointer), so a later flag cannot erase an earlier one.
+   */
+  async addRisk(
+    db: Db, id: number,
+    risk: { flags: string[]; duplicateRefs?: Array<{ id: number; reference: string; reason: string; minutesApart: number }> },
+  ): Promise<void> {
+    if (risk.flags.length === 0 && !risk.duplicateRefs?.length) return;
+    await db.update(orders).set({
+      // array_cat then de-duplicate, so replays and races cannot pile the same flag up
+      riskFlags: sql`(SELECT COALESCE(array_agg(DISTINCT f), '{}') FROM unnest(${orders.riskFlags} || ARRAY[${sql.join(risk.flags.map((f) => sql`${f}`), sql`, `)}]::text[]) AS f)`,
+      ...(risk.duplicateRefs?.length ? { duplicateRefs: risk.duplicateRefs } : {}),
+    }).where(eq(orders.id, id));
+  },
+
+  /**
+   * Open orders that might be the same purchase as one just placed: same product, last 24h, not deleted, and sharing a
+   * phone/WhatsApp number or the same name and address. Candidates only - src/abuse/duplicateOrders.ts decides.
+   */
+  async duplicateCandidates(db: Db, input: {
+    productId: number; excludeId: number; since: Date; numbers: string[]; rawNumbers: string[]; nameLower: string; addressLower: string;
+  }): Promise<OrderRow[]> {
+    const identity: SQL[] = [];
+    if (input.numbers.length) identity.push(inArray(orders.phoneNorm, input.numbers));
+    if (input.rawNumbers.length) identity.push(inArray(orders.whatsapp, input.rawNumbers), inArray(orders.phone, input.rawNumbers));
+    if (input.nameLower && input.addressLower) {
+      identity.push(and(sql`lower(${orders.customerName}) = ${input.nameLower}`, sql`lower(${orders.address}) = ${input.addressLower}`)!);
+    }
+    if (identity.length === 0) return [];
+    return db.select().from(orders).where(and(
+      eq(orders.productId, input.productId),
+      ne(orders.id, input.excludeId),
+      gte(orders.createdAt, input.since),
+      sql`${orders.deletedAt} IS NULL`,
+      sql`${orders.status} NOT IN ('delivered','cancelled','failed')`,
+      or(...identity),
+    )).orderBy(desc(orders.createdAt)).limit(25);
+  },
+
   /** Orders from this address in the last hour that went through without a verified bot check. */
   async unverifiedFromIpInLastHour(db: Db, ip: string): Promise<number> {
     const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(orders)
-      .where(and(eq(orders.createdFromIp, ip), inArray(orders.botCheck, ["missing", "unverified"]),
+      .where(and(eq(orders.createdFromIp, ip), inArray(orders.botCheck, ["missing", "unverified", "failed"]),
         // In SQL, so the window and created_at (defaultNow) are measured by the same clock.
         sql`${orders.createdAt} >= now() - interval '1 hour'`));
     return row?.n ?? 0;

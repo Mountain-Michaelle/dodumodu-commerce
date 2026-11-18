@@ -7,7 +7,7 @@ import { validateOrderForm, collectOrderPayload } from "./validate.js";
 import { parsePaymentRules, decideCod, codHint } from "./codRules.js";
 import { deliveryChoices } from "./deliveryOptions.js";
 import { saveDraft, loadDraft, applyDraft, clearDraft } from "./draftStore.js";
-import { armTurnstile, quickToken, waitForToken, resetTurnstile, onNextToken, checkFailed } from "./turnstile.js";
+import { armTurnstile, tokenForSubmit, checkConfigured, waitForToken, resetTurnstile, onNextToken, checkFailed } from "./turnstile.js";
 
 import "./stick.js";
 
@@ -22,17 +22,33 @@ const IDEMPOTENCY_KEY_STORAGE = "skincare_order_idempotency_key";
 // customer refreshes, a plain variable would generate a *new* key and
 // create a second order. sessionStorage means the retry after refresh
 // reuses the same key and lands on the same order.
+// sessionStorage can throw (private mode, storage disabled), so the key is also kept in memory: a retry in the same page
+// load still reuses it even when storage is unavailable.
+let memoryKey = null;
+function newKey() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* fall through */ }
+  // Older Android WebViews have no randomUUID: build a v4 UUID from getRandomValues, or Math.random as a last resort.
+  const bytes = new Uint8Array(16);
+  try { crypto.getRandomValues(bytes); } catch (e) { for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256); }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const h = [];
+  for (let i = 0; i < 16; i++) h.push((bytes[i] + 256).toString(16).slice(1));
+  return `${h.slice(0, 4).join("")}-${h.slice(4, 6).join("")}-${h.slice(6, 8).join("")}-${h.slice(8, 10).join("")}-${h.slice(10).join("")}`;
+}
 function getOrCreateIdempotencyKey() {
-  let key = sessionStorage.getItem(IDEMPOTENCY_KEY_STORAGE);
-  if (!key) {
-    key = crypto.randomUUID();
-    sessionStorage.setItem(IDEMPOTENCY_KEY_STORAGE, key);
-  }
+  let key = null;
+  try { key = sessionStorage.getItem(IDEMPOTENCY_KEY_STORAGE); } catch (e) { /* storage unavailable */ }
+  key = key || memoryKey;
+  if (!key) key = newKey();
+  memoryKey = key;
+  try { sessionStorage.setItem(IDEMPOTENCY_KEY_STORAGE, key); } catch (e) { /* kept in memory */ }
   return key;
 }
 
 function clearIdempotencyKey() {
-  sessionStorage.removeItem(IDEMPOTENCY_KEY_STORAGE);
+  memoryKey = null;
+  try { sessionStorage.removeItem(IDEMPOTENCY_KEY_STORAGE); } catch (e) { /* nothing to clear */ }
 }
 
 // Mirrors orderService.ts's computeUnitPrice — a display convenience only,
@@ -104,16 +120,12 @@ export function initProductPage({ slug, productId }) {
     refreshPaymentOptions();
   }
 
-  // Start the anti-spam challenge once the page itself has finished loading (and sooner if the customer heads for the
-  // form), so a fresh token is already waiting at "Place order". It is invisible unless Cloudflare needs a tap, and it
-  // never competes with the first paint or the hero image. See turnstile.js.
+  // The anti-spam check is armed here but does NOTHING until the customer first types in or changes a field of this form
+  // (see turnstile.js): no request, no script, no timer at load, reload, scroll or idle.
   armTurnstile(form);
 
-  // First paint already happened from static HTML — the quantity input is a
-  // plain <input type="number"> until this resolves. Fetch page data (one
-  // request covers product/packages/discount tiers/images/testimonials) and
-  // render everything that depends on it right after.
-  // The gallery is printed into the page by the publish build, so it needs no API round trip.
+  // The gallery, testimonials, prices and delivery options are all printed into a published page, so rendering needs no
+  // backend request. Only a page built without them (local dev, the source page) falls back to the API.
   try {
     const gallery = JSON.parse(carouselContainer?.dataset.gallery || "null");
     if (Array.isArray(gallery)) {
@@ -121,39 +133,55 @@ export function initProductPage({ slug, productId }) {
     }
   } catch (e) { /* malformed attribute: keep the static first photo */ }
 
-  // Ask for the pricing data NOW (the script has just run), not at the next idle moment: on a slow phone that gap is
-  // hundreds of milliseconds of a quantity box with no price beside it. Rendering still waits for idle.
-  const pageDataRequest = getPageData(slug);
-  pageDataRequest.catch(() => {}); // handled where it is awaited; this only prevents an "unhandled" report
-
-  const __r = async () => {
+  function readEmbeddedPageData() {
     try {
-      const data = await pageDataRequest;
-      pricing.product = data.product;
-      pricing.packageOptions = data.product.packageOptions || [];
-      pricing.discountTiers = data.discountTiers;
-      pricing.maxOrderQuantity = data.maxOrderQuantity;
-      pricing.packageId = pricing.packageOptions[0]?.id ?? null;
-      paymentRules = parsePaymentRules(data.paymentRules);
+      const el = document.getElementById("page-data");
+      const data = el ? JSON.parse(el.textContent) : null;
+      return data && data.product ? data : null;
+    } catch (e) { return null; }
+  }
 
-      renderPackageSelector(packageSelect, packageField, pricing.packageOptions);
-      rerenderPricing();
+  function applyPageData(data) {
+    pricing.product = data.product;
+    pricing.packageOptions = data.product.packageOptions || [];
+    pricing.discountTiers = data.discountTiers || [];
+    pricing.maxOrderQuantity = data.maxOrderQuantity;
+    pricing.packageId = pricing.packageOptions[0]?.id ?? null;
+    paymentRules = parsePaymentRules(data.paymentRules);
 
-      // A published page already drew its gallery from data-gallery (below). Only a page without one
-      // (local dev, the source page) builds it from the API.
-      if (!carouselContainer?.dataset.gallery) {
-        renderCarousel(carouselContainer, (data.images || []).map((img) => ({ key: img.r2Key, altText: img.altText })), imageOptions());
-      }
+    renderPackageSelector(packageSelect, packageField, pricing.packageOptions);
+    rerenderPricing();
+
+    // A published page already drew its gallery and testimonials. Only a page without them builds them from data.
+    if (!carouselContainer?.dataset.gallery) {
+      renderCarousel(carouselContainer, (data.images || []).map((img) => ({ key: img.r2Key, altText: img.altText })), imageOptions());
+    }
+    if (testimonialsContainer && !testimonialsContainer.querySelector(".testimonial-card")) {
       renderTestimonials(testimonialsContainer, (data.testimonials || []).map((t) => ({ url: mediaUrl(t.r2Key), ...t })));
-      hydrateDeliveryDates(data.deliveryOptions);
-      restoreDraft();
-      refreshPaymentOptions();
+    }
+    hydrateDeliveryDates(data.deliveryOptions);
+    restoreDraft();
+    refreshPaymentOptions();
+  }
+
+  async function loadPageDataFromApi() {
+    try {
+      applyPageData(await getPageData(slug));
     } catch (err) {
-      // No backend: the gallery printed into the page (or its static hero) stays as it is.
+      // No backend: the page's static content stays as it is.
       if (quantityPriceEl) quantityPriceEl.innerHTML = "";
     }
+  }
+
+  // Scheduled at the end of init (after every handler below is defined).
+  const startPageData = () => {
+    const embedded = readEmbeddedPageData();
+    if (embedded) {
+      try { applyPageData(embedded); } catch (err) { if (quantityPriceEl) quantityPriceEl.innerHTML = ""; }
+      return;
+    }
+    if ("requestIdleCallback" in window) window.requestIdleCallback(loadPageDataFromApi); else setTimeout(loadPageDataFromApi, 1);
   };
-  if ("requestIdleCallback" in window) window.requestIdleCallback(__r); else setTimeout(__r, 1);
 
   packageSelect.addEventListener("change", () => {
     pricing.packageId = packageSelect.value;
@@ -340,12 +368,11 @@ export function initProductPage({ slug, productId }) {
     cancelLate = null;
 
     // The bot check never decides whether an order is sent. A token that is already there (the normal case) goes with
-    // the order; one that is a moment away is waited for briefly; otherwise the order goes without it and the server
-    // records it as unconfirmed. The page then keeps the check going and completes the SAME order when it arrives.
-    statusEl.textContent = "Placing your order...";
+    // the order; a check that is already running is waited for briefly; otherwise the order goes without it and is
+    // recorded. The page then runs the check and completes the SAME order (same key) when it arrives.
     const idempotencyKey = getOrCreateIdempotencyKey();
     const payload = collectOrderPayload(form, productId);
-    payload.turnstileToken = await quickToken(2500);
+    payload.turnstileToken = await tokenForSubmit(1500);
     lastAttemptPayload = payload;
 
     await submitWithRetry(payload, idempotencyKey, { statusEl, retryBanner, submitButton });
@@ -364,25 +391,75 @@ export function initProductPage({ slug, productId }) {
     manualRetryButton.disabled = false;
   });
 
-  let pendingRounds = 0;
   let busy = false; // a submit is in flight: a late token must not start a second one beside it
   let cancelLate = null;
 
+  // Message for a customer whose order is safely recorded. It never says anything about the verification itself.
+  const RECEIVED = "Thanks! We've received your order. Just finishing up\u2026";
+  const CONFIRMED = "Thanks! We have your order and will confirm on WhatsApp shortly.";
+
+  /** The order is recorded and nothing more is needed: leave for the thank-you page. */
+  function finishOrder(result) {
+    clearIdempotencyKey();
+    // The order exists: the draft of the same details must not come back on the next visit and fill a second order.
+    clearTimeout(draftTimer);
+    clearDraft(slug);
+    // Rest the page BEFORE leaving it (see restForm): the browser snapshots the document for the Back button.
+    restForm();
+    // The thank-you page shows this verbatim - it is the server's breakdown, never recomputed in the browser.
+    try { sessionStorage.setItem("skincare_last_order", JSON.stringify(result)); } catch (e) { /* thank-you falls back */ }
+    window.location.href = "/thank-you.html";
+  }
+
+  /** Sends the SAME order again with the token now in the form so the server completes it. The order already exists, so
+   *  a failure here changes nothing for the customer. Returns once it has been answered or given up on. */
+  async function completeWithToken(payload, idempotencyKey) {
+    payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
+    if (!payload.turnstileToken) return;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { await createOrder(payload, idempotencyKey); return; } catch (err) {
+        if (err.status && err.status !== 429 && err.status !== 503) return;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+    }
+  }
+
   /**
-   * The order is recorded but the bot check has not finished, and the customer has been told to wait or tap again. If the
-   * check comes back on its own later (signal returns, the tab wakes), finish that SAME order then, without asking them to
-   * do anything. The server upgrades the order on the same idempotency key, so this can never create a second order.
+   * Called once the server has recorded the order. If a token went with it (or there is no bot check in this build) the
+   * order is complete. If not, the customer is told the order was received, the check is started (the box appears under
+   * the button only if Cloudflare needs a tap, with a hint), and the SAME order is completed when the token arrives.
+   * Whatever happens, they are never asked to submit again and a second order is never created.
    */
-  function finishWhenCheckArrives(payload, idempotencyKey, ui) {
+  async function onOrderRecorded(result, payload, idempotencyKey, ui) {
+    if (payload.turnstileToken || !checkConfigured()) return finishOrder(result);
+
+    clearTimeout(draftTimer);
+    clearDraft(slug); // recorded: the draft has done its job
+    ui.submitButton.disabled = true; // no accidental second tap while this order is being completed
+    ui.submitButton.dataset.loading = "false";
+    ui.statusEl.textContent = RECEIVED;
+
+    if (await waitForToken(15000)) {
+      await completeWithToken(payload, idempotencyKey);
+      return finishOrder(result);
+    }
+
+    // The check did not finish in time (slow link, blocked script). The order IS recorded, so say so, leave the form ready
+    // for the next order, and keep trying quietly: if the token turns up later it completes this order in place.
+    checkFailed();
+    clearIdempotencyKey();
+    restForm();
+    ui.statusEl.textContent = CONFIRMED;
+    finishWhenCheckArrives(payload, idempotencyKey);
+  }
+
+  function finishWhenCheckArrives(payload, idempotencyKey) {
     cancelLate?.();
-    cancelLate = onNextToken((token) => {
+    cancelLate = onNextToken(async () => {
       cancelLate = null;
-      if (busy) return; // the customer tapped meanwhile; that attempt picks the token up itself
-      payload.turnstileToken = token;
-      ui.submitButton.disabled = true;
-      ui.submitButton.dataset.loading = "true";
-      ui.statusEl.textContent = "Confirming your order...";
-      submitWithRetry(payload, idempotencyKey, ui);
+      if (busy) return; // a new order is being placed meanwhile: it needs this token
+      await completeWithToken(payload, idempotencyKey);
+      resetTurnstile(); // that token is spent; have a fresh one ready for the next order
     });
   }
 
@@ -398,66 +475,19 @@ export function initProductPage({ slug, productId }) {
   }
 
   async function runSubmit(payload, idempotencyKey, ui) {
-    let botCheckRetried = false;
     let lastErr = null; // why the last attempt failed, so the final message is the true one
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await createOrder(payload, idempotencyKey);
-        // Recorded, but the bot check did not complete: keep trying it in the background and finish the same order when
-        // it does. No thank-you page until then (it is also the page that counts a conversion).
-        if (result.botCheck === "missing" || result.botCheck === "unverified") {
-          ui.statusEl.textContent = "Confirming your order...";
-          if (payload.turnstileToken) resetTurnstile(); // that token was spent or expired; with none sent, the solve already running is kept
-          if (!(await waitForToken(pendingRounds++ ? 12000 : 20000))) {
-            ui.submitButton.disabled = pendingRounds > 1;
-            ui.submitButton.dataset.loading = "false";
-            ui.statusEl.textContent = pendingRounds > 1
-              ? "Thanks! We have your order and will confirm on WhatsApp shortly."
-              : "Almost done. Tap Place order once more to finish.";
-            checkFailed();
-            finishWhenCheckArrives(payload, idempotencyKey, ui);
-            return;
-          }
-          payload.turnstileToken = form.elements["turnstileToken"]?.value || "";
-          attempt = -1;
-          continue;
-        }
-        clearIdempotencyKey();
-        // The order exists — the draft of the same details must not come back
-        // on the next visit and re-fill a second order for the same person.
-        clearTimeout(draftTimer);
-        clearDraft(slug);
-        // Rest the page before leaving it, not after: see restForm(). By the
-        // time the browser caches this document for the Back button, the form
-        // must already look untouched.
-        restForm();
-        // The thank-you page shows this verbatim — it's the server's
-        // breakdown, never recomputed in the browser (§6 step 9).
-        sessionStorage.setItem("skincare_last_order", JSON.stringify(result));
-        window.location.href = "/thank-you.html";
+        await onOrderRecorded(result, payload, idempotencyKey, ui);
         return;
       } catch (err) {
         lastErr = err;
         // 429 and 503 are the server asking for a retry (rate limit; verifier or database briefly unavailable).
         if (err.status && err.status !== 429 && err.status !== 503) {
-          if (err.code === "turnstile_failed" && !botCheckRetried) {
-            // Cloudflare did not recognise the token. Nothing was created: send the SAME order again without it, once;
-            // the server accepts it as unconfirmed and the check is retried afterwards. A customer is never stranded.
-            botCheckRetried = true;
-            resetTurnstile();
-            payload.turnstileToken = "";
-            attempt = -1;
-            continue;
-          }
-          resetTurnstile();
-          // A real validation/business error (including 500s the server chose
-          // to return as a response) — retrying won't help.
-          //
-          // The attempt is over, so the idempotency key goes too: the next
-          // submit is a new intent. Keeping the key would replay this
-          // rejection forever — and any order an older build half-created
-          // before failing would keep answering in place of the one the
-          // customer now wants.
+          if (payload.turnstileToken) resetTurnstile();
+          // A real validation/business error - retrying won't help. The attempt is over, so the key goes too: the next
+          // submit is a new intent. The customer's input is untouched.
           clearIdempotencyKey();
           if (err.fields) {
             for (const field of form.querySelectorAll(".field")) {
@@ -466,7 +496,7 @@ export function initProductPage({ slug, productId }) {
               if (message) setFieldError(field, message);
             }
           }
-          ui.statusEl.textContent = (err.message || "Something went wrong.") + (err.code === "turnstile_failed" && err.detail ? ` (${err.detail})` : "");
+          ui.statusEl.textContent = err.message || "Something went wrong.";
           ui.submitButton.disabled = false;
           ui.submitButton.dataset.loading = "false";
           return;
@@ -477,8 +507,8 @@ export function initProductPage({ slug, productId }) {
         }
       }
     }
-    // Idempotency makes retries safe, but we still don't hammer a dead connection forever.
-    // The server DID answer (503/429): say what it said instead of blaming the customer's connection.
+    // Idempotency makes retries safe, but we still don't hammer a dead connection forever. NOTHING was recorded, so the
+    // customer's input stays exactly as it is and the same key is kept for the next try.
     ui.statusEl.textContent = lastErr?.status
       ? `${lastErr.message}${lastErr.detail ? ` (${lastErr.detail})` : ""}`
       : lastErr ? `Could not send (${lastErr.name}).` : "";
@@ -486,6 +516,8 @@ export function initProductPage({ slug, productId }) {
     ui.submitButton.disabled = false;
     ui.submitButton.dataset.loading = "false";
   }
+
+  startPageData();
 } catch (e) {}
 }
 

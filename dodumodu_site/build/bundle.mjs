@@ -131,7 +131,7 @@ async function bundleJs(entryFileName, outBaseName) {
     bundle: true,
     minify: true,
     format: "iife",
-    target: ["es2019"],
+    target: ["es2015"],
     write: false,
   });
   const minified = result.outputFiles[0].text;
@@ -261,7 +261,7 @@ async function minifyInlineScript(body) {
   const result = await build({
     stdin: { contents: body, loader: "js", resolveDir: sharedDir },
     minify: true,
-    target: ["es2019"],
+    target: ["es2015"],
     write: false,
   });
   return result.outputFiles[0].text.trim();

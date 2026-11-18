@@ -8,7 +8,7 @@ import {
   copyToClipboard, listScaffold,
 } from "../ui.js";
 import { markAsSpam, revertSpamFlag } from "./spam.js";
-import { orderBadges, orderEvidenceSection } from "./evidence.js";
+import { orderBadges, orderEvidenceSection, duplicateSummary } from "./evidence.js";
 
 // The delivery window the customer picked (today / tomorrow / next_tomorrow).
 // Full labels live in the modal; the LIST badge uses the short forms ("Day
@@ -808,7 +808,8 @@ export function ordersView({ shell, identity }) {
           ["Customer", order.customerName],
           ["Phone", el("span", { class: "mono", text: order.phone })],
           ["WhatsApp", el("span", { class: "mono", text: order.whatsapp })],
-          ...(order.botCheck ? [["Bot check", { verified: "Verified", off: "Off for this product", missing: "Pending (no result received)", unverified: "Pending (could not be confirmed)" }[order.botCheck] || order.botCheck]] : []),
+          ...(order.botCheck ? [["Bot check", { verified: "Verified", off: "Off for this product", missing: "Pending (no result received)", unverified: "Pending (could not be confirmed)", failed: "Failed (token refused by Cloudflare)" }[order.botCheck] || order.botCheck]] : []),
+          ...(duplicateSummary(order) ? [["Looks like a repeat of", duplicateSummary(order)]] : []),
           ["Address", el("div", { class: "stack" },
             el("span", { text: order.address }),
             el("span", { class: "muted", text: order.state }))],

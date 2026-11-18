@@ -495,7 +495,9 @@ adminRoute.put("/testimonials/:id?", async (c) => {
     productId,
     id: idParam ? Number(idParam) : undefined,
   });
-  return c.json({ testimonial });
+  // The page prints its testimonials from its snapshot, so the edit is only visible once that product's page is regenerated.
+  const republished = await publishService.republishAffected(db, c.env, c.get("principal").email, { productId });
+  return c.json({ testimonial, republished });
 });
 
 // §5.12 — a small, flat, admin-editable table: the "global variable" for
@@ -522,7 +524,9 @@ adminRoute.put("/discount-tiers", async (c) => {
   })));
 
   console.log(JSON.stringify({ event: "admin_discount_tiers_updated", by: c.get("principal").email, tierCount: tiers.length }));
-  return c.json({ discountTiers: tiers });
+  // Every published page prints these tiers: regenerate them all, or customers would see one price and be charged another.
+  const republished = await publishService.republishAffected(db, c.env, c.get("principal").email);
+  return c.json({ discountTiers: tiers, republished });
 });
 
 // §5.13 — pay-on-delivery eligibility: which states may choose it, and the
@@ -552,7 +556,9 @@ adminRoute.put("/payment-rules", async (c) => {
     event: "admin_payment_rules_updated", by: c.get("principal").email,
     codStateCount: saved.codStates.length, codBulkThreshold: saved.codBulkThreshold,
   }));
-  return c.json({ paymentRules: codPolicyService.publicRules(saved) });
+  // Pay-on-delivery eligibility is printed into every published page, so they are all regenerated.
+  const republished = await publishService.republishAffected(db, c.env, c.get("principal").email);
+  return c.json({ paymentRules: codPolicyService.publicRules(saved), republished });
 });
 
 

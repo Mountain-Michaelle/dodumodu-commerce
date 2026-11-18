@@ -29,6 +29,7 @@
 {{HERO_PRELOAD}}
 {{CSP_META}}
 {{RUNTIME_CONFIG}}
+{{PAGE_DATA}}
 {{JSON_LD}}
 <style>{{CSS_INLINE}}</style>
 </head>
@@ -184,10 +185,11 @@ It's past our same-day cutoff &mdash; we'll still note your preference, but deli
 </div>
 <div class="visually-hidden" aria-hidden="true"><label>Leave this empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
 <input type="hidden" name="turnstileToken" value="">
-<div class="cf-turnstile" id="cf-turnstile" data-sitekey="{{TURNSTILE_SITE_KEY}}" data-callback="onTurnstileToken"></div>
 <p class="submit-note">Choosing Pay on delivery? You pay only after you open and check your package.</p>
 <button type="submit" class="submit-button">Place order</button>
 <div class="form-status" role="status" aria-live="polite"></div>
+<div class="cf-turnstile" id="cf-turnstile" data-sitekey="{{TURNSTILE_SITE_KEY}}" data-callback="onTurnstileToken"></div>
+<p class="cf-hint" id="cf-hint">Please tick the box above to finish your order.</p>
 <div id="retry-banner" class="retry-banner" role="alert">
 <span>We couldn't reach the server. Check your connection and try again.</span>
 <button type="button" id="manual-retry-button" class="manual-retry-button">Try again</button>

@@ -1,23 +1,24 @@
-// The bot check (Cloudflare Turnstile), built so a customer never waits for it and never sees it unless Cloudflare
-// itself needs a tap.
+// The bot check (Cloudflare Turnstile), built so it can never get in the customer's way.
 //
-// WHEN IT LOADS. On intent, not at page load: when the order form is about two screens away, when a field is touched,
-// or when an order button jumps to the form. Loading it with the page made small Android phones laggy while the hero and
-// the first scroll were still happening; filling the form takes the customer long enough for the solve to finish first.
+// WHEN IT LOADS. Only on genuine interaction with the order form: typing in, selecting, or changing a field (and the
+// moment Place order is tapped, if it has not started yet). NOT on page load, reload, scrolling, idle, a timer, or the
+// form merely coming into view. Nothing here registers a scroll/timer/observer before that first interaction: until then
+// this module costs the page nothing and makes no request to Cloudflare. It starts once per verification lifecycle.
 //
 // WHAT THE CUSTOMER SEES. Nothing (`appearance: interaction-only`): the challenge runs invisibly and the box appears only
-// if Cloudflare decides it needs a tap. The container is never display:none (a hidden iframe can stall the solve); it is
-// collapsed to zero height until a tap is actually needed.
+// if Cloudflare decides it needs a tap. The container sits BELOW the Place order button, so it never pushes down a field
+// being typed into. It is never display:none (a hidden iframe can stall the solve).
+//
+// IT NEVER DECIDES WHETHER AN ORDER IS TAKEN. Place order sends the order with a token if one is already there, and
+// without one otherwise (the server records it, internally unconfirmed). The page then keeps the check going and completes
+// the SAME order (same idempotency key) when the token arrives. See orchestrate.js.
 //
 // TOKENS. A token is valid for 5 minutes and works once. So: a token older than 4.5 minutes is dropped and re-solved in
-// the background, a token the server spent (any answered order attempt) is dropped by resetTurnstile() so the next click
-// has a fresh one waiting, and Cloudflare is told to refresh an expired token on its own.
-//
-// SLOW LINKS. The script load is retried, the wait at "Place order" is 45s (not 10s) with an honest message from the page,
-// and the order is never posted with a token that cannot verify.
+// the background, a token the server saw is dropped by resetTurnstile(), and Cloudflare is told to refresh an expired
+// token on its own.
 //
 // No site key means the challenge is not configured for this build (local development, where the server skips
-// verification too): nothing is requested and ensureToken() resolves at once.
+// verification too): nothing is requested and every helper resolves at once.
 const ORIGIN = "https://challenges.cloudflare.com";
 const API_SRC = `${ORIGIN}/turnstile/v0/api.js?render=explicit&onload=__turnstileLoaded`;
 const WAIT_MS = 45_000;
@@ -172,7 +173,9 @@ function renderWidget() {
     "before-interactive-callback"() {
       interacted = true;
       showBox(true);
-      if (waiters.length) hostEl()?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      // Someone is waiting on the check: make sure the box (right under the button) is on screen. Instant and minimal
+      // ("nearest"), never a smooth scroll that makes the page appear to jump.
+      if (waiters.length) hostEl()?.scrollIntoView?.({ block: "nearest" });
     },
     "after-interactive-callback"() { showBox(false); },
   });
@@ -202,21 +205,23 @@ function loadScript() {
   document.head.appendChild(script);
 }
 
+let wakeListening = false;
 function arm() {
   if (!turnstileConfigured()) return;
-  if (state === "failed") { state = "idle"; loadAttempts = 0; } // a later click gets a fresh try
+  if (state === "failed") { state = "idle"; loadAttempts = 0; } // a later interaction gets a fresh try
   if (state !== "idle") return;
+  if (!wakeListening) {
+    // Registered only once the check has actually been started, never before any interaction.
+    wakeListening = true;
+    window.addEventListener?.("online", wake);
+    document.addEventListener?.("visibilitychange", wake);
+  }
   loadScript();
 }
 
-const whenIdle = (fn) => {
-  if (typeof requestIdleCallback === "function") requestIdleCallback(fn, { timeout: 2000 });
-  else setTimeout(fn, 300);
-};
-
 // A phone that lost signal, slept, or came back to this tab must not be left holding a failed or stalled check.
 function wake() {
-  if (!turnstileConfigured() || document.visibilityState === "hidden") return;
+  if (state === "idle" || !turnstileConfigured() || document.visibilityState === "hidden") return;
   if (state === "failed") return void arm();
   if (widgetId !== null && !tokenIsFresh() && (errors > 0 || Date.now() - solveAt > STALL_MS)) restartSolve(errors > 2);
 }
@@ -225,45 +230,27 @@ export function armTurnstile(formEl) {
   if (armed) return;
   if (!turnstileConfigured()) return; // no challenge in this build, nothing to arm
   armed = true;
-
-  // The solve is real work (an iframe, crypto, network). Running it while a phone is still loading and scrolling the
-  // top of the page made the whole page feel heavy, so it starts on INTENT instead of at load, and still well before
-  // the button: the customer needs 10+ seconds to fill the form.
-  let io = null;
+  if (!formEl?.addEventListener) return;
+  // The ONLY triggers: the customer focuses, types in, or changes a field of the order form. One tiny passive listener
+  // per event, removed on the first hit. No IntersectionObserver, no scroll/pointer/anchor listener, no timer.
+  const events = ["focusin", "input", "change"];
   const go = () => {
-    io?.disconnect();
-    for (const ev of ["focusin", "pointerdown"]) formEl?.removeEventListener?.(ev, go);
-    document.removeEventListener?.("click", onAnchor, true);
+    for (const ev of events) formEl.removeEventListener(ev, go);
     arm();
   };
-  // 1. The customer touches the form.
-  for (const ev of ["focusin", "pointerdown"]) formEl?.addEventListener?.(ev, go, { once: true, passive: true });
-  // 2. The form is about to come into view (about two screens away).
-  if (formEl && typeof IntersectionObserver === "function") {
-    io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) go(); }, { rootMargin: "1200px 0px" });
-    io.observe(formEl);
-  } else {
-    whenIdle(arm); // no observer support: fall back to after-load idle
-  }
-  // 3. They jump straight to the form from an order button.
-  function onAnchor(e) {
-    const a = e.target?.closest?.('a[href^="#order"]');
-    if (a) go();
-  }
-  document.addEventListener?.("click", onAnchor, true);
-  // 4. Safety nets, so the check is never first requested by the Place order tap itself (the slowest moment for it):
-  //    - the moment the customer first scrolls or touches the page, only the CONNECTION to Cloudflare is opened (DNS and
-  //      TLS are most of the wait on a slow link, and this costs the page next to nothing);
-  //    - and if nothing above has started it a few seconds after the page settled, it starts anyway.
-  const warm = () => {
-    const link = Object.assign(document.createElement("link"), { rel: "preconnect", href: ORIGIN });
-    document.head.appendChild(link);
-  };
-  for (const ev of ["scroll", "pointerdown"]) window.addEventListener?.(ev, warm, { once: true, passive: true });
-  const late = () => setTimeout(go, 8000);
-  if (document.readyState === "complete") late(); else window.addEventListener?.("load", late, { once: true });
-  window.addEventListener?.("online", wake);
-  document.addEventListener?.("visibilitychange", wake);
+  for (const ev of events) formEl.addEventListener(ev, go, { passive: true });
+}
+
+/** True when this build has a bot check at all (a site key is configured). */
+export const checkConfigured = () => turnstileConfigured();
+
+/** The token if one is ready, else "". Starts the check if it has not started, but NEVER waits for a script that has not
+ *  loaded: Place order must not hang on it. With the check already running, waits at most `ms` for it. */
+export function tokenForSubmit(ms) {
+  if (!turnstileConfigured()) return Promise.resolve("");
+  if (tokenIsFresh()) return Promise.resolve(inputEl()?.value || "");
+  if (state === "idle" || state === "failed") { arm(); return Promise.resolve(""); }
+  return ensureToken(ms).then(() => inputEl()?.value || "", () => "");
 }
 
 /**
@@ -318,9 +305,6 @@ export function onNextToken(fn) {
   tokenListeners.push(fn);
   return () => { tokenListeners = tokenListeners.filter((f) => f !== fn); };
 }
-
-/** The token if it is there (or arrives within `ms`), else "". Never rejects: the order goes either way. */
-export const quickToken = (ms) => ensureToken(ms).then(() => inputEl()?.value || "", () => "");
 
 /** True when a token is (or becomes, within `ms`) available. Used to upgrade an order that went through without one. */
 export const waitForToken = (ms) => ensureToken(ms).then(() => Boolean(inputEl()?.value), () => false);

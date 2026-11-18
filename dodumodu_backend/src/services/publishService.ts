@@ -99,7 +99,10 @@ export const publishService = {
       // does: what the form offers and what the page promises must be the ones
       // that were true when the page was built. Public numbers only - nothing in
       // here can rewrite an order that already exists.
-      deliveryOptions: deliveryService.getDeliveryOptions(),
+      // The full set, NOT today's list: the list depends on the hour the page happens to be published, which froze "today" out for
+      // everyone after a 3pm publish and made identical content hash differently morning vs evening. The page applies the 3pm WAT
+      // cutoff itself from the visitor's clock, and the server still re-checks every order.
+      deliveryOptions: ["today", "tomorrow", "next_tomorrow"],
       discountTiers: discountTiers.map((t) => ({
         minQuantity: t.minQuantity, discountPercent: t.discountPercent, label: t.label,
       })),
@@ -107,6 +110,34 @@ export const publishService = {
       paymentRules: codPolicyService.publicRules(paymentRules),
       freeDeliveryStates: deliveryService.freeDeliveryStates(),
     };
+  },
+
+  /**
+   * Published pages are static: the page prints its prices, discount tiers, pay-on-delivery rules and testimonials from the
+   * snapshot and asks the backend for none of it. So an edit to any of those is only real once the affected pages are
+   * regenerated. This does that, for every page ever published (global rules) or one product's page (a testimonial), skipping
+   * products that were never published.
+   */
+  async republishAffected(
+    db: Db, env: Env, publishedBy: string, only?: { productId: number },
+  ): Promise<Array<{ slug: string; outcome?: string; reused?: boolean; error?: string }>> {
+    const ids = only
+      ? ((await publishesRepo.latestForProduct(db, only.productId)) ? [only.productId] : [])
+      : await publishesRepo.publishedProductIds(db);
+    const results: Array<{ slug: string; outcome?: string; reused?: boolean; error?: string }> = [];
+    for (const id of ids) {
+      const product = await productsRepo.findById(db, id);
+      if (!product) continue;
+      try {
+        const r = await publishService.publish(db, env, product.slug, publishedBy);
+        results.push({ slug: product.slug, outcome: r.outcome, reused: r.reused });
+      } catch (err) {
+        // The edit that triggered this is already saved; a failed rebuild is reported, never allowed to fail the save.
+        console.error(JSON.stringify({ event: "republish_failed", slug: product.slug, error: err instanceof Error ? err.message : String(err) }));
+        results.push({ slug: product.slug, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return results;
   },
 
   /**
