@@ -607,6 +607,9 @@ ok("orders: a recorded order is completed on the SAME idempotency key, never a n
 ok("page data: a published page reads its embedded data and only falls back to the API when it is absent",
   /getElementById\("page-data"\)/.test(orchestrateSource) && /readEmbeddedPageData\(\)/.test(orchestrateSource)
     && !/const pageDataRequest = getPageData/.test(orchestrateSource));
+ok("validation: a refused submit scrolls to and focuses the first invalid field (client, COD gate and server-named fields)",
+  /function focusFirstInvalid/.test(orchestrateSource) && (orchestrateSource.match(/focusFirstInvalid\(\)/g) || []).length >= 4
+    && /\.field\[data-invalid="true"\]/.test(orchestrateSource) && /prefers-reduced-motion/.test(orchestrateSource));
 ok("keys: crypto.randomUUID has a fallback for older Android WebViews",
   /getRandomValues/.test(orchestrateSource));
 ok("turnstile: the server's shape check accepts the blank token this build sends",

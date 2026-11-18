@@ -33,7 +33,8 @@ const BUDGETS = {
   // Removed in the same change: the IntersectionObserver / scroll / timer / anchor triggers for the bot check.
   // +0.4 more: the bot check now waits for a pause in typing and hands focus back to the field if Cloudflare's frame steals it (measured on
   // real phones as lost keystrokes / lag). Both are needed to keep typing uninterrupted.
-  js: 10.4 * 1024,     // the whole customer bundle
+  // +0.2 more: a refused submit now takes the customer to the first field that needs fixing (focusFirstInvalid), and a field's red mark clears as it is corrected.
+  js: 10.6 * 1024,     // the whole customer bundle
   // Everything the first paint needs, excluding the hero image (which is a
   // separate, cacheable, content-negotiated request). This is the number that
   // decides whether a customer on a poor connection sees the product.
@@ -220,7 +221,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
 // gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
 // Re-pinned for the interaction-only bot check, embedded page data and es2015 target; the CSS change is the bot-check box moving below the button.
-const EXPECTED_CUSTOMER = { js: "site.49bc6b02.min.js", css: "site.5d3e9bad.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.e9cf90be.min.js", css: "site.5d3e9bad.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;
