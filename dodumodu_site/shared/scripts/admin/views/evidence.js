@@ -45,6 +45,14 @@ export function orderBadges(order) {
   }
   // The bot check did not complete for this order (blocked script, slow phone, Cloudflare unreachable). It is a real
   // order; "pending" until the customer's page finishes the check, so worth a confirming message before shipping.
+  // Verified is shown too (green), so a blank space never has to be read as "unknown": every order with a bot check either
+  // says it passed or says what is outstanding. "Off for this product" has no badge: there was no check to pass.
+  if (order.botCheck === "verified") {
+    badges.push(el("span", {
+      class: "badge badge-ok", text: "Human verified",
+      title: "Cloudflare confirmed this order was placed by a person.",
+    }));
+  }
   if (order.botCheck === "failed") {
     badges.push(el("span", {
       class: `badge ${TONE.activity}`, text: "Bot check failed",

@@ -5,9 +5,16 @@
 // form merely coming into view. Nothing here registers a scroll/timer/observer before that first interaction: until then
 // this module costs the page nothing and makes no request to Cloudflare. It starts once per verification lifecycle.
 //
+// IT NEVER COMPETES WITH TYPING. Starting after the first keystroke must not cost the customer a single keystroke, so
+// the work is split into two small steps (inject the script; draw the widget), each run only once the customer has paused
+// typing for QUIET_MS and the browser is idle (requestIdleCallback). The script is async + low priority. If the customer
+// presses Place order first, the steps run at once. And if the challenge's frame still grabs keyboard focus (Cloudflare's
+// iframe can), focus is handed straight back to the field they were typing in, unless they deliberately tapped the box.
+//
 // WHAT THE CUSTOMER SEES. Nothing (`appearance: interaction-only`): the challenge runs invisibly and the box appears only
-// if Cloudflare decides it needs a tap. The container sits BELOW the Place order button, so it never pushes down a field
-// being typed into. It is never display:none (a hidden iframe can stall the solve).
+// if Cloudflare decides it needs a tap. The container sits directly ABOVE the Place order button and grows downward only
+// (the page's scroll anchoring is off, so nothing above it moves and the page does not scroll). It is never display:none
+// (a hidden iframe can stall the solve).
 //
 // IT NEVER DECIDES WHETHER AN ORDER IS TAKEN. Place order sends the order with a token if one is already there, and
 // without one otherwise (the server records it, internally unconfirmed). The page then keeps the check going and completes
@@ -43,6 +50,65 @@ let restartTimer = null;
 let tapRestart = false; // a whole round of waiting failed: the next tap on Place order starts the solve over
 let watchdog = null;
 let tokenListeners = [];
+let lastActivity = 0; // last keystroke/field change, so heavy work waits for a pause in typing
+let lastField = null; // the field the customer was last in, to give focus back to it
+let urgent = false; // Place order was pressed: do not wait for a pause any more
+let deferred = [];
+
+const QUIET_MS = 700;
+
+function runDeferred() {
+  const list = deferred;
+  deferred = [];
+  for (const fn of list) fn();
+}
+
+/** Runs `fn` once the customer has stopped typing and the browser is idle; at once if they pressed Place order. */
+function defer(fn) {
+  if (urgent) return void fn();
+  deferred.push(fn);
+  const check = () => {
+    if (!deferred.length) return; // already run (urgent)
+    const wait = QUIET_MS - (Date.now() - lastActivity);
+    if (wait > 0) return void setTimeout(check, wait);
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => (Date.now() - lastActivity < QUIET_MS ? check() : runDeferred()), { timeout: 1500 });
+    } else {
+      setTimeout(runDeferred, 0);
+    }
+  };
+  if (deferred.length === 1) check();
+}
+
+function goUrgent() {
+  urgent = true;
+  runDeferred();
+}
+
+/** Cloudflare's frame can take keyboard focus when it is drawn. Give it back to the field the customer was typing in,
+ *  unless they deliberately tapped the box. Watches only for a few seconds after the widget is drawn. */
+function guardFocus(prev) {
+  const host = hostEl();
+  if (!host || !prev || prev === document.body) return;
+  const until = Date.now() + 6000;
+  let tapped = 0;
+  const onTap = () => { tapped = Date.now(); };
+  host.addEventListener("pointerdown", onTap, true);
+  host.addEventListener("touchstart", onTap, true);
+  const onFocus = () => {
+    if (Date.now() > until) return void stop();
+    if (Date.now() - tapped < 4000) return; // a real tap on the box
+    const a = document.activeElement;
+    if (a && (a === host || host.contains(a))) { try { prev.focus({ preventScroll: true }); } catch { /* element gone */ } }
+  };
+  const stop = () => {
+    document.removeEventListener("focusin", onFocus, true);
+    host.removeEventListener("pointerdown", onTap, true);
+    host.removeEventListener("touchstart", onTap, true);
+  };
+  document.addEventListener("focusin", onFocus, true);
+  setTimeout(stop, 6500);
+}
 
 const hostEl = () => document.getElementById("cf-turnstile");
 const inputEl = () => document.querySelector('input[name="turnstileToken"]');
@@ -119,6 +185,7 @@ function renderWidget() {
   const host = hostEl();
   if (!host || !window.turnstile || widgetId !== null) return;
   solveAt = Date.now();
+  const prevFocus = lastField && document.activeElement === lastField ? lastField : null;
   widgetId = window.turnstile.render(host, {
     sitekey: host.dataset.sitekey,
     appearance: "interaction-only",
@@ -179,6 +246,11 @@ function renderWidget() {
     },
     "after-interactive-callback"() { showBox(false); },
   });
+  guardFocus(prevFocus);
+  // The frame may take focus a moment after render() returns; the guard above is still listening then.
+  if (prevFocus && host.contains(document.activeElement)) {
+    try { prevFocus.focus({ preventScroll: true }); } catch { /* element gone */ }
+  }
 }
 
 function loadScript() {
@@ -189,7 +261,10 @@ function loadScript() {
   // customer waited the full timeout at "Place order" with nothing ever loading.
   window.__turnstileLoaded = () => {
     state = "ready";
-    try { renderWidget(); } catch (e) { state = "failed"; settle(new Error("Challenge could not start")); }
+    // Drawing the widget is the heavy part: do it in a pause in typing, not between two keystrokes.
+    defer(() => {
+      try { renderWidget(); } catch (e) { state = "failed"; settle(new Error("Challenge could not start")); }
+    });
   };
   const script = document.createElement("script");
   script.src = API_SRC;
@@ -202,7 +277,7 @@ function loadScript() {
     state = "failed";
     settle(new Error("Challenge could not load"));
   };
-  document.head.appendChild(script);
+  defer(() => document.head.appendChild(script)); // after a pause in typing; at once if Place order was pressed
 }
 
 let wakeListening = false;
@@ -234,10 +309,14 @@ export function armTurnstile(formEl) {
   // The ONLY triggers: the customer focuses, types in, or changes a field of the order form. One tiny passive listener
   // per event, removed on the first hit. No IntersectionObserver, no scroll/pointer/anchor listener, no timer.
   const events = ["focusin", "input", "change"];
-  const go = () => {
-    for (const ev of events) formEl.removeEventListener(ev, go);
+  const go = (e) => {
+    lastActivity = Date.now();
+    const t = e && e.target;
+    if (t && t.matches && t.matches("input,textarea,select")) lastField = t;
     arm();
   };
+  // These stay for the page's life: each call only records "the customer is typing" (one timestamp, one reference), which
+  // is what lets the check wait for a pause. arm() does nothing after the first call.
   for (const ev of events) formEl.addEventListener(ev, go, { passive: true });
 }
 
@@ -249,7 +328,8 @@ export const checkConfigured = () => turnstileConfigured();
 export function tokenForSubmit(ms) {
   if (!turnstileConfigured()) return Promise.resolve("");
   if (tokenIsFresh()) return Promise.resolve(inputEl()?.value || "");
-  if (state === "idle" || state === "failed") { arm(); return Promise.resolve(""); }
+  if (state === "idle" || state === "failed") { arm(); goUrgent(); return Promise.resolve(""); }
+  goUrgent();
   return ensureToken(ms).then(() => inputEl()?.value || "", () => "");
 }
 
@@ -267,6 +347,7 @@ export function ensureToken(ms = WAIT_MS) {
     if (widgetId !== null) try { window.turnstile.reset(widgetId); } catch { /* still loading */ }
   }
   arm();
+  goUrgent(); // the customer is waiting on this: no more waiting for a pause in typing
   if (state === "failed") return Promise.reject(new Error("Challenge could not load"));
   // The customer needs a token NOW. A solve that errored, or has been quiet for a while, will not get there by itself in
   // time: start it over at this moment (the tap on Place order) instead of letting them repeat the same wait.

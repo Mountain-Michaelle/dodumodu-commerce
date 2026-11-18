@@ -567,8 +567,9 @@ ok("turnstile: the token callback bridges the page's global to the lazy loader",
 ok("turnstile: the container is never display:none or clipped (either can stall the challenge)",
   hasRule(".cf-turnstile{max-width:100%}") && !hasRule(".cf-turnstile{display:none")
     && hasRule('.cf-turnstile[data-ready="true"]{min-height:65px;margin:8px 0 4px}'));
-ok("turnstile: the box sits BELOW the Place order button and its status line, so it can never push a field being typed into",
-  html.indexOf('class="submit-button"') < html.indexOf('id="cf-turnstile"') && html.indexOf('class="form-status"') < html.indexOf('id="cf-turnstile"'));
+ok("turnstile: the box sits directly ABOVE the Place order button (cannot be missed) and grows downward",
+  html.indexOf('id="cf-turnstile"') < html.indexOf('class="submit-button"') && html.indexOf('id="cf-hint"') < html.indexOf('class="submit-button"')
+    && html.indexOf('class="submit-note"') < html.indexOf('id="cf-turnstile"') && hasRule("body{overflow-anchor:none}"));
 ok("turnstile: a hint under the box is shown only when the box is",
   hasRule(".cf-hint{display:none") && hasRule('.cf-turnstile[data-ready="true"]+.cf-hint{display:block}'));
 
@@ -587,9 +588,14 @@ ok("turnstile: the bot check never blocks sending - a token is used if there (or
   /payload\.turnstileToken = await tokenForSubmit\(/.test(orchestrateSource));
 const turnstileSource = readFileSync(new URL("../shared/scripts/turnstile.js", import.meta.url), "utf8");
 const turnstileCode = turnstileSource.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
-ok("turnstile: no IntersectionObserver, scroll, pointer, anchor or timer trigger can start it (interaction only)",
-  !/IntersectionObserver/.test(turnstileCode) && !/["']scroll["']/.test(turnstileCode) && !/["']pointerdown["']/.test(turnstileCode)
-    && !/onAnchor|requestIdleCallback|whenIdle|preconnect/.test(turnstileCode) && !/setTimeout\(go/.test(turnstileCode));
+const armBody = turnstileCode.slice(turnstileCode.indexOf("export function armTurnstile"), turnstileCode.indexOf("export const checkConfigured"));
+ok("turnstile: nothing but form focus/typing/change can start it (no observer, scroll, pointer, anchor or load/idle timer)",
+  !/IntersectionObserver/.test(turnstileCode) && !/["']scroll["']/.test(armBody) && !/pointerdown|requestIdleCallback|setTimeout|preconnect|onAnchor/.test(armBody));
+ok("turnstile: the start waits for a pause in typing (and an idle browser) so it cannot lag keystrokes",
+  /QUIET_MS/.test(turnstileCode) && /requestIdleCallback/.test(turnstileCode) && /defer\(\(\) => document\.head\.appendChild\(script\)\)/.test(turnstileCode)
+    && /defer\(\(\) => \{\s*try \{ renderWidget/.test(turnstileCode));
+ok("turnstile: focus taken by Cloudflare's frame is handed back to the field being typed in",
+  /guardFocus\(prevFocus\)/.test(turnstileCode) && /prev\.focus\(\{ preventScroll: true \}\)/.test(turnstileCode));
 ok("turnstile: the only triggers are focusin, input and change on the form",
   /\["focusin", "input", "change"\]/.test(turnstileCode));
 ok("turnstile: the box is never scrolled into view smoothly (the page must not jump)",

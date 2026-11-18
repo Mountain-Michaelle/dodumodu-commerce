@@ -123,7 +123,13 @@ console.log("PASS  turnstile renders from onload, restarts after errors, and rep
   assert.equal(scripts.length, before, "arming alone requests nothing");
   assert.equal(globalListeners.length, globalBefore, "arming alone registers no global listener");
   for (const fn of [...listeners.input]) fn({ type: "input" }); // the customer types one character
-  assert.equal(scripts.length, before + 1, "typing starts the check");
+  assert.equal(scripts.length, before, "typing starts the check, but the script is NOT injected between keystrokes");
+  await new Promise((r) => realSetTimeout(r, 300));
+  for (const fn of [...listeners.input]) fn({ type: "input" }); // still typing: the pause timer restarts
+  await new Promise((r) => realSetTimeout(r, 500));
+  assert.equal(scripts.length, before, "still typing 800ms after the first key: nothing injected yet");
+  await new Promise((r) => realSetTimeout(r, 600));
+  assert.equal(scripts.length, before + 1, "after a pause in typing the script is injected, once");
   for (const ev of ["input", "change", "focusin"]) for (const fn of listeners[ev] || []) fn();
   assert.equal(scripts.length, before + 1, "more typing, selecting or focusing never starts it again (once per lifecycle)");
   assert.ok(globalListeners.length > globalBefore, "online/visibility recovery listeners exist only after the check started");
