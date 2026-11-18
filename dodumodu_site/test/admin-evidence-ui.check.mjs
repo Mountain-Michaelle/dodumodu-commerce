@@ -55,6 +55,16 @@ ok("badges coexist on one row",
   orderBadges({ spamFlagged: true, reordering: true, possibleDuplicate: true }).querySelectorAll(".badge").length === 3,
   `got ${orderBadges({ spamFlagged: true, reordering: true, possibleDuplicate: true }).querySelectorAll(".badge").length}`);
 
+/* ---- the bot-check status: every checked order says something, none is left blank ---- */
+ok("a bot-verified order shows a green \"Human verified\" badge",
+  /Human verified/.test(orderBadges({ botCheck: "verified" }).textContent) && /badge-ok/.test(orderBadges({ botCheck: "verified" }).innerHTML));
+ok("a pending bot check (missing or unverified) shows \"Bot check pending\", never \"Human verified\"",
+  ["missing", "unverified"].every((b) => /Bot check pending/.test(orderBadges({ botCheck: b }).textContent) && !/Human verified/.test(orderBadges({ botCheck: b }).textContent)));
+ok("a failed bot check says so, and is not green",
+  /Bot check failed/.test(orderBadges({ botCheck: "failed" }).textContent) && !/badge-ok/.test(orderBadges({ botCheck: "failed" }).innerHTML));
+ok("a product with the check off (or an old order with none) shows no bot-check badge",
+  orderBadges({ botCheck: "off" }).textContent === "" && orderBadges({ botCheck: null }).textContent === "");
+
 /* ---- the detail panel ---- */
 
 ok("no evidence means no panel at all",

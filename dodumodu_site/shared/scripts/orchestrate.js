@@ -269,6 +269,32 @@ export function initProductPage({ slug, productId }) {
     radio.addEventListener("change", clearIdempotencyKey);
   }
 
+  // ---- Validation: take the customer to what needs fixing ------------------------
+  /**
+   * After a refused submit, scroll to the FIRST field that needs attention (page order, so a blank form lands on the
+   * first field and a nearly complete one lands on the one thing left) and put the cursor in it. Lightweight on purpose:
+   * one querySelector, one scroll, one focus; smooth only when the device allows motion. The focus uses preventScroll so
+   * the browser's own scroll (e.g. when the keyboard opens) does not fight ours.
+   */
+  const INVALID_NOTE = "Please check the highlighted field.";
+  function focusFirstInvalid() {
+    const field = form.querySelector('.field[data-invalid="true"]');
+    if (!field) return;
+    const control = field.querySelector("input:not([type=hidden]), select, textarea");
+    const calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { field.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" }); } catch (e) { field.scrollIntoView(); }
+    if (control) { try { control.focus({ preventScroll: true }); } catch (e) { control.focus(); } }
+  }
+
+  // A field's red mark goes as soon as the customer starts correcting it, not only at the next submit.
+  const unmark = (event) => {
+    const field = event.target && event.target.closest ? event.target.closest(".field") : null;
+    if (field && field.dataset.invalid === "true") setFieldError(field, "");
+    if (statusEl.textContent === INVALID_NOTE && !form.querySelector('.field[data-invalid="true"]')) statusEl.textContent = "";
+  };
+  form.addEventListener("input", unmark);
+  form.addEventListener("change", unmark);
+
   // ---- Draft --------------------------------------------------------------
   let draftTimer = null;
   form.addEventListener("input", (event) => {
@@ -342,7 +368,11 @@ export function initProductPage({ slug, productId }) {
       const name = field.dataset.field;
       setFieldError(field, errors[name]);
     }
-    if (!valid) return;
+    if (!valid) {
+      statusEl.textContent = INVALID_NOTE;
+      focusFirstInvalid();
+      return;
+    }
 
     // Re-run the COD gate at submit time. Only a courtesy — orderService.ts
     // makes this exact decision again before it prices anything, so a customer
@@ -354,6 +384,7 @@ export function initProductPage({ slug, productId }) {
       if (!decision.allowed) {
         setFieldError(paymentField, decision.message);
         statusEl.textContent = decision.message;
+        focusFirstInvalid();
         return;
       }
     }
@@ -499,6 +530,7 @@ export function initProductPage({ slug, productId }) {
           ui.statusEl.textContent = err.message || "Something went wrong.";
           ui.submitButton.disabled = false;
           ui.submitButton.dataset.loading = "false";
+          focusFirstInvalid(); // the server named a field: take the customer to it too
           return;
         }
         if (attempt < 2) {

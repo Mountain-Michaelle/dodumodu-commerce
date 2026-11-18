@@ -239,11 +239,13 @@ details.faq-item p { margin: 10px 0 0; font-size: 0.85rem; color: var(--color-te
   flex-wrap: wrap;
 }
 
-/* The bot check (Cloudflare Turnstile) is created only after the customer first interacts with the form, and sits BELOW
-   the Place order button and its status line, so nothing the customer is typing into or looking at can be pushed
-   around when it appears. It runs invisibly (appearance: interaction-only); Cloudflare shows the box only if it needs a
-   tap. The container is NOT display:none (a hidden frame can stall the challenge) and has no reserved height, so an
-   invisible solve takes no space; data-ready (a tap is needed) gives it room, and the hint under it appears with it. */
+/* The bot check (Cloudflare Turnstile) is created only after the customer first interacts with the form, and sits directly
+   ABOVE the Place order button so it cannot be missed. It runs invisibly (appearance: interaction-only); Cloudflare shows the
+   box only if it needs a tap. Inserting it must never make the page jump: the container has no height until a tap is needed
+   (an invisible solve takes no space), then it grows DOWNWARD only: the fields above stay put and the button moves down. Scroll
+   anchoring is switched off for the page, otherwise the browser would scroll to keep the button still and shove the fields up.
+   The container is NOT display:none (a hidden frame can stall the challenge). */
+body { overflow-anchor: none; }
 .cf-turnstile { max-width: 100%; }
 .cf-turnstile[data-ready="true"] { min-height: 65px; margin: 8px 0 4px; }
 .cf-hint { display: none; margin: 0 0 12px; font-size: 0.85rem; text-align: center; color: var(--color-text-muted); }
