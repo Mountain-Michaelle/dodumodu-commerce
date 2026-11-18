@@ -45,6 +45,12 @@ export function orderBadges(order) {
   }
   // The bot check did not complete for this order (blocked script, slow phone, Cloudflare unreachable). It is a real
   // order; "pending" until the customer's page finishes the check, so worth a confirming message before shipping.
+  if (order.botCheck === "failed") {
+    badges.push(el("span", {
+      class: `badge ${TONE.activity}`, text: "Bot check failed",
+      title: "Cloudflare refused the token this order was sent with. The order is stored; confirm it with the customer before shipping.",
+    }));
+  }
   if (order.botCheck === "missing" || order.botCheck === "unverified") {
     badges.push(el("span", {
       class: `badge ${TONE.activity}`, text: "Bot check pending",
@@ -54,14 +60,37 @@ export function orderBadges(order) {
   if (order.reordering) {
     badges.push(el("span", { class: `badge ${TONE.repeat}`, text: "Reordering customer" }));
   }
-  if (order.possibleDuplicate) {
+  // One badge for two sources: the read-time rule (same order submitted twice today) and the labels written when the order was
+  // placed (a likely repeat of an open order, with the orders it resembles). The title names every related order.
+  const labelled = (order.riskFlags || []).includes("probable_duplicate");
+  if (order.possibleDuplicate || labelled) {
+    const related = duplicateSummary(order);
     badges.push(el("span", {
       class: `badge ${TONE.duplicate}`,
       text: "Possible duplicate",
-      title: order.duplicateOf ? `The same order was submitted again today: ${order.duplicateOf.reference}` : "A matching order was placed today",
+      title: related || (order.duplicateOf ? `The same order was submitted again today: ${order.duplicateOf.reference}` : "A matching order was placed today"),
+    }));
+  }
+  if ((order.riskFlags || []).includes("unverified_burst")) {
+    badges.push(el("span", {
+      class: `badge ${TONE.activity}`, text: "Many unverified orders",
+      title: "Several orders arrived from this connection in the last hour without a verified bot check. Shared mobile-network addresses are common, so review rather than assume.",
     }));
   }
   return el("span", { class: "badge-row" }, badges);
+}
+
+const DUPLICATE_REASONS = {
+  same_number_within_minutes: "same number, minutes apart",
+  same_number_and_name: "same number and name",
+  same_number_and_address: "same number and address",
+  same_name_and_address: "same name and address, different number",
+};
+
+/** "ddmd-ab12 (same number and name, 4 min apart); ..." or "" when this order has no stored references. */
+export function duplicateSummary(order) {
+  const refs = Array.isArray(order.duplicateRefs) ? order.duplicateRefs : [];
+  return refs.map((r) => `${r.reference} (${DUPLICATE_REASONS[r.reason] || r.reason}, ${r.minutesApart} min apart)`).join("; ");
 }
 
 /**

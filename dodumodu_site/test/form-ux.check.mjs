@@ -566,7 +566,11 @@ ok("turnstile: the token callback bridges the page's global to the lazy loader",
   /window\.__turnstileTokenReceived/.test(html));
 ok("turnstile: the container is never display:none or clipped (either can stall the challenge)",
   hasRule(".cf-turnstile{max-width:100%}") && !hasRule(".cf-turnstile{display:none")
-    && hasRule('.cf-turnstile[data-ready="true"]{min-height:65px;margin:0 0 12px}'));
+    && hasRule('.cf-turnstile[data-ready="true"]{min-height:65px;margin:8px 0 4px}'));
+ok("turnstile: the box sits BELOW the Place order button and its status line, so it can never push a field being typed into",
+  html.indexOf('class="submit-button"') < html.indexOf('id="cf-turnstile"') && html.indexOf('class="form-status"') < html.indexOf('id="cf-turnstile"'));
+ok("turnstile: a hint under the box is shown only when the box is",
+  hasRule(".cf-hint{display:none") && hasRule('.cf-turnstile[data-ready="true"]+.cf-hint{display:block}'));
 
 /* With no site key the widget is disabled, so ensureToken() resolves with nothing
    and the payload carries an empty token. That is CORRECT, and the server has to
@@ -580,7 +584,25 @@ const orderSchemaSource = backend("validation/orderSchema.ts");
 ok("turnstile: the payload always carries the field, empty included, so the server decides",
   /payload\.turnstileToken\s*=\s*form\.elements\[.turnstileToken.\]\?\.value\s*\|\|\s*""/.test(orchestrateSource));
 ok("turnstile: the bot check never blocks sending - a token is used if there (or a moment away), otherwise the order goes without",
-  /payload\.turnstileToken = await quickToken\(/.test(orchestrateSource));
+  /payload\.turnstileToken = await tokenForSubmit\(/.test(orchestrateSource));
+const turnstileSource = readFileSync(new URL("../shared/scripts/turnstile.js", import.meta.url), "utf8");
+const turnstileCode = turnstileSource.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+ok("turnstile: no IntersectionObserver, scroll, pointer, anchor or timer trigger can start it (interaction only)",
+  !/IntersectionObserver/.test(turnstileCode) && !/["']scroll["']/.test(turnstileCode) && !/["']pointerdown["']/.test(turnstileCode)
+    && !/onAnchor|requestIdleCallback|whenIdle|preconnect/.test(turnstileCode) && !/setTimeout\(go/.test(turnstileCode));
+ok("turnstile: the only triggers are focusin, input and change on the form",
+  /\["focusin", "input", "change"\]/.test(turnstileCode));
+ok("turnstile: the box is never scrolled into view smoothly (the page must not jump)",
+  !/behavior:\s*"smooth"/.test(turnstileCode));
+ok("orders: the page never reads a bot-check status from the response and never asks for a second submit",
+  !/botCheck|turnstile_failed|Tap Place order|once more/.test(orchestrateSource));
+ok("orders: a recorded order is completed on the SAME idempotency key, never a new one",
+  /completeWithToken\(payload, idempotencyKey\)/.test(orchestrateSource));
+ok("page data: a published page reads its embedded data and only falls back to the API when it is absent",
+  /getElementById\("page-data"\)/.test(orchestrateSource) && /readEmbeddedPageData\(\)/.test(orchestrateSource)
+    && !/const pageDataRequest = getPageData/.test(orchestrateSource));
+ok("keys: crypto.randomUUID has a fallback for older Android WebViews",
+  /getRandomValues/.test(orchestrateSource));
 ok("turnstile: the server's shape check accepts the blank token this build sends",
   !/turnstileToken:\s*z\.string\(\)\.min\(1\)/.test(orderSchemaSource)
     && /turnstileToken:\s*z\.string\(\)/.test(orderSchemaSource));
@@ -609,7 +631,7 @@ ok("perf: the preload declares the same srcset, so no image is downloaded twice"
    the happy path and only shows up on the customer's Back button. The
    behavioural counterpart is test/order-success.smoke.mjs; these are the cheap
    ones that run without a build. */
-const successBlock = orchestrateSource.slice(orchestrateSource.indexOf("const result = await createOrder"));
+const successBlock = orchestrateSource.slice(orchestrateSource.indexOf("function finishOrder"));
 ok("order-success: the form is reset before the page navigates, not after",
   /restForm\(\);\s*[\s\S]*?window\.location\.href/.test(successBlock));
 ok("order-success: the reset clears the draft, not just the inputs",

@@ -87,6 +87,12 @@ export const publishesRepo = {
     return rows.filter((r) => (seen.has(r.productId) ? false : (seen.add(r.productId), true)));
   },
 
+  /** Products that have been published at least once (a draft that was never published must never be published by a side effect). */
+  async publishedProductIds(db: Db): Promise<number[]> {
+    const rows = await db.selectDistinct({ id: productPublishes.productId }).from(productPublishes);
+    return rows.map((r) => r.id);
+  },
+
   // The newest snapshot for one product: what the live site was built from.
   // Ordered by id rather than created_at, because ids cannot tie - two
   // publishes in the same second otherwise have no defined order.

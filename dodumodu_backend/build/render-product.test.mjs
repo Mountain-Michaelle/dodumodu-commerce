@@ -212,7 +212,7 @@ test('benefits, how-to, FAQ and testimonials render from the stored arrays, esca
   assert.ok(html.includes('<li><strong>Apply:</strong> Use 3 drops.</li>'), 'a trailing colon is not doubled')
   assert.ok(html.includes('<details class="faq-item" open><summary>Is it safe?</summary><p>Yes, &lt;b&gt;very&lt;/b&gt;.</p></details>'))
   assert.ok(html.includes('<details class="faq-item"><summary>How fast?</summary>'))
-  assert.ok(html.includes('<div class="testimonial-title">Amaka O. - Lagos</div>'))
+  assert.ok(html.includes('<p class="testimonial-title">Amaka O. - Lagos</p>'))
   assert.ok(html.includes('Faded in 10 days &lt;3'))
   assert.ok(html.includes('src="https://media.example.com/uploads/t1.jpg"'))
 })
@@ -268,4 +268,50 @@ test('a snapshot with no valid publish ref is refused, not rendered as pub_0 (wh
   assert.throws(() => renderProduct(noRef, {}), /publishRef/)
   assert.throws(() => renderProduct({ ...baseSnapshot, publishRef: 'pub_12' }, {}), /publishRef/)
   assert.ok(renderProduct({ ...baseSnapshot, publishRef: 'pub_abcdef0123456789abcd' }, {}).includes('content="pub_abcdef0123456789abcd"'))
+})
+
+// ---------------------------------------------------------------------------
+// Static completeness: a published page needs no backend request to render or hydrate
+// ---------------------------------------------------------------------------
+const pageData = (html) => {
+  const m = html.match(/<script type="application\/json" id="page-data">([\s\S]*?)<\/script>/)
+  assert.ok(m, 'embedded page-data script present')
+  assert.ok(!m[1].includes('<'), 'no raw < inside page-data')
+  return JSON.parse(m[1])
+}
+
+test('page-data is embedded, parseable, and survives hostile text and JS line separators', () => {
+  const snap = {
+    ...baseSnapshot,
+    product: { ...baseSnapshot.product, name: 'A</script><b>x y z' },
+    discountTiers: [{ minQuantity: 2, discountPercent: 5, label: '2+' }],
+    paymentRules: { codStates: ['Lagos'], codBulkThreshold: 3 },
+  }
+  const html = renderProduct(snap, { css: '', jsPath: '/site.js' })
+  const d = pageData(html)
+  assert.equal(d.product.name, 'A</script><b>x y z')
+  assert.equal(d.discountTiers.length, 1)
+  assert.equal(d.maxOrderQuantity, 20)
+  assert.deepEqual(d.paymentRules, { codStates: ['Lagos'], codBulkThreshold: 3 })
+  assert.deepEqual(d.deliveryOptions, ['today', 'tomorrow', 'next_tomorrow'])
+  assert.ok(!html.match(/\{\{[A-Z_]+\}\}/))
+})
+
+test('every testimonial is in the static markup, not just the first few', () => {
+  const testimonials = Array.from({ length: 9 }, (_, i) => ({ r2Key: i % 2 ? `uploads/t${i}.jpg` : null, title: `Customer ${i}`, description: `Said ${i}`, kind: 'review' }))
+  const html = renderProduct({ ...baseSnapshot, testimonials }, { css: '', jsPath: '/site.js', deliveryBase: 'https://media.example.com' })
+  for (let i = 0; i < 9; i++) assert.ok(html.includes(`Customer ${i}`), `testimonial ${i} rendered`)
+  assert.equal(pageData(html).testimonials.length, 9)
+})
+
+test('no testimonials renders no empty testimonial section', () => {
+  const html = renderProduct({ ...baseSnapshot, testimonials: [] }, { css: '', jsPath: '/site.js' })
+  assert.ok(!html.includes('testimonial-image') && !html.includes('testimonial-avatar'))
+  assert.deepEqual(pageData(html).testimonials, [])
+})
+
+test('the same snapshot renders byte-identically (no clock or random input at render time)', () => {
+  const a = renderProduct(baseSnapshot, { css: '', jsPath: '/site.js', buildId: 'b1' })
+  const b = renderProduct(baseSnapshot, { css: '', jsPath: '/site.js', buildId: 'b1' })
+  assert.equal(a, b)
 })

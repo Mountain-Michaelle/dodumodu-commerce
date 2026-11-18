@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 const input = { value: "" };
 const host = { dataset: { sitekey: "0x4AAAAAAAtestkey" }, scrollIntoView() {} };
 const scripts = [];
+const globalListeners = [];
 let rendered = null;
 let resets = 0;
 globalThis.window = {
@@ -14,7 +15,7 @@ globalThis.window = {
     render(_el, opts) { rendered = opts; return "w1"; },
     reset() { resets += 1; input.value = ""; },
   },
-  addEventListener() {},
+  addEventListener(ev) { globalListeners.push(`window:${ev}`); },
 };
 globalThis.document = {
   readyState: "complete",
@@ -25,21 +26,36 @@ globalThis.document = {
 };
 globalThis.requestIdleCallback = (fn) => fn();
 
-// The challenge starts on INTENT, not at page load: nothing is requested until the form is near the screen or touched.
-let observe = null;
-globalThis.IntersectionObserver = class { constructor(cb) { observe = cb; } observe() {} disconnect() {} };
+// The challenge starts ONLY on genuine form interaction (focus, typing, changing a field): never on load, scroll, idle,
+// a timer, or the form coming into view. Observers and timers are forbidden outright.
+globalThis.IntersectionObserver = class { constructor() { throw new Error("IntersectionObserver must not be used"); } };
+const timersBefore = [];
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (fn, ms, ...a) => { timersBefore.push(ms); return realSetTimeout(fn, ms, ...a); };
 const formListeners = {};
-const formEl = { addEventListener(ev, fn) { formListeners[ev] = fn; }, removeEventListener() {} };
-globalThis.document.addEventListener = () => {};
+const formEl = {
+  addEventListener(ev, fn) { (formListeners[ev] ||= []).push(fn); },
+  removeEventListener(ev, fn) { formListeners[ev] = (formListeners[ev] || []).filter((f) => f !== fn); },
+};
+globalThis.document.addEventListener = (ev) => { globalListeners.push(`document:${ev}`); };
 globalThis.document.removeEventListener = () => {};
 
-const { armTurnstile, ensureToken, checkFailed, onNextToken } = await import("../shared/scripts/turnstile.js");
+const { armTurnstile, ensureToken, checkFailed, onNextToken, tokenForSubmit, checkConfigured } = await import("../shared/scripts/turnstile.js");
 armTurnstile(formEl);
-assert.equal(scripts.length, 0, "nothing is requested while the customer is still at the top of the page");
-observe([{ isIntersecting: false }]);
-assert.equal(scripts.length, 0, "and not while the form is far away");
-observe([{ isIntersecting: true }]); // the form is about two screens away
-assert.equal(scripts.length, 1, "the challenge script is requested when the form is approaching");
+assert.deepEqual(Object.keys(formListeners).sort(), ["change", "focusin", "input"], "the ONLY triggers are focusin, input and change");
+assert.equal(scripts.length, 0, "nothing is requested at page load");
+assert.deepEqual(globalListeners, [], "no window/document listener (scroll, visibility, online, load) exists before the first interaction");
+assert.equal(timersBefore.length, 0, "no timer is scheduled by arming");
+await new Promise((r) => realSetTimeout(r, 400));
+assert.equal(scripts.length, 0, "and nothing starts on its own after load, idle or time passing");
+assert.equal(checkConfigured(), true);
+// Place order tapped before the check ever started: the order must not wait for a script that has not loaded.
+const quick = await Promise.race([tokenForSubmit(1500), new Promise((r) => realSetTimeout(() => r("TIMED-OUT"), 200))]);
+assert.equal(quick, "", "submitting before the check loaded returns at once with no token (the order is sent unconfirmed)");
+assert.equal(scripts.length, 1, "...and that submit starts the check, once, for the page to prompt");
+// (the first interaction listeners fire later in the real page; arming again must not add a second script)
+for (const fn of [...(formListeners.focusin || [])]) fn();
+assert.equal(scripts.length, 1, "interaction after the check started does not load it a second time");
 assert.ok(/onload=__turnstileLoaded/.test(scripts[0].src), "api.js is told to call us when it is ready");
 
 window.__turnstileLoaded(); // what api.js does when it has loaded
@@ -92,4 +108,25 @@ await assert.rejects(second, (e) => e.code === "turnstile_config");
 
 process.on("exit", () => {});
 console.log("PASS  turnstile renders from onload, restarts after errors, and reports configuration errors immediately");
-process.exit(0); // the 8-second safety-net timer is not waited for
+
+// A fresh page: the first genuine interaction (typing) starts the check exactly once, whichever event it is.
+{
+  const fresh = await import("../shared/scripts/turnstile.js?fresh-page");
+  const listeners = {};
+  const form = {
+    addEventListener(ev, fn) { (listeners[ev] ||= []).push(fn); },
+    removeEventListener(ev, fn) { listeners[ev] = (listeners[ev] || []).filter((f) => f !== fn); },
+  };
+  const before = scripts.length;
+  const globalBefore = globalListeners.length;
+  fresh.armTurnstile(form);
+  assert.equal(scripts.length, before, "arming alone requests nothing");
+  assert.equal(globalListeners.length, globalBefore, "arming alone registers no global listener");
+  for (const fn of [...listeners.input]) fn({ type: "input" }); // the customer types one character
+  assert.equal(scripts.length, before + 1, "typing starts the check");
+  for (const ev of ["input", "change", "focusin"]) for (const fn of listeners[ev] || []) fn();
+  assert.equal(scripts.length, before + 1, "more typing, selecting or focusing never starts it again (once per lifecycle)");
+  assert.ok(globalListeners.length > globalBefore, "online/visibility recovery listeners exist only after the check started");
+}
+console.log("PASS  turnstile starts only on first form interaction, once, with no observer, timer or scroll trigger");
+process.exit(0); // pending Cloudflare-restart timers are not waited for

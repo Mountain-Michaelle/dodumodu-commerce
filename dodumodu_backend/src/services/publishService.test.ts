@@ -215,3 +215,45 @@ test("retrying a product that was never published is null, not an error", async 
     assert.equal(await publishService.redeploy(db, env("tok"), 1), null);
   });
 });
+
+/* Admin edits to GLOBAL content (discount tiers, payment rules) or a product's testimonials must regenerate the
+   affected static pages, because published pages no longer ask the backend for that data at runtime. */
+test("republishAffected rebuilds every published product, skips unknown ones, and never throws for a failed rebuild", async () => {
+  const saved = { ids: publishesRepo.publishedProductIds, find: productsRepo.findById, pub: publishService.publish };
+  const published: string[] = [];
+  publishesRepo.publishedProductIds = async () => [1, 2, 3];
+  productsRepo.findById = async (_db, id) => (id === 3 ? null : { id, slug: `p${id}` }) as never;
+  publishService.publish = (async (_db: unknown, _env: unknown, slug: string) => {
+    published.push(slug);
+    if (slug === "p2") throw new Error("snapshot failed");
+    return { outcome: "queued", reused: false };
+  }) as never;
+  try {
+    const out = await publishService.republishAffected({} as never, env("t"), "admin@x.test");
+    assert.deepEqual(published, ["p1", "p2"]);
+    assert.equal(out.length, 2);
+    assert.equal(out[0].slug, "p1");
+    assert.equal(out[0].outcome, "queued");
+    assert.equal(out[1].slug, "p2");
+    assert.match(out[1].error ?? "", /snapshot failed/);
+  } finally {
+    publishesRepo.publishedProductIds = saved.ids; productsRepo.findById = saved.find; publishService.publish = saved.pub;
+  }
+});
+
+test("republishAffected for one product does nothing when that product was never published", async () => {
+  const saved = { latest: publishesRepo.latestForProduct, find: productsRepo.findById, pub: publishService.publish };
+  let calls = 0;
+  publishesRepo.latestForProduct = async (_db, id) => (id === 7 ? ({ id: 1 } as never) : (null as never));
+  productsRepo.findById = async (_db, id) => ({ id, slug: `p${id}` }) as never;
+  publishService.publish = (async () => { calls++; return { outcome: "queued", reused: false }; }) as never;
+  try {
+    assert.deepEqual(await publishService.republishAffected({} as never, env("t"), "a@x.test", { productId: 8 }), []);
+    assert.equal(calls, 0);
+    const r = await publishService.republishAffected({} as never, env("t"), "a@x.test", { productId: 7 });
+    assert.equal(calls, 1);
+    assert.equal(r[0].slug, "p7");
+  } finally {
+    publishesRepo.latestForProduct = saved.latest; productsRepo.findById = saved.find; publishService.publish = saved.pub;
+  }
+});

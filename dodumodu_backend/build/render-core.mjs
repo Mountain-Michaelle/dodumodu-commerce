@@ -165,13 +165,42 @@ function faqSection(page) {
   const ds = items.map((f, i) => `<details class="faq-item"${i === 0 ? ' open' : ''}><summary>${escapeHtml(f.q)}</summary><p>${escapeHtml(f.a)}</p></details>`).join('')
   return `<section class="section lazy-section" aria-labelledby="faq-title"><h2 id="faq-title">Frequently Asked Questions</h2>${ds}</section>`
 }
+/**
+ * Everything the order form needs to price and validate an order, printed into the page as inert JSON (type=application/json
+ * is never executed, so it needs no CSP allowance). The storefront reads this instead of calling GET /page-data/<slug>, so a
+ * published page makes NO backend request to render or become interactive. It comes from the same verified snapshot as the rest
+ * of the page, which is what makes "admin changes regenerate the page" the whole update mechanism.
+ *
+ * Delivery options are the full set on purpose: the page works out the 3pm WAT cutoff from the visitor's own clock
+ * (shared/scripts/deliveryOptions.js), and a list frozen at publish time would hide "today" from everyone published after 3pm.
+ */
+function pageDataScript(snapshot) {
+  const data = {
+    product: snapshot.product,
+    discountTiers: list(snapshot.discountTiers),
+    maxOrderQuantity: snapshot.maxOrderQuantity,
+    paymentRules: snapshot.paymentRules ?? null,
+    deliveryOptions: ['today', 'tomorrow', 'next_tomorrow'],
+    images: list(snapshot.images).map((i) => ({ r2Key: i.r2Key, altText: i.altText ?? '' })),
+    testimonials: list(snapshot.testimonials).map((t) => ({ r2Key: t.r2Key ?? null, title: t.title ?? '', description: t.description ?? '' })),
+  }
+  // "<" and the two JS line separators are escaped so no value can close the tag or break a parser.
+  const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  return `<script type="application/json" id="page-data">${json}</script>`
+}
 function testimonialsSection(snapshot, deliveryBase) {
-  const items = list(snapshot.testimonials).slice(0, 4)
+  // EVERY testimonial, in the exact markup the storefront script used to build at runtime (avatar letter when there is no
+  // photo, empty alt, <p> title). The page used to print four and then have the script replace them with all of them in
+  // different markup, which was a visible reload; now there is nothing left for the script to do.
+  const items = list(snapshot.testimonials)
   if (!items.length) return ''
   const cards = items.map((t) => {
     const src = mediaUrl(t.r2Key, deliveryBase)
-    const img = src ? `<img class="testimonial-image" src="${escapeUrl(src)}" alt="${escapeHtmlAttr(t.title ?? '')}" width="64" height="64" loading="lazy" decoding="async">` : ''
-    return `<div class="testimonial-card">${img}<div><div class="testimonial-title">${escapeHtml(t.title ?? '')}</div><p class="testimonial-description">${escapeHtml(t.description ?? '')}</p></div></div>`
+    const title = String(t.title ?? '')
+    const avatar = src
+      ? `<img class="testimonial-image" src="${escapeUrl(src)}" alt="" loading="lazy" decoding="async" width="64" height="64">`
+      : `<span class="testimonial-avatar" aria-hidden="true">${escapeHtml((title || '?').trim().charAt(0).toUpperCase())}</span>`
+    return `<div class="testimonial-card">${avatar}<div><p class="testimonial-title">${escapeHtml(title)}</p><p class="testimonial-description">${escapeHtml(t.description ?? '')}</p></div></div>`
   }).join('')
   return `<section class="section lazy-section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${cards}</div></div></section>`
 }
@@ -215,8 +244,9 @@ export function renderProductWith(template, snapshot, opts = {}) {
   const heroSrc = hero ? mediaUrl(hero.r2Key, deliveryBase) : ''
   const heroAlt = page.heroAlt || p.name
   const ogImage = absoluteUrl(heroSrc, siteUrl)
-  const title = `${p.name} - DODUMODU`
-  const description = p.description ?? ''
+  // The admin's SEO fields were saved and published but never used. Fall back to the old derived values when they are empty.
+  const title = (p.seoTitle && String(p.seoTitle).trim()) || `${p.name} - DODUMODU`
+  const description = (p.seoDescription && String(p.seoDescription).trim()) || (p.description ?? '')
 
   const ogImageTags = ogImage
     ? [
@@ -296,6 +326,7 @@ export function renderProductWith(template, snapshot, opts = {}) {
     APP_JS_PATH: jsPath.replace(/^\//, ''),
     CSP_META: csp ? `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttr(csp)}">` : '',
     RUNTIME_CONFIG: opts.runtimeConfig ?? '',
+    PAGE_DATA: pageDataScript(snapshot),
     INLINE_SCRIPTS: opts.inlineScripts ?? '',
     SVG_SPRITE: opts.sprite ?? '',
     JSON_LD: `<script type="application/ld+json">${jsonLd(snapshot, canonicalUrl, ldImages)}</script>`,

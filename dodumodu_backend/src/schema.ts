@@ -143,8 +143,11 @@ export const orders = pgTable("orders", {
   // only asks "in-app or not", and retaining a full UA on every order would be
   // personal data kept for no benefit.
   clientKind: text("client_kind"),
-  // verified | missing | unverified | off. See migrations/0033. NULL: placed before this existed, or by hand.
+  // verified | missing | unverified | failed | off. See migrations/0033. NULL: placed before this existed, or by hand.
   botCheck: text("bot_check"),
+  // Internal review flags and the earlier orders a probable duplicate resembles. See migrations/0035. Never sent to customers.
+  riskFlags: text("risk_flags").array().notNull().default([]),
+  duplicateRefs: jsonb("duplicate_refs").$type<Array<{ id: number; reference: string; reason: string; minutesApart: number }> | null>(),
   whatsapp: text("whatsapp").notNull(),
   address: text("address").notNull(),
   state: text("state").notNull(),

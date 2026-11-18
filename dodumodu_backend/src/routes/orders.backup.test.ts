@@ -174,16 +174,17 @@ test("an order for a missing product is a rejected order too: the admin is alert
   assert.equal(sent.filter((m) => m.to === adminEmail && /product_not_found/.test(m.subject)).length, 1);
 });
 
-test("a SAVED order sends no failure alert; invalid input and failed bot checks send no email at all", async () => {
+test("a SAVED order sends no failure alert; invalid input sends no email at all; a refused bot-check token is a stored order, not junk", async () => {
   assert.equal((await post(body(crypto.randomUUID()))).status, 200);
   await flushOrderMail();
   assert.equal(sent.filter((m) => m.to === adminEmail).length, 0);
 
   sent = [];
   assert.equal((await post(body(crypto.randomUUID(), { phone: "" }))).status, 400);       // schema rejects
-  assert.equal((await post(body(crypto.randomUUID(), { turnstileToken: "bad" }))).status, 400); // bot check fails
   await flushOrderMail();
-  assert.equal(sent.length, 0, "junk and bot traffic never reaches the mailbox");
+  assert.equal(sent.length, 0, "input that is not an order never reaches the mailbox");
+  // A token Cloudflare refuses no longer rejects the order (it is stored and flagged), so it is backed up like any order.
+  assert.equal((await post(body(crypto.randomUUID(), { turnstileToken: "bad" }))).status, 200);
 });
 
 test("not configured: no ORDER_BACKUP_EMAIL, or no RESEND_API_KEY -> skipped silently, order unaffected", async () => {

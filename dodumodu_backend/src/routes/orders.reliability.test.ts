@@ -124,7 +124,7 @@ test("verifier outage: the order is ACCEPTED and flagged 'unverified' (fail open
   const key = crypto.randomUUID();
   const res = await post(payload(key, "tok-B"));
   assert.equal(res.status, 200);
-  assert.equal(((await res.json()) as { botCheck: string }).botCheck, "unverified");
+  assert.ok(!("botCheck" in ((await res.json()) as object)), "verification status is internal and never in the response");
   assert.equal(await countFor(key), 1);
   assert.equal(await botCheckOf(key), "unverified");
 });
@@ -134,15 +134,15 @@ test("no token at all (script blocked, slow phone): accepted and flagged 'missin
   const key = crypto.randomUUID();
   const first = await post(payload(key, ""));
   assert.equal(first.status, 200);
-  const a = await first.json() as { orderId: number; botCheck: string };
-  assert.equal(a.botCheck, "missing");
+  const a = await first.json() as { orderId: number; botCheck?: string };
+  assert.equal(a.botCheck, undefined, "the customer is never told the check is missing");
   assert.equal(await botCheckOf(key), "missing");
 
   const retry = await post(payload(key, "tok-LATE"));        // the check finally completed on the customer's phone
   assert.equal(retry.status, 200);
-  const b = await retry.json() as { orderId: number; botCheck: string };
+  const b = await retry.json() as { orderId: number; botCheck?: string };
   assert.equal(b.orderId, a.orderId, "the SAME order");
-  assert.equal(b.botCheck, "verified");
+  assert.equal(b.botCheck, undefined);
   assert.equal(await botCheckOf(key), "verified");
   assert.equal(await countFor(key), 1);
 });
@@ -178,21 +178,41 @@ test("honeypot: a request that fills the hidden field gets a plausible answer an
   assert.equal(await countFor(key), 0);
 });
 
-test("fail-open has brakes: after 8 unverified orders from one address in an hour, the next is refused with 429", async () => {
+test("fail-open brake: a burst of unverified orders from one address is STORED and flagged for review, never refused", async () => {
   turnstile("down");
   const ip = `203.0.113.${Math.floor(Math.random() * 200) + 20}`;
-  for (let i = 0; i < 8; i++) assert.equal((await post({ ...payload(crypto.randomUUID(), ""), phone: `0803${String(1000000 + i)}` }, ip)).status, 200);
-  const blocked = await post(payload(crypto.randomUUID(), ""), ip);
-  assert.equal(blocked.status, 429);
-  assert.equal(((await blocked.json()) as { code: string }).code, "rate_limited");
+  for (let i = 0; i < 8; i++) assert.equal((await post({ ...payload(crypto.randomUUID(), ""), phone: `0803${String(1000000 + i)}`, whatsapp: `0803${String(1000000 + i)}`, customerName: `Burst ${i}`, address: `${i} Burst Road` }, ip)).status, 200);
+  const key = crypto.randomUUID();
+  const ninth = await post({ ...payload(key, ""), phone: "08039990000", whatsapp: "08039990000", customerName: "Ninth Person", address: "9 Ninth Road" }, ip);
+  assert.equal(ninth.status, 200, "a customer behind a shared mobile-network address must not lose their order");
+  assert.equal(await countFor(key), 1);
+  const [row] = await db.select({ f: orders.riskFlags }).from(orders).where(eq(orders.idempotencyKey, key));
+  assert.ok(row.f.includes("unverified_burst"), `flags: ${row.f}`);
 });
 
-test("a token Cloudflare does not recognise is the one definitive refusal: 400 and no order", async () => {
+test("a token Cloudflare does not recognise is STORED, flagged 'failed' for review, and answered like any other order", async () => {
   turnstile("reject");
   const key = crypto.randomUUID();
   const res = await post(payload(key, "tok-C"));
-  assert.equal(res.status, 400);
-  assert.equal(await countFor(key), 0);
+  assert.equal(res.status, 200, "an order must never be lost because verification failed");
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok(body.orderId && body.reference);
+  assert.ok(!("botCheck" in body) && !("error" in body) && !("code" in body), "nothing about verification reaches the customer");
+  assert.equal(await countFor(key), 1);
+  assert.equal(await botCheckOf(key), "failed");
+  const [row] = await db.select({ f: orders.riskFlags }).from(orders).where(eq(orders.idempotencyKey, key));
+  assert.ok(row.f.includes("bot_check_failed"));
+});
+
+test("a stored 'failed' order is upgraded, not duplicated, when the same submission later brings a valid token", async () => {
+  turnstile("reject");
+  const key = crypto.randomUUID();
+  const first = await post(payload(key, "tok-bad")) ; const a = await first.json() as { orderId: number };
+  turnstile("single-use");
+  const second = await post(payload(key, "tok-good")); const b = await second.json() as { orderId: number };
+  assert.equal(a.orderId, b.orderId);
+  assert.equal(await countFor(key), 1);
+  assert.equal(await botCheckOf(key), "verified");
 });
 
 test("the order's idempotency key is sent to Cloudflare, so an automatic retry of the same order can reuse its token", async () => {
@@ -202,17 +222,10 @@ test("the order's idempotency key is sent to Cloudflare, so an automatic retry o
   assert.equal(cf.bodies[0].idempotency_key, key);
 });
 
-test("a refused token is answered with a machine-readable code so the page can fetch a fresh one by itself", async () => {
-  turnstile("reject");
-  const res = await post(payload(crypto.randomUUID(), "tok-CODE"));
-  assert.equal(res.status, 400);
-  assert.deepEqual(await res.json(), { error: "Bot verification failed", code: "turnstile_failed", detail: "invalid-input-response" });
-});
-
-test("an unseen key is verified, so a bot cannot skip Turnstile by sending a made-up key", async () => {
+test("an unseen key is still verified, so a bot cannot skip Turnstile by sending a made-up key (the order is stored either way)", async () => {
   const cf = turnstile("reject");
   const res = await post(payload(crypto.randomUUID(), "tok-D"));
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
   assert.equal(cf.calls(), 1);
 });
 
