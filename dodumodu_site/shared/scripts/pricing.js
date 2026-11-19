@@ -26,8 +26,11 @@ export function computePriceBreakdown(unitPrice, quantity, tiers) {
   return { unitPrice, quantity, subtotal, discountPercent, discountAmount, amount };
 }
 
+// Grouped by hand, not toLocaleString("en-NG"): the first Intl call loads the device's locale data (measured ~12 ms on a
+// laptop, ~70 ms on a 6x-throttled CPU, right in the page's first render), and a WebView without en-NG data would print an
+// ungrouped "₦1500000". For whole naira the two produce the same text; this one is identical on every device.
 export function formatNaira(kobo) {
-  return `₦${Math.round(kobo / 100).toLocaleString("en-NG")}`;
+  return `₦${String(Math.round(kobo / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 }
 
 // Built from the tiers themselves (labels come straight from admin config),

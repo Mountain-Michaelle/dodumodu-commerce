@@ -195,4 +195,14 @@ assert.equal(deliverySelect.value, "", "no date is pre-selected for the customer
 assert.ok(offered().length > 0, "the date list was populated from page-data");
 console.log(`PASS: delivery dates rendered from page-data (${offered().join(", ")}), nothing pre-selected`);
 
+{
+  // formatNaira groups by hand (no Intl: it costs a locale-data load on the first render). It must print exactly what the
+  // en-NG locale prints for whole naira, including edges.
+  const { formatNaira } = await import("../shared/scripts/pricing.js");
+  for (const kobo of [0, 49, 50, 99, 100, 99900, 100000, 150000, 1500000, 2800000, 123456789, 100000000000, -250000]) {
+    assert.equal(formatNaira(kobo), `\u20A6${Math.round(kobo / 100).toLocaleString("en-NG")}`, `formatNaira(${kobo})`);
+  }
+  console.log("PASS: formatNaira matches en-NG grouping for 13 values incl. 0, rounding and negatives");
+}
+
 console.log("\nAll frontend pricing + payment-gate smoke tests passed.");
