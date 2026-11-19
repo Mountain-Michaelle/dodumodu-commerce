@@ -221,8 +221,8 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // reproduces 300e2222 exactly, so that one line is the whole difference. css is unchanged.
 // Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
 // gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
-// Re-pinned for the interaction-only bot check, embedded page data and es2015 target; the CSS change is the bot-check box moving below the button.
-const EXPECTED_CUSTOMER = { js: "site.4001b5ee.min.js", css: "site.5d3e9bad.min.css" };
+// Re-pinned for the accessibility pass: darker text-amber token, 24px carousel dot targets, keyboard-focusable carousel.
+const EXPECTED_CUSTOMER = { js: "site.908c7a23.min.js", css: "site.6f42e0d2.min.css" };
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

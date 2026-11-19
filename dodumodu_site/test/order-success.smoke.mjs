@@ -88,6 +88,7 @@ async function bootProductPage(createOrderResponse) {
     throw new Error(`Unexpected fetch in smoke test: ${url}`);
   };
   window.requestIdleCallback = (fn) => fn();
+  window.Element.prototype.scrollIntoView = function () {}; // jsdom has no layout; every real browser does
 
   window.eval(jsBundle);
   await sleep(60); // page-data fetch, then the first render

@@ -18,7 +18,7 @@ h1 { font-size: 1.6rem; font-weight: 700; }
 h2 { font-size: 1.25rem; font-weight: 700; }
 h3 { font-size: 1rem; font-weight: 600; }
 
-a { color: var(--color-primary); }
+a { color: var(--color-primary-text); }
 
 button { font-family: inherit; }
 

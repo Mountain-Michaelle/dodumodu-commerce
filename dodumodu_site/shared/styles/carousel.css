@@ -48,22 +48,37 @@
   gap: 6px;
 }
 
+.carousel-dots { gap: 0; }
+
+/* A 24x24 touch target (WCAG 2.5.8) drawn as the same small dot: the button is the target, ::before is the picture. */
 .carousel-dot {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: none;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+
+.carousel-dot::before {
+  content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: rgba(209, 213, 219, 0.85);
-  padding: 0;
-  border: none;
-  cursor: pointer;
   transition: width 0.15s ease, background 0.15s ease;
 }
 
-.carousel-dot[data-active="true"] {
+.carousel-dot[data-active="true"]::before {
   background: #f3f4f6;
   width: 16px;
   border-radius: 3px;
 }
+
+/* The photo strip scrolls sideways, so it takes keyboard focus (arrow keys scroll it) and shows where focus is. */
+.carousel:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
 
 /* Quiet chevrons: light grey, no disc, a 40px touch target around a 20px glyph. */
 .carousel-arrow {

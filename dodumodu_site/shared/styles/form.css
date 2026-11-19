@@ -62,7 +62,7 @@
 }
 
 .field input::placeholder,
-.field textarea::placeholder { color: #a99c95; }
+.field textarea::placeholder { color: #756a64; }
 
 .field select {
   appearance: none;
@@ -221,7 +221,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-md);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 600;
   cursor: pointer;
 }

@@ -42,6 +42,7 @@ export function renderCarousel(container, images, options = {}) {
   track.setAttribute("role", "region");
   track.setAttribute("aria-roledescription", "carousel");
   track.setAttribute("aria-label", "Product photos");
+  track.tabIndex = 0; // a sideways-scrolling region must be reachable and scrollable from the keyboard
 
   const nav = document.createElement("div");
   nav.className = "carousel-nav";

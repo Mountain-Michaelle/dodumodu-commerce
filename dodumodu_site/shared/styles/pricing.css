@@ -16,7 +16,7 @@
   border: 0;
   border-radius: 0;
   background: var(--color-surface);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-size: 1.35rem;
   font-weight: 700;
   line-height: 1;
@@ -129,7 +129,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #a99c95;
+  color: #756a64;
 }
 
 .quantity-price-ladder {
