@@ -125,7 +125,7 @@ async function bundleCss(fileNames, outBaseName) {
 }
 
 /** Bundle from a single entry (its import graph IS the dependency order), minify, hash. */
-async function bundleJs(entryFileName, outBaseName) {
+async function bundleJs(entryFileName, outBaseName, { squeeze = false } = {}) {
   const result = await build({
     entryPoints: [join(sharedDir, "scripts", entryFileName)],
     bundle: true,
@@ -134,7 +134,22 @@ async function bundleJs(entryFileName, outBaseName) {
     target: ["es2015"],
     write: false,
   });
-  const minified = result.outputFiles[0].text;
+  let minified = result.outputFiles[0].text;
+  if (squeeze) {
+    // Second, build-time-only pass (terser never ships): esbuild is fast but leaves ~4% on the table that terser's multi-pass
+    // compressor and top-level mangler recover. Safe settings only (no unsafe_*, default getter handling), same ES2015 target,
+    // all comments dropped. The runtime is untouched: the page still loads one plain script and no library.
+    const { minify } = await import("terser");
+    const out = await minify(minified, {
+      ecma: 2015,
+      toplevel: true,
+      compress: { passes: 3, drop_debugger: true },
+      mangle: { toplevel: true },
+      format: { comments: false },
+    });
+    if (!out.code) throw new Error(`terser produced no output for ${entryFileName}`);
+    minified = out.code;
+  }
   const filename = `${outBaseName}.${hashOf(minified)}.min.js`;
   writeFileSync(join(distDir, filename), minified);
   return filename;
@@ -374,7 +389,7 @@ async function main() {
   // in orchestrate.js (apiClient -> render/validate -> orchestrate), not by
   // this list — this list only says which file is the entry point.
   const siteCss = await bundleCss(SITE_STYLES, "site");
-  const siteJs = await bundleJs("orchestrate.js", "site");
+  const siteJs = await bundleJs("orchestrate.js", "site", { squeeze: true });
 
   // Admin bundle — never shipped to a customer-facing page.
   const adminCss = await bundleCss(ADMIN_STYLES, "admin");

@@ -138,7 +138,7 @@
   // so it always exactly matches what was actually charged.
   (function () {
     function formatNaira(kobo) {
-      return "\u20A6" + Math.round(kobo / 100).toLocaleString("en-NG");
+      return "\u20A6" + String(Math.round(kobo / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     }
 
     // Values below are interpolated into markup, so they are escaped even though
