@@ -408,7 +408,8 @@ test("an ordinary unexpected fault is still the plain 500", async () => {
 test("a new testimonial saves with POST or PUT, and an empty product choice means 'the only product'", async () => {
   const { productsRepo } = await import("../data/productsRepo");
   const { publishService } = await import("../services/publishService");
-  const o = { upsert: testimonialsRepo.upsert, list: productsRepo.listAll, re: publishService.republishAffected };
+  const o = { upsert: testimonialsRepo.upsert, list: productsRepo.listAll, re: publishService.republishAffected, count: testimonialsRepo.countActiveWhatsapp };
+  (testimonialsRepo as any).countActiveWhatsapp = async () => 0;
   const saved: Array<Record<string, unknown>> = [];
   (testimonialsRepo as any).upsert = async (_d: unknown, i: Record<string, unknown>) => { saved.push(i); return { id: 7, ...i }; };
   (productsRepo as any).listAll = async () => [{ id: 3 }];
@@ -428,6 +429,33 @@ test("a new testimonial saves with POST or PUT, and an empty product choice mean
     const emptyReview = await call("/admin/testimonials", { method: "POST", body: JSON.stringify({ ...noQuote, kind: "review", title: "Written" }) });
     assert.equal(emptyReview.status, 400, "a written review still needs its quote");
   } finally {
-    (testimonialsRepo as any).upsert = o.upsert; (productsRepo as any).listAll = o.list; (publishService as any).republishAffected = o.re;
+    (testimonialsRepo as any).upsert = o.upsert; (productsRepo as any).listAll = o.list; (publishService as any).republishAffected = o.re; (testimonialsRepo as any).countActiveWhatsapp = o.count;
+  }
+});
+
+test("a product's WhatsApp section is capped at five visible screenshots", async () => {
+  const { productsRepo } = await import("../data/productsRepo");
+  const { publishService } = await import("../services/publishService");
+  const o = { upsert: testimonialsRepo.upsert, list: productsRepo.listAll, re: publishService.republishAffected, count: testimonialsRepo.countActiveWhatsapp };
+  let others = 0;
+  const seen: Array<[number, number | undefined]> = [];
+  (testimonialsRepo as any).upsert = async (_d: unknown, i: Record<string, unknown>) => ({ id: 9, ...i });
+  (testimonialsRepo as any).countActiveWhatsapp = async (_d: unknown, productId: number, except?: number) => { seen.push([productId, except]); return others; };
+  (productsRepo as any).listAll = async () => [{ id: 3 }];
+  (publishService as any).republishAffected = async () => ({});
+  try {
+    const shot = { title: "Chat", kind: "whatsapp", r2Key: "uploads/s.png", productId: 3 };
+    others = 4;
+    assert.equal((await call("/admin/testimonials", { method: "POST", body: JSON.stringify(shot) })).status, 200, "the fifth is allowed");
+    others = 5;
+    const sixth = await call("/admin/testimonials", { method: "POST", body: JSON.stringify(shot) });
+    assert.equal(sixth.status, 400, "the sixth is refused");
+    assert.match(JSON.stringify(await sixth.json()), /at most 5/);
+    assert.equal((await call("/admin/testimonials/12", { method: "PUT", body: JSON.stringify({ ...shot, active: false }) })).status, 200, "hiding a screenshot is never blocked");
+    await call("/admin/testimonials/12", { method: "PUT", body: JSON.stringify({ ...shot, active: true }) });
+    assert.deepEqual(seen.at(-1), [3, 12], "an edited row is not counted against itself");
+    assert.equal((await call("/admin/testimonials", { method: "POST", body: JSON.stringify({ title: "R", description: "text", kind: "review", productId: 3 }) })).status, 200, "written reviews have no cap");
+  } finally {
+    (testimonialsRepo as any).upsert = o.upsert; (productsRepo as any).listAll = o.list; (publishService as any).republishAffected = o.re; (testimonialsRepo as any).countActiveWhatsapp = o.count;
   }
 });

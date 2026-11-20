@@ -76,47 +76,68 @@ export function testimonialsView({ shell, identity }) {
     const body = el("div");
     const modal = openModal({ title: isNew ? "Add testimonial" : `Edit “${item.title}”`, render: () => body });
 
-    // The image row exists only for a screenshot - the one kind that needs one. The
-    // server enforces that regardless, so this is clarity, not the control.
+    // WhatsApp screenshots: one row per image. A NEW screenshot testimonial takes up to MAX_SHOTS images at once (the product page
+    // shows at most 5 of them in its WhatsApp section; the server enforces that too); editing one row changes that one image.
+    const MAX_SHOTS = 5;
+    const shotLimit = () => (isNew ? MAX_SHOTS : 1);
+    const shots = existing && existing.r2Key && existing.kind === "whatsapp"
+      ? [{ r2Key: existing.r2Key, width: existing.width || null, height: existing.height || null }] : [];
     const imageField = el("div", { class: "field-row" });
     function paintImageRow() {
-      // One uploader for both kinds: required for a WhatsApp screenshot (the
-      // server refuses a screenshot without one — a broken frame on a live
-      // product page), OPTIONAL for a written review, where the photo becomes
-      // the small avatar beside the quote. A text-only review renders its
-      // initial-letter tile instead, so it stays cheap on weak networks.
       const isScreenshot = item.kind === "whatsapp";
+      if (isScreenshot) {
+        const room = shotLimit() - shots.length;
+        const toShot = (media, dims) => ({ r2Key: media.r2Key, width: dims?.width || media.width || null, height: dims?.height || media.height || null });
+        mount(imageField,
+          el("div", { class: "field" },
+            el("span", { class: "field-label", text: isNew ? `Screenshot images (up to ${MAX_SHOTS})` : "Screenshot image" }),
+            el("div", { class: "shot-list" }, ...shots.map((shot, i) => el("div", { class: "uploader-row" },
+              el("div", { class: "image-preview" }, el("img", { class: "picker-thumb", src: `${imageBase()}/${shot.r2Key}`, alt: "", loading: "lazy" })),
+              // Change: replace THIS image with another upload.
+              adminImageUploader({ label: "Change image", onUploaded: (media, dims) => { shots[i] = toShot(media, dims); paintImageRow(); } }),
+              isNew ? el("button", { class: "button button-small", type: "button", text: "Remove", onclick: () => { shots.splice(i, 1); paintImageRow(); } }) : null))),
+            room > 0
+              ? el("div", { class: "uploader-row" },
+                adminImageUploader({
+                  max: room,
+                  label: shots.length ? "Add more images…" : (shotLimit() > 1 ? "Choose images…" : "Choose image…"),
+                  onUploaded: (media, dims) => { if (shots.length < shotLimit()) { shots.push(toShot(media, dims)); paintImageRow(); } },
+                }),
+                adminImagePicker({
+                  label: "Reuse uploaded images", title: "Choose the testimonial screenshots", max: room,
+                  onSelect: (picked) => { for (const m of picked || []) if (m && shots.length < shotLimit()) shots.push(toShot(m)); paintImageRow(); },
+                }))
+              : null,
+            el("p", { class: "field-error", dataset: { errorFor: "r2Key" } }),
+            el("span", {
+              class: "hint",
+              text: "Required. Each image is its own screenshot in the “Real WhatsApp messages” section after the written reviews, no quote needed; the title is only a label (and the screen-reader description).",
+            })));
+        return;
+      }
+      // A written review takes an OPTIONAL photo (shown large beside / above the text). A text-only review renders its
+      // initial-letter tile instead, so it stays cheap on weak networks.
       mount(imageField,
         el("div", { class: "field" },
-          el("span", { class: "field-label", text: isScreenshot ? "Screenshot image" : "Review photo (optional)" }),
+          el("span", { class: "field-label", text: "Review photo (optional)" }),
           el("div", { class: "uploader-row" },
-            // Showing the storage key told an operator an image was set and gave them
-            // no way to change it except uploading a duplicate. Now the current
-            // image is visible, and both routes to a new one - upload a file, or
-            // reuse one already uploaded.
             item.r2Key
               ? el("div", { class: "image-preview" },
                 el("img", { class: "picker-thumb", src: `${imageBase()}/${item.r2Key}`, alt: "", loading: "lazy" }))
               : el("span", { class: "muted", text: "No image chosen" }),
             adminImageUploader({
+              label: item.r2Key ? "Change image" : "Choose image…",
               onUploaded: (media) => { item.r2Key = media.r2Key; paintImageRow(); },
             }),
-            // max 1: a screenshot testimonial has exactly one image, so choosing
-            // replaces rather than adds.
             adminImagePicker({
               label: "Reuse an uploaded image",
-              title: "Choose the testimonial screenshot",
+              title: "Choose the review photo",
               max: 1,
               onSelect: ([media]) => { if (media) { item.r2Key = media.r2Key; paintImageRow(); } },
             }),
             item.r2Key ? el("button", { class: "button button-small", type: "button", text: "Remove", onclick: () => { item.r2Key = ""; paintImageRow(); } }) : null),
           el("p", { class: "field-error", dataset: { errorFor: "r2Key" } }),
-          el("span", {
-            class: "hint",
-            text: isScreenshot
-              ? "Required. Shown in its own “Real WhatsApp messages” section after the written reviews. No quote is needed; the title is only a label (and the screen-reader description)."
-              : "Optional. Shown large beside (desktop) or above (phone) the text. Leave empty for a text-only review.",
-          })));
+          el("span", { class: "hint", text: "Optional. Shown large beside (desktop) or above (phone) the text. Leave empty for a text-only review." })));
     }
     paintImageRow();
 
@@ -147,23 +168,36 @@ export function testimonialsView({ shell, identity }) {
         onCancel: () => modal.close(),
         onSave: async () => {
           const values = readForm(form);
-          const payload = {
+          const base = {
             title: values.title,
-            description: values.kind === "whatsapp" ? "" : values.description,
             kind: values.kind,
-            r2Key: item.r2Key,
             // Left out (not null) when no product is chosen: the server then uses the only product, or says which is needed.
             ...(values.productId ? { productId: Number(values.productId) } : {}),
             displayOrder: Number(values.displayOrder) || 0,
             active: values.active,
           };
+          const isShot = values.kind === "whatsapp";
+          if (isShot && !shots.length) { applyFieldErrors(form, { r2Key: ["A WhatsApp screenshot needs an uploaded image"] }); return; }
+          const payloads = isShot
+            ? shots.map((shot) => ({ ...base, description: "", r2Key: shot.r2Key, ...(shot.width && shot.height ? { width: shot.width, height: shot.height } : {}) }))
+            : [{ ...base, description: values.description, r2Key: item.r2Key }];
+          let saved = 0;
           try {
-            if (isNew) await api.post("/testimonials", payload);
-            else await api.put(`/testimonials/${item.id}`, payload);
-            toast("Testimonial saved", "success");
+            for (const payload of payloads) {
+              if (isNew) await api.post("/testimonials", payload);
+              else await api.put(`/testimonials/${item.id}`, payload);
+              saved += 1;
+            }
+            toast(saved > 1 ? `${saved} screenshots saved` : "Testimonial saved", "success");
             modal.close();
             load();
           } catch (err) {
+            if (saved) {
+              // Some images are already saved: drop them from the form so pressing save again cannot create duplicates.
+              shots.splice(0, saved); paintImageRow(); load();
+              toast(`${saved} saved, the rest were not: ${err?.message || err}`, "error", 8000);
+              return;
+            }
             if (err instanceof ApiError && err.isValidation && err.fields) {
               applyFieldErrors(form, err.fields);
               return;

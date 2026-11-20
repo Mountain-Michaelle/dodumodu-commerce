@@ -8,7 +8,7 @@ import type { Env } from "../env";
 import { createDb } from "../db";
 import { ordersRepo } from "../data/ordersRepo";
 import { productsRepo } from "../data/productsRepo";
-import { testimonialsRepo } from "../data/testimonialsRepo";
+import { testimonialsRepo, MAX_WHATSAPP_SCREENSHOTS } from "../data/testimonialsRepo";
 import { productPagesRepo } from "../data/productPagesRepo";
 import { publishesRepo } from "../data/publishesRepo";
 import { deployProgress } from "../services/deployProgress";
@@ -491,6 +491,14 @@ const saveTestimonial = async (c: AdminContext) => {
       return c.json({ error: "productId is required while more than one product exists" }, 400);
     }
     productId = all[0].id;
+  }
+  // One product's WhatsApp section shows at most MAX_WHATSAPP_SCREENSHOTS screenshots (a wall of chat images defeats the point
+  // and the page would carry all of them). Only a VISIBLE screenshot counts, and a row being edited does not count against itself.
+  if (parsed.data.kind === "whatsapp" && parsed.data.active !== false) {
+    const others = await testimonialsRepo.countActiveWhatsapp(db, productId, idParam ? Number(idParam) : undefined);
+    if (others >= MAX_WHATSAPP_SCREENSHOTS) {
+      return c.json({ error: `A product can show at most ${MAX_WHATSAPP_SCREENSHOTS} WhatsApp screenshots. Hide or delete one first.`, fields: { r2Key: [`Limit of ${MAX_WHATSAPP_SCREENSHOTS} screenshots reached`] } }, 400);
+    }
   }
   const testimonial = await testimonialsRepo.upsert(db, {
     ...parsed.data,
