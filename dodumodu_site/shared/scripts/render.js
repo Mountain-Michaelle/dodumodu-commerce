@@ -168,11 +168,10 @@ export function renderTestimonials(container, testimonials) {
     const card = document.createElement("div");
     const title = escapeHtml(t.title);
     const text = `<div class="testimonial-body"><p class="testimonial-title">${title}</p><p class="testimonial-description">${escapeHtml(t.description)}</p></div>`;
-    // Same three shapes build-time rendering prints (build/render-core.mjs): screenshot under its text, big photo, initial tile.
-    if (t.url && t.kind === "whatsapp") {
-      card.className = "testimonial-card is-screenshot";
-      card.innerHTML = `${text}<img class="testimonial-screenshot" src="${t.url}" alt="WhatsApp message from ${title}" loading="lazy" decoding="async">`;
-    } else if (t.url) {
+    // Same shapes build-time rendering prints (build/render-core.mjs): big photo or initial tile. (WhatsApp screenshots are
+    // their own section there; this runtime fallback is for pages built without testimonials, so it skips them.)
+    if (t.kind === "whatsapp") continue;
+    if (t.url) {
       card.className = "testimonial-card has-photo";
       card.innerHTML = `<img class="testimonial-image" src="${t.url}" alt="" loading="lazy" decoding="async" width="480" height="600">${text}`;
     } else {

@@ -15,10 +15,9 @@
 
 .testimonial-body { min-width: 0; }
 
-/* A photo review is a picture card: on a phone the photo fills the card's content box (about 93% of the card, the rest is its padding), centred, with the text UNDER it; from
-   768px up the photo is a fixed column and the text sits beside it, centred on the photo's height. */
-.testimonial-card.has-photo,
-.testimonial-card.is-screenshot { flex-direction: column; align-items: center; gap: var(--space-3); }
+/* A photo review is a picture card: on a phone the photo fills the card's content box, centred, with the text UNDER it; from
+   768px up the photo is a fixed column from the top of the card (even padding all round) and the text beside it starts level with the top of the photo. */
+.testimonial-card.has-photo { flex-direction: column; align-items: center; gap: var(--space-3); }
 
 .testimonial-image {
   width: 100%;
@@ -31,17 +30,18 @@
   background: var(--color-border);
 }
 
-.testimonial-card.has-photo .testimonial-body,
-.testimonial-card.is-screenshot .testimonial-body { width: 100%; }
+.testimonial-card.has-photo .testimonial-body { width: 100%; }
 
-/* The WhatsApp screenshot: always below its written text, never cropped (contain), never wider than a phone screen. */
+/* WhatsApp screenshots: their own section after the written reviews, images only. One per row on a phone, a centred row of
+   columns on larger screens. Never cropped (contain). */
+.screenshot-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); justify-items: center; }
+
 .testimonial-screenshot {
   display: block;
   width: 100%;
   max-width: 380px;
   height: auto;
   aspect-ratio: auto 9 / 16;
-  margin: 0 auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   object-fit: contain;
@@ -49,14 +49,15 @@
 }
 
 @media (min-width: 768px) {
-  .testimonial-card.has-photo { flex-direction: row; align-items: center; gap: var(--space-5); padding: var(--space-4); }
+  .testimonial-card.has-photo { flex-direction: row; align-items: flex-start; gap: var(--space-5); padding: var(--space-5); }
   .testimonial-card.has-photo .testimonial-image { width: 300px; max-width: 300px; flex: 0 0 300px; }
-  .testimonial-card.has-photo .testimonial-body { width: auto; flex: 1; }
+  /* The text starts at the top of the card, level with the top of the photo (not centred against it). */
+  .testimonial-card.has-photo .testimonial-body { flex: 1; width: auto; align-self: flex-start; }
+  .screenshot-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 300px)); justify-content: center; }
 }
 
 /* Text-only reviews: the initial-letter tile that stands in for a photo.
-   Same 64px footprint as .testimonial-image, so a mixed list of photo and
-   text-only cards aligns without a layout shift. */
+   The compact card for a review that has no photo (a photo review is the big picture card above). */
 .testimonial-avatar{width:64px;height:64px;border-radius:var(--radius-sm);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:var(--color-primary-dark);background:var(--color-accent)}
 
 .testimonial-title {
