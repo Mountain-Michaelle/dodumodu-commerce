@@ -39,7 +39,7 @@ import {
   rewriteAdminJs,
 } from "../config/adminBase";
 import { parseListQuery, pageMeta } from "../shared/listQuery";
-import { requirePermissionOf } from "./admin/helpers";
+import { requirePermissionOf, type AdminContext } from "./admin/helpers";
 import { mayCall, legacyFromGrants } from "../auth/route-access";
 import { categoryRoutes } from "./admin/categories";
 import { productRoutes } from "./admin/products";
@@ -472,7 +472,7 @@ adminRoute.get("/testimonials", async (c) => {
 
 // Create is PUT (the contract the route table and the panel were written against), and POST is accepted as the same
 // create: a panel that sent POST got a bare 404 and could not save a new testimonial at all.
-const saveTestimonial = async (c: Context<{ Bindings: Env }>) => {
+const saveTestimonial = async (c: AdminContext) => {
   const body = await c.req.json().catch(() => null);
   const parsed = testimonialUpsertSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "Invalid testimonial", fields: parsed.error.flatten().fieldErrors }, 400);
