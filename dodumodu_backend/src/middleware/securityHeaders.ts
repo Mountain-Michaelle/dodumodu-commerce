@@ -69,6 +69,9 @@ export function securityHeaders(): MiddlewareHandler<{ Bindings: Env }> {
         // already knows this deployment's media/Turnstile origins) keeps it. A second, fixed same-origin header here
         // would be ANDed with it and could block exactly those origins.
         if (!/<meta[^>]+http-equiv\s*=\s*["']?Content-Security-Policy/i.test(html)) headers.set("Content-Security-Policy", await htmlCsp(html, mediaOrigin(c.env?.IMAGE_DELIVERY_BASE)));
+        // frame-ancestors is ignored inside a <meta> policy (the browser logs a console error), so the self-policed
+        // storefront gets it here as a header. It restricts nothing else, so it adds no conflict with the page's own policy.
+        else headers.set("Content-Security-Policy", "frame-ancestors 'none'");
         c.res = new Response(html, { status: original.status, statusText: original.statusText, headers });
       } catch {
         c.res = new Response(null, { status: 500 });                  // unreachable in practice; never serve a half-read page

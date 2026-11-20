@@ -67,7 +67,7 @@
 </div>
 </section>
 <section class="section product-summary section--summary" aria-labelledby="product-title">
-<div class="rating-badge" aria-label="Rated {{RATING_VALUE}} out of 5 stars from {{RATING_COUNT}} reviews"><span class="rating-stars" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span> <strong>{{RATING_VALUE}}/5</strong> ({{RATING_COUNT}}+ verified reviews)</div>
+<div class="rating-badge" role="img" aria-label="Rated {{RATING_VALUE}} out of 5 stars from {{RATING_COUNT}} reviews"><span class="rating-stars" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span> <strong>{{RATING_VALUE}}/5</strong> ({{RATING_COUNT}}+ verified reviews)</div>
 <h1 id="product-title">{{PRODUCT_NAME}}</h1>
 <div class="price-row">
 <span class="price">{{PRICE_DISPLAY}}</span>
@@ -102,9 +102,9 @@
 <label for="quantity-input">Quantity</label>
 <div class="quantity-row">
 <div class="quantity-stepper" id="quantity-stepper">
-<button type="button" class="quantity-stepper-btn" data-action="decrement" aria-label="Decrease quantity">&minus;</button>
+<button type="button" class="quantity-stepper-btn" data-action="decrement" aria-label="Decrease quantity"><span aria-hidden="true">&minus;</span></button>
 <input id="quantity-input" name="quantity" type="number" min="1" max="{{MAX_ORDER_QUANTITY}}" value="1" inputmode="numeric" required aria-label="Item quantity">
-<button type="button" class="quantity-stepper-btn" data-action="increment" aria-label="Increase quantity">+</button>
+<button type="button" class="quantity-stepper-btn" data-action="increment" aria-label="Increase quantity"><span aria-hidden="true">+</span></button>
 </div>
 <div class="quantity-price" id="quantity-price" role="group" aria-label="Price for the selected quantity"></div>
 </div>

@@ -12,7 +12,7 @@ import {
 // The `kind` distinction is the rule with teeth: a WhatsApp screenshot without an
 // image renders a broken frame on a live product page, so the server refuses it.
 // A written review takes an OPTIONAL photo: text-only cards stay cheap on weak
-// networks, and a supplied photo renders as the 64px avatar on the storefront.
+// networks, and a supplied photo renders as a large picture card on the storefront.
 //
 // Paging is SERVER-side (page/pageSize on /admin/testimonials) through the same
 // scaffold and paginator every other list uses: a testimonial table that grows
@@ -114,8 +114,8 @@ export function testimonialsView({ shell, identity }) {
           el("span", {
             class: "hint",
             text: isScreenshot
-              ? "A screenshot testimonial must have an image, or the product page renders a broken frame."
-              : "Optional. Leave empty for a text-only review — nothing breaks, and the card stays light on slow networks.",
+              ? "Required. The screenshot is shown below the written quote on the product page."
+              : "Optional. Shown large beside (desktop) or above (phone) the text. Leave empty for a text-only review.",
           })));
     }
     paintImageRow();
@@ -149,7 +149,8 @@ export function testimonialsView({ shell, identity }) {
             description: values.description,
             kind: values.kind,
             r2Key: item.r2Key,
-            productId: values.productId ? Number(values.productId) : null,
+            // Left out (not null) when no product is chosen: the server then uses the only product, or says which is needed.
+            ...(values.productId ? { productId: Number(values.productId) } : {}),
             displayOrder: Number(values.displayOrder) || 0,
             active: values.active,
           };

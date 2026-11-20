@@ -4,6 +4,7 @@
   --color-text: #2b2320;
   --color-text-muted: #6b5f59;
   --color-primary: #cf7f00;
+  --color-primary-text: #9a5b00; /* primary as TEXT: 5.2:1 on the page background (the brand amber is 3.0:1, fine for fills and borders only) */
   --color-primary-dark: #084d02;
   --color-accent: #F7A21B;
   --color-success: #2f7d4f;

@@ -402,3 +402,27 @@ test("an ordinary unexpected fault is still the plain 500", async () => {
     ordersRepo.listForAdmin = original;
   }
 });
+
+/* ---- saving a testimonial (the WhatsApp screenshot upload used to end in a 404) ---- */
+
+test("a new testimonial saves with POST or PUT, and an empty product choice means 'the only product'", async () => {
+  const { productsRepo } = await import("../data/productsRepo");
+  const { publishService } = await import("../services/publishService");
+  const o = { upsert: testimonialsRepo.upsert, list: productsRepo.listAll, re: publishService.republishAffected };
+  const saved: Array<Record<string, unknown>> = [];
+  (testimonialsRepo as any).upsert = async (_d: unknown, i: Record<string, unknown>) => { saved.push(i); return { id: 7, ...i }; };
+  (productsRepo as any).listAll = async () => [{ id: 3 }];
+  (publishService as any).republishAffected = async () => ({});
+  try {
+    const shot = { title: "Chioma", description: "Sent on WhatsApp", kind: "whatsapp", r2Key: "uploads/shot.png" };
+    for (const [method, extra] of [["POST", { productId: 3 }], ["PUT", { productId: 3 }], ["POST", { productId: null }], ["POST", {}]] as const) {
+      const res = await call("/admin/testimonials", { method, body: JSON.stringify({ ...shot, ...extra }) });
+      assert.equal(res.status, 200, `${method} ${JSON.stringify(extra)}`);
+    }
+    assert.ok(saved.every((s) => s.productId === 3 && s.kind === "whatsapp" && s.r2Key === "uploads/shot.png"));
+    const noImage = await call("/admin/testimonials", { method: "POST", body: JSON.stringify({ ...shot, r2Key: "" }) });
+    assert.equal(noImage.status, 400, "a screenshot without an image is still refused");
+  } finally {
+    (testimonialsRepo as any).upsert = o.upsert; (productsRepo as any).listAll = o.list; (publishService as any).republishAffected = o.re;
+  }
+});

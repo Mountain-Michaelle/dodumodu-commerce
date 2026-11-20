@@ -13,12 +13,45 @@
   box-shadow: var(--shadow-card);
 }
 
+.testimonial-body { min-width: 0; }
+
+/* A photo review is a picture card: on a phone the photo fills the card's content box (about 93% of the card, the rest is its padding), centred, with the text UNDER it; from
+   768px up the photo is a fixed column and the text sits beside it, centred on the photo's height. */
+.testimonial-card.has-photo,
+.testimonial-card.is-screenshot { flex-direction: column; align-items: center; gap: var(--space-3); }
+
 .testimonial-image {
-  width: 64px;
-  height: 64px;
-  border-radius: var(--radius-sm);
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 4 / 5;
+  height: auto;
+  border-radius: var(--radius-md);
   object-fit: cover;
   flex-shrink: 0;
+  background: var(--color-border);
+}
+
+.testimonial-card.has-photo .testimonial-body,
+.testimonial-card.is-screenshot .testimonial-body { width: 100%; }
+
+/* The WhatsApp screenshot: always below its written text, never cropped (contain), never wider than a phone screen. */
+.testimonial-screenshot {
+  display: block;
+  width: 100%;
+  max-width: 380px;
+  height: auto;
+  aspect-ratio: auto 9 / 16;
+  margin: 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  object-fit: contain;
+  background: var(--color-border);
+}
+
+@media (min-width: 768px) {
+  .testimonial-card.has-photo { flex-direction: row; align-items: center; gap: var(--space-5); padding: var(--space-4); }
+  .testimonial-card.has-photo .testimonial-image { width: 300px; max-width: 300px; flex: 0 0 300px; }
+  .testimonial-card.has-photo .testimonial-body { width: auto; flex: 1; }
 }
 
 /* Text-only reviews: the initial-letter tile that stands in for a photo.

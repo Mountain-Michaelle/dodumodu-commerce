@@ -62,7 +62,7 @@ test("the composed app sends the headers on a public API response and on a refus
 test("a page that declares its own CSP (the storefront's <meta>) keeps it: no second header is stacked on top and it is not blanked", async () => {
   const page = `<html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https://media.example.com"></head><body>shop</body></html>`;
   const r = await mini(page).request("/page", {}, { ENVIRONMENT: "production" });
-  assert.equal(r.headers.get("content-security-policy"), null, "no header CSP that would be ANDed with the page's own");
+  assert.equal(r.headers.get("content-security-policy"), "frame-ancestors 'none'", "only frame-ancestors (ignored in a <meta> policy): it restricts nothing the page's own policy allows");
   assert.equal(await r.text(), page, "body untouched");
   assert.equal(r.headers.get("x-content-type-options"), "nosniff", "the other protections still apply");
 });
@@ -72,7 +72,8 @@ test("the real storefront pages keep their own meta CSP; the self-contained than
   for (const path of ["/"]) {
     const r = await composed.fetch(new Request(`https://shop.example.com${path}`), env);
     assert.equal(r.status, 200, path);
-    assert.equal(r.headers.get("content-security-policy"), null, `${path} is governed by its own meta CSP`);
+    assert.equal(r.headers.get("content-security-policy"), "frame-ancestors 'none'", `${path} is governed by its own meta CSP; the header only forbids framing`);
+    assert.doesNotMatch(await r.clone().text(), /frame-ancestors/, `${path}: no frame-ancestors in the meta CSP (browsers reject it there with a console error)`);
     assert.match(await r.text(), /http-equiv="Content-Security-Policy"/, `${path} carries the meta CSP`);
   }
   const ty = await composed.fetch(new Request("https://shop.example.com/thank-you.html"), env);

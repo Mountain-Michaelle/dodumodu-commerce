@@ -315,3 +315,23 @@ test('the same snapshot renders byte-identically (no clock or random input at re
   const b = renderProduct(baseSnapshot, { css: '', jsPath: '/site.js', buildId: 'b1' })
   assert.equal(a, b)
 })
+
+test('a WhatsApp screenshot prints BELOW its written text; a photo review is a picture card; a text-only review keeps the initial tile', () => {
+  const testimonials = [
+    { r2Key: 'uploads/p.jpg', title: 'Photo', description: 'photo text', kind: 'review' },
+    { r2Key: null, title: 'Plain', description: 'plain text', kind: 'review' },
+    { r2Key: 'uploads/s.png', title: 'Shot', description: 'shot text', kind: 'whatsapp', width: 540, height: 960 },
+    { r2Key: 'uploads/s2.png', title: 'NoDims', description: 'no dims', kind: 'whatsapp' },
+  ]
+  const html = renderProduct({ ...baseSnapshot, testimonials }, { css: '', jsPath: '/site.js', deliveryBase: 'https://media.example.com' })
+  assert.match(html, /testimonial-card has-photo"><img class="testimonial-image" src="https:\/\/media\.example\.com\/uploads\/p\.jpg"/)
+  assert.match(html, /testimonial-card"><span class="testimonial-avatar"[^>]*>P<\/span>/)
+  const shot = html.match(/<div class="testimonial-card is-screenshot">(.*?)<\/div><\/section>|<div class="testimonial-card is-screenshot">.*?<img class="testimonial-screenshot"[^>]*>/s)[0]
+  assert.ok(shot.indexOf('shot text') < shot.indexOf('testimonial-screenshot'), 'the written text comes before the screenshot')
+  assert.match(html, /<img class="testimonial-screenshot" src="https:\/\/media\.example\.com\/uploads\/s\.png" alt="WhatsApp message from Shot" loading="lazy" decoding="async" width="540" height="960">/)
+  assert.match(html, /uploads\/s2\.png" alt="WhatsApp message from NoDims" loading="lazy" decoding="async">/, 'no invented dimensions')
+  assert.ok(!/is-screenshot[^>]*><div class="testimonial-body">[^]*?<span class="testimonial-avatar"/.test(html.split('Shot')[0]), 'a screenshot card has no avatar tile')
+  // a screenshot row whose image is missing degrades to a text card rather than a broken frame
+  const broken = renderProduct({ ...baseSnapshot, testimonials: [{ r2Key: '', title: 'X', description: 'y', kind: 'whatsapp' }] }, { css: '', jsPath: '/site.js' })
+  assert.ok(!broken.includes('testimonial-screenshot') && broken.includes('testimonial-avatar'))
+})

@@ -470,7 +470,9 @@ adminRoute.get("/testimonials", async (c) => {
   return c.json({ testimonials: rows, page: pageMeta(query, total) });
 });
 
-adminRoute.put("/testimonials/:id?", async (c) => {
+// Create is PUT (the contract the route table and the panel were written against), and POST is accepted as the same
+// create: a panel that sent POST got a bare 404 and could not save a new testimonial at all.
+const saveTestimonial = async (c: Context<{ Bindings: Env }>) => {
   const body = await c.req.json().catch(() => null);
   const parsed = testimonialUpsertSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "Invalid testimonial", fields: parsed.error.flatten().fieldErrors }, 400);
@@ -498,7 +500,9 @@ adminRoute.put("/testimonials/:id?", async (c) => {
   // The page prints its testimonials from its snapshot, so the edit is only visible once that product's page is regenerated.
   const republished = await publishService.republishAffected(db, c.env, c.get("principal").email, { productId });
   return c.json({ testimonial, republished });
-});
+};
+adminRoute.put("/testimonials/:id?", saveTestimonial);
+adminRoute.post("/testimonials", saveTestimonial);
 
 // §5.12 — a small, flat, admin-editable table: the "global variable" for
 // quantity discounts. GET returns everything (active and inactive) so the

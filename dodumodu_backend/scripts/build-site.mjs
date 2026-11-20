@@ -81,7 +81,8 @@ export function buildCsp({ scriptHashes, styleHashes, imgOrigins = [], connectOr
     ...(turnstile ? [`frame-src ${CF_CHALLENGES}`] : []),
     `base-uri 'none'`,
     `form-action 'self'`,
-    `frame-ancestors 'none'`,
+    // No frame-ancestors here: browsers ignore it in a <meta> policy and log a console error. Framing is refused by the
+    // response headers instead (securityHeaders.ts: X-Frame-Options DENY + a frame-ancestors-only Content-Security-Policy).
   ].join('; ')
 }
 
