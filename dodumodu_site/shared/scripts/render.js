@@ -25,8 +25,11 @@ const ARROW = {
 
 export function renderCarousel(container, images, options = {}) {
   const list = (images || []).filter((img) => img && (img.key || img.url));
-  if (!list.length) return;
-  container.innerHTML = "";
+  // A published page already printed the finished track (build/render-core.mjs): the slides in the page are the ones that
+  // are painted and decoded, so they are KEPT and only wired up. Rebuilding them is what blanked the hero on slow phones.
+  const printed = container.querySelector(".carousel");
+  if (!printed && !list.length) return;
+  if (!printed) container.innerHTML = "";
 
   const { widths, mode, deliveryBase } = options;
   const quality = options.quality || DEFAULT_QUALITY;
@@ -35,14 +38,16 @@ export function renderCarousel(container, images, options = {}) {
   const mid = srcWidth[Math.min(1, srcWidth.length - 1)];
   const side = intrinsicWidthFor(slot, widths);
 
-  const wrap = document.createElement("div");
+  const wrap = printed ? printed.parentNode : document.createElement("div");
   wrap.className = "carousel-wrap";
-  const track = document.createElement("div");
-  track.className = "carousel";
-  track.setAttribute("role", "region");
-  track.setAttribute("aria-roledescription", "carousel");
-  track.setAttribute("aria-label", "Product photos");
-  track.tabIndex = 0; // a sideways-scrolling region must be reachable and scrollable from the keyboard
+  const track = printed || document.createElement("div");
+  if (!printed) {
+    track.className = "carousel";
+    track.setAttribute("role", "region");
+    track.setAttribute("aria-roledescription", "carousel");
+    track.setAttribute("aria-label", "Product photos");
+    track.tabIndex = 0; // a sideways-scrolling region must be reachable and scrollable from the keyboard
+  }
 
   const nav = document.createElement("div");
   nav.className = "carousel-nav";
@@ -64,7 +69,7 @@ export function renderCarousel(container, images, options = {}) {
   let timer = null;
   const AUTOPLAY_MS = 5000;
 
-  const slides = list.map((img, i) => {
+  const slides = printed ? [...track.children] : list.map((img) => {
     const key = img.key || img.url;
     const slide = document.createElement("div");
     slide.className = "carousel-slide";
@@ -76,23 +81,25 @@ export function renderCarousel(container, images, options = {}) {
     el.src = imageUrl({ key, width: mid, quality: quality[slot], mode, deliveryBase });
     const srcset = srcsetFor({ key, slot, widths, quality, mode, deliveryBase });
     if (srcset) { el.srcset = srcset; el.sizes = DEFAULT_SIZES[slot]; }
-    if (i === 0) { el.fetchPriority = "high"; el.loading = "eager"; } else { el.loading = "lazy"; }
+    if (track.children.length === 0) { el.fetchPriority = "high"; el.loading = "eager"; } else { el.loading = "lazy"; }
     slide.append(el);
     track.append(slide);
-
+    return slide;
+  });
+  slides.forEach((_, i) => {
     const dot = document.createElement("button");
     dot.type = "button";
     dot.className = "carousel-dot";
     dot.setAttribute("aria-label", `Go to photo ${i + 1}`);
     dot.addEventListener("click", () => goTo(i, true));
     dotsWrap.append(dot);
-    return slide;
   });
+  list.length = slides.length; // one count for everything below, whether the slides were printed or built
 
   nav.append(prevBtn, dotsWrap, nextBtn);
-  wrap.append(track);
-  if (list.length > 1) wrap.append(nav);
-  container.append(wrap);
+  if (!printed) wrap.append(track);
+  if (slides.length > 1) wrap.append(nav);
+  if (!printed) container.append(wrap);
 
   function paint() {
     [...dotsWrap.children].forEach((d, i) => { d.dataset.active = i === currentIndex ? "true" : "false"; });

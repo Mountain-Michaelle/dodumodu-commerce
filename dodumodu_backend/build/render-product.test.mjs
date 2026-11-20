@@ -146,7 +146,7 @@ test('the OG tags come before the inline CSS so a crawler that reads only the st
 test('the static hero is the optimised image the carousel requests first, preloaded with the same srcset', () => {
   const html = rich()
   const o = 'https://media.example.com/cdn-cgi/image/'
-  assert.ok(html.includes(`class="hero-fallback" src="${o}width=640,quality=75,format=auto,fit=scale-down/uploads/hero.jpg"`))
+  assert.ok(html.includes(`<div class="carousel-slide"><img src="${o}width=640,quality=75,format=auto,fit=scale-down/uploads/hero.jpg"`))
   assert.ok(html.includes(`${o}width=320,quality=75,format=auto,fit=scale-down/uploads/hero.jpg 320w`))
   assert.ok(html.includes('alt="Serum bottle with dropper"'))
   assert.match(html, /<link rel="preload" as="image" href="[^"]*width=640[^"]*" imagesrcset="[^"]*320w[^"]*960w" imagesizes="[^"]+" fetchpriority="high">/)
@@ -164,19 +164,23 @@ test('without a custom domain (same-origin /media or workers.dev) photos are the
     const html = rich({ deliveryBase })
     assert.ok(!html.includes('cdn-cgi'), deliveryBase)
     assert.ok(html.includes(`uploads/hero.jpg"`), deliveryBase)
-    assert.ok(!html.includes('hero-fallback" src="" '), deliveryBase)
-    assert.ok(!/class="hero-fallback"[^>]* srcset=/.test(html), 'no srcset of identical URLs')
+    assert.ok(!html.includes('<img src="" '), deliveryBase)
+    assert.ok(!/<div class="carousel-slide"><img[^>]* srcset=/.test(html), 'no srcset of identical URLs')
   }
 })
 
-test('the whole gallery is printed into the page so the carousel needs no API call', () => {
-  const html = rich()
-  const m = html.match(/<div id="carousel" data-gallery="([^"]*)">/)
-  assert.ok(m, 'carousel carries data-gallery')
-  const gallery = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
-  assert.equal(gallery[0].key, 'uploads/hero.jpg')
-  assert.ok(gallery.length >= 1)
-  assert.ok(!renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE }).includes('data-gallery'))
+test('the whole gallery is printed as the finished carousel track, so the script never has to rebuild (or blank) the hero', () => {
+  const two = { ...baseSnapshot, images: [{ r2Key: 'uploads/hero.jpg', altText: 'Serum bottle with dropper' }, { r2Key: 'uploads/two.jpg', altText: 'Second' }, { r2Key: 'uploads/three.jpg', altText: '' }] }
+  const html = renderProduct(two, { siteUrl: SITE, deliveryBase: 'https://media.example.com' })
+  const track = html.match(/<div id="carousel">\s*<div class="carousel-wrap"><div class="carousel" role="region" aria-roledescription="carousel" aria-label="Product photos" tabindex="0">(.*?)<\/div><\/div>\s*<\/div>/s)
+  assert.ok(track, 'a finished track sits inside #carousel')
+  const slides = track[1].split('<div class="carousel-slide">').slice(1)
+  assert.equal(slides.length, 3)
+  assert.match(slides[0], /fetchpriority="high"/); assert.ok(!/loading="lazy"/.test(slides[0]), 'the first photo is never lazy')
+  assert.ok(slides.slice(1).every((x) => /loading="lazy"/.test(x) && /decoding="async"/.test(x) && /width="960" height="960"/.test(x)))
+  assert.ok(slides[1].includes('uploads/two.jpg') && slides[1].includes('alt="Second"') && slides[2].includes('alt=""'))
+  assert.ok(!html.includes('data-gallery'), 'no second copy of the gallery as JSON')
+  assert.ok(!renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE }).includes('class="carousel"'))
 })
 
 test('an empty hero alt falls back to the product name (an empty string used to win)', () => {
@@ -188,7 +192,7 @@ test('a product with no images renders without a hero, preload or og:image', () 
   const html = renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE })
   assert.ok(!html.includes('og:image'))
   assert.ok(!html.includes('rel="preload"'))
-  assert.ok(!html.includes('hero-fallback'))
+  assert.ok(!html.includes('carousel-slide'))
 })
 
 test('mediaUrl and absoluteUrl follow the browser rules', () => {

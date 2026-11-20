@@ -128,7 +128,9 @@ export function initProductPage({ slug, productId }) {
   // backend request. Only a page built without them (local dev, the source page) falls back to the API.
   try {
     const gallery = JSON.parse(carouselContainer?.dataset.gallery || "null");
-    if (Array.isArray(gallery)) {
+    if (carouselContainer?.querySelector(".carousel")) {
+      renderCarousel(carouselContainer, [], imageOptions()); // the track is already in the page: wire it up, do not rebuild it
+    } else if (Array.isArray(gallery)) {
       renderCarousel(carouselContainer, gallery.map((g) => ({ key: g.key, altText: g.alt })), imageOptions());
     }
   } catch (e) { /* malformed attribute: keep the static first photo */ }
@@ -153,7 +155,7 @@ export function initProductPage({ slug, productId }) {
     rerenderPricing();
 
     // A published page already drew its gallery and testimonials. Only a page without them builds them from data.
-    if (!carouselContainer?.dataset.gallery) {
+    if (!carouselContainer?.dataset.gallery && !carouselContainer?.querySelector(".carousel")) {
       renderCarousel(carouselContainer, (data.images || []).map((img) => ({ key: img.r2Key, altText: img.altText })), imageOptions());
     }
     if (testimonialsContainer && !testimonialsContainer.querySelector(".testimonial-card")) {

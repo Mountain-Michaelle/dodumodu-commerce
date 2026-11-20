@@ -279,8 +279,21 @@ export function renderProductWith(template, snapshot, opts = {}) {
   const midWidth = widths[Math.min(1, widths.length - 1)]
   const heroSrcOpt = hero ? imageUrl({ ...imgOpts, width: midWidth, quality: DEFAULT_QUALITY.gallery }) : ''
   const heroSrcset = hero ? srcsetFor(imgOpts) : ''
-  const heroHtml = heroSrcOpt
-    ? `<img class="hero-fallback" src="${escapeUrl(heroSrcOpt)}"${heroSrcset ? ` srcset="${escapeHtmlAttr(heroSrcset)}" sizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} alt="${escapeHtmlAttr(heroAlt)}" width="${widths[widths.length - 1]}" height="${widths[widths.length - 1]}" fetchpriority="high" decoding="async">`
+  // The WHOLE gallery is printed as the finished carousel track (slides only; arrows and dots are an absolutely-placed
+  // overlay the script adds, so adding them moves nothing). The script then only wires it up. Before, the script deleted
+  // the painted hero and built a new one, which showed a blank box on slow phones and was HTML generated after delivery.
+  // The first slide is byte-for-byte the old hero image (same src, srcset, sizes), so the preload below still matches.
+  const slideHtml = (img, i) => {
+    const src = i === 0 ? heroSrcOpt : imageUrl({ key: img.r2Key, slot: 'gallery', mode: imageMode, deliveryBase, width: midWidth, quality: DEFAULT_QUALITY.gallery })
+    if (!src) return ''
+    const set = i === 0 ? heroSrcset : srcsetFor({ key: img.r2Key, slot: 'gallery', mode: imageMode, deliveryBase })
+    const alt = i === 0 ? heroAlt : (img.altText ?? '')
+    const dim = widths[widths.length - 1]
+    return `<div class="carousel-slide"><img src="${escapeUrl(src)}"${set ? ` srcset="${escapeHtmlAttr(set)}" sizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} alt="${escapeHtmlAttr(alt)}" width="${dim}" height="${dim}"${i === 0 ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></div>`
+  }
+  const slides = heroSrcOpt ? images.map(slideHtml).join('') : ''
+  const heroHtml = slides
+    ? `<div class="carousel-wrap"><div class="carousel" role="region" aria-roledescription="carousel" aria-label="Product photos" tabindex="0">${slides}</div></div>`
     : ''
   const heroOrigin = originOf(heroSrcOpt)
   const sameOrigin = heroOrigin && heroOrigin === originOf(siteUrl)
@@ -288,10 +301,7 @@ export function renderProductWith(template, snapshot, opts = {}) {
   const preload = heroSrcOpt
     ? `<link rel="preload" as="image" href="${escapeUrl(heroSrcOpt)}"${heroSrcset ? ` imagesrcset="${escapeHtmlAttr(heroSrcset)}" imagesizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} fetchpriority="high">`
     : ''
-  // The whole gallery, for the carousel to build from at once (no API round trip).
-  const carouselAttrs = images.length
-    ? ` data-gallery="${escapeHtmlAttr(JSON.stringify(images.map((i) => ({ key: i.r2Key, alt: i.altText ?? '' }))))}"`
-    : ''
+  const carouselAttrs = ''
 
   const ldImages = images.map((i) => absoluteUrl(mediaUrl(i.r2Key, deliveryBase), siteUrl)).filter(Boolean)
 

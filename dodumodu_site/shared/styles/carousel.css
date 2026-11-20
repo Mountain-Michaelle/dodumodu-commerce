@@ -6,7 +6,6 @@
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   position: relative; /* slides measure their offset from the track */
-  contain-intrinsic-size: 480px 480px;
 }
 
 .carousel::-webkit-scrollbar { display: none; }
@@ -17,7 +16,6 @@
   border-radius: var(--radius-md);
   overflow: hidden;
   aspect-ratio: 1 / 1;
-  contain-intrinsic-size: 480px 480px;
 }
 
 .carousel-slide img {
