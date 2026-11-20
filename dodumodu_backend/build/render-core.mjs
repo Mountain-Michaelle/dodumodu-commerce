@@ -204,10 +204,7 @@ function lazyTestimonialImg(cls, t, deliveryBase, mode, alt, size) {
 }
 
 function testimonialsSection(snapshot, deliveryBase, mode = 'transform') {
-  // Two sections, written reviews first. WhatsApp screenshots are not part of a review card: they are their own section with
-  // their own H2 (like every other section) and carry no text, only the screenshots.
   const items = list(snapshot.testimonials)
-  const dim = (n) => (Number.isInteger(n) && n > 0 ? n : 0)
   const reviews = items.filter((t) => t.kind !== 'whatsapp').map((t) => {
     const title = String(t.title ?? '')
     const text = `<div class="testimonial-body"><p class="testimonial-title">${escapeHtml(title)}</p><p class="testimonial-description">${escapeHtml(t.description ?? '')}</p></div>`
@@ -215,16 +212,23 @@ function testimonialsSection(snapshot, deliveryBase, mode = 'transform') {
     if (photo) return `<div class="testimonial-card has-photo">${photo}${text}</div>`
     return `<div class="testimonial-card"><span class="testimonial-avatar" aria-hidden="true">${escapeHtml((title || '?').trim().charAt(0).toUpperCase())}</span>${text}</div>`
   }).join('')
+  return reviews
+    ? `<section class="section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${reviews}</div></div></section>`
+    : ''
+}
+
+function whatsappSection(snapshot, deliveryBase, mode = 'transform') {
+  // WhatsApp screenshots are not part of a review card: they are their own section with their own H2 and carry no text,
+  // only the screenshots.
+  const items = list(snapshot.testimonials)
+  const dim = (n) => (Number.isInteger(n) && n > 0 ? n : 0)
   const shots = items.filter((t) => t.kind === 'whatsapp').map((t) => {
     const w = dim(t.width), h = dim(t.height) // the real size when the admin recorded it (no layout shift while loading)
     return lazyTestimonialImg('testimonial-screenshot', t, deliveryBase, mode, `WhatsApp message from ${String(t.title ?? 'a customer')}`, w && h ? ` width="${w}" height="${h}"` : '')
   }).filter(Boolean).join('')
-  return (reviews
-    ? `<section class="section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${reviews}</div></div></section>`
-    : '')
-    + (shots
-      ? `<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">Real WhatsApp messages from customers</h2><div class="screenshot-grid">${shots}</div></section>`
-      : '')
+  return shots
+    ? `<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">Real WhatsApp messages from customers</h2><div class="screenshot-grid">${shots}</div></section>`
+    : ''
 }
 
 function trustRow(page) {
@@ -349,6 +353,7 @@ export function renderProductWith(template, snapshot, opts = {}) {
     TRUST_ROW: trustRow(page),
     BENEFITS_SECTION: benefitsSection(page),
     TESTIMONIALS_SECTION: testimonialsSection(snapshot, deliveryBase, imageMode),
+    WHATSAPP_SECTION: whatsappSection(snapshot, deliveryBase, imageMode),
     HOW_TO_SECTION: howToSection(page),
     FAQ_SECTION: faqSection(page),
     CTA_TEXT: escapeHtml(page.ctaText || 'Place your order'),
