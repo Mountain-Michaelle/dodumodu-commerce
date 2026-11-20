@@ -335,8 +335,8 @@ test('written reviews and WhatsApp screenshots are two sections: screenshots are
   assert.match(rev, /testimonial-card"><span class="testimonial-avatar"[^>]*>P<\/span>/)
   assert.ok(!rev.includes('testimonial-screenshot') && !rev.includes('is-screenshot'))
   // screenshot section: own H2, after the reviews, images only
-  const iRev = html.indexOf('id="testimonials-title"'), iShot = html.indexOf('id="whatsapp-title"')
-  assert.ok(iRev > 0 && iShot > iRev, 'the screenshot section comes after the written reviews')
+  const iRev = html.indexOf('id="testimonials-title"'), iCta = html.indexOf('id="cta-mid-title"'), iShot = html.indexOf('id="whatsapp-title"')
+  assert.ok(iRev > 0 && iCta > iRev && iShot > iCta, 'written reviews, then CTA, then WhatsApp screenshots')
   const sec = html.match(/<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">([^<]+)<\/h2><div class="screenshot-grid">(.*?)<\/div><\/section>/s)
   assert.ok(sec, 'an H2 titled section like the others')
   assert.ok(!/<p|testimonial-body|testimonial-description/.test(sec[2]), 'no written text in the screenshot section')
