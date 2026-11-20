@@ -422,6 +422,11 @@ test("a new testimonial saves with POST or PUT, and an empty product choice mean
     assert.ok(saved.every((s) => s.productId === 3 && s.kind === "whatsapp" && s.r2Key === "uploads/shot.png"));
     const noImage = await call("/admin/testimonials", { method: "POST", body: JSON.stringify({ ...shot, r2Key: "" }) });
     assert.equal(noImage.status, 400, "a screenshot without an image is still refused");
+    const { description: _omit, ...noQuote } = shot;
+    const bare = await call("/admin/testimonials", { method: "POST", body: JSON.stringify(noQuote) });
+    assert.equal(bare.status, 200, "a screenshot needs no written quote");
+    const emptyReview = await call("/admin/testimonials", { method: "POST", body: JSON.stringify({ ...noQuote, kind: "review", title: "Written" }) });
+    assert.equal(emptyReview.status, 400, "a written review still needs its quote");
   } finally {
     (testimonialsRepo as any).upsert = o.upsert; (productsRepo as any).listAll = o.list; (publishService as any).republishAffected = o.re;
   }

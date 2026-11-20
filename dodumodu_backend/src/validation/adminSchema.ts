@@ -37,7 +37,8 @@ export const testimonialUpsertSchema = z.object({
   kind: z.enum(["review", "whatsapp"]).default("review"),
   r2Key: z.string().trim().max(300).default(""),
   title: z.string().trim().min(1).max(200),
-  description: z.string().trim().min(1),
+  // A screenshot has no written text; a written review needs its quote (checked below).
+  description: z.string().trim().default(""),
   displayOrder: z.number().int().default(0),
   width: z.number().int().min(0).max(20000).optional().nullable(),
   height: z.number().int().min(0).max(20000).optional().nullable(),
@@ -49,6 +50,9 @@ export const testimonialUpsertSchema = z.object({
 }).refine((t) => t.kind !== "whatsapp" || t.r2Key.length > 0, {
   message: "A WhatsApp screenshot needs an uploaded image",
   path: ["r2Key"],
+}).refine((t) => t.kind === "whatsapp" || t.description.length > 0, {
+  message: "A written review needs its quote",
+  path: ["description"],
 });
 
 // Order list FILTERS only. The page size, the page number, the search term and

@@ -31,11 +31,9 @@
 .site-nav a:hover{background:#0a5f03;text-decoration:none}
 .site-nav a:focus-visible{outline:3px solid rgba(207,127,0,.4);outline-offset:2px}
 
-/* Below-the-fold sections are skipped by layout/paint until they approach the
-   viewport (faster first render on phones). `auto` remembers the real height
-   after the first render, so scrollbar jumps are avoided. Unsupported
-   browsers simply render them normally. */
-.lazy-section{content-visibility:auto;contain-intrinsic-size:auto 480px}
+/* .lazy-section used to be content-visibility:auto (skip layout/paint of off-screen sections). On low-memory Android that made
+   sections go blank a moment after being scrolled past and repaint on the way back. Every section is small static HTML, so
+   it is all simply rendered: no blanking, and the page's size is final from the first paint. */
 
 @media (max-width:360px){.site-nav a{padding:0 12px;font-size:.78rem}}
 

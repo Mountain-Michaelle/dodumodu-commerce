@@ -188,32 +188,45 @@ function pageDataScript(snapshot) {
   const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
   return `<script type="application/json" id="page-data">${json}</script>`
 }
-function testimonialsSection(snapshot, deliveryBase) {
-  // EVERY testimonial is printed here, so the script has nothing left to build. Three shapes, one card class:
-  //  - written review with a photo: big photo (90% wide on a phone, a fixed column beside the text on desktop)
-  //  - written review without one: the small initial tile, unchanged
-  //  - WhatsApp screenshot: the written text first, the screenshot BELOW it (a screenshot has to be legible, so it is
-  //    never squeezed into a thumbnail)
+// A review photo is shown ~300px wide on desktop and about the card width on a phone; a screenshot the same. The default
+// testimonial `sizes` (480px) would make a phone download more than it draws.
+const TESTIMONIAL_SIZES = '(max-width: 768px) 92vw, 300px'
+
+// One lazily-loaded, responsive testimonial image: the browser picks the smallest candidate that fits, fetches it only when it
+// nears the viewport (loading=lazy), decodes it off the main thread (decoding=async) and ranks it below everything else.
+function lazyTestimonialImg(cls, t, deliveryBase, mode, alt, size) {
+  const o = { key: t.r2Key, slot: 'testimonial', mode, deliveryBase }
+  const widths = DEFAULT_WIDTHS.testimonial
+  const src = imageUrl({ ...o, width: widths[widths.length - 1], quality: DEFAULT_QUALITY.testimonial })
+  if (!src) return ''
+  const set = srcsetFor(o)
+  return `<img class="${cls}" src="${escapeUrl(src)}"${set ? ` srcset="${escapeHtmlAttr(set)}" sizes="${TESTIMONIAL_SIZES}"` : ''} alt="${escapeHtmlAttr(alt)}" loading="lazy" decoding="async" fetchpriority="low"${size}>`
+}
+
+function testimonialsSection(snapshot, deliveryBase, mode = 'transform') {
+  // Two sections, written reviews first. WhatsApp screenshots are not part of a review card: they are their own section with
+  // their own H2 (like every other section) and carry no text, only the screenshots.
   const items = list(snapshot.testimonials)
-  if (!items.length) return ''
   const dim = (n) => (Number.isInteger(n) && n > 0 ? n : 0)
-  const cards = items.map((t) => {
-    const src = mediaUrl(t.r2Key, deliveryBase)
+  const reviews = items.filter((t) => t.kind !== 'whatsapp').map((t) => {
     const title = String(t.title ?? '')
     const text = `<div class="testimonial-body"><p class="testimonial-title">${escapeHtml(title)}</p><p class="testimonial-description">${escapeHtml(t.description ?? '')}</p></div>`
-    if (src && t.kind === 'whatsapp') {
-      // Real dimensions when the admin recorded them (no layout shift while it loads); otherwise the CSS reserves a phone-shaped box.
-      const w = dim(t.width), h = dim(t.height)
-      const size = w && h ? ` width="${w}" height="${h}"` : ''
-      return `<div class="testimonial-card is-screenshot">${text}<img class="testimonial-screenshot" src="${escapeUrl(src)}" alt="WhatsApp message from ${escapeHtml(title)}" loading="lazy" decoding="async"${size}></div>`
-    }
-    if (src) {
-      return `<div class="testimonial-card has-photo"><img class="testimonial-image" src="${escapeUrl(src)}" alt="" loading="lazy" decoding="async" width="480" height="600">${text}</div>`
-    }
+    const photo = t.r2Key ? lazyTestimonialImg('testimonial-image', t, deliveryBase, mode, '', ' width="480" height="600"') : ''
+    if (photo) return `<div class="testimonial-card has-photo">${photo}${text}</div>`
     return `<div class="testimonial-card"><span class="testimonial-avatar" aria-hidden="true">${escapeHtml((title || '?').trim().charAt(0).toUpperCase())}</span>${text}</div>`
   }).join('')
-  return `<section class="section lazy-section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${cards}</div></div></section>`
+  const shots = items.filter((t) => t.kind === 'whatsapp').map((t) => {
+    const w = dim(t.width), h = dim(t.height) // the real size when the admin recorded it (no layout shift while loading)
+    return lazyTestimonialImg('testimonial-screenshot', t, deliveryBase, mode, `WhatsApp message from ${String(t.title ?? 'a customer')}`, w && h ? ` width="${w}" height="${h}"` : '')
+  }).filter(Boolean).join('')
+  return (reviews
+    ? `<section class="section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${reviews}</div></div></section>`
+    : '')
+    + (shots
+      ? `<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">Real WhatsApp messages from customers</h2><div class="screenshot-grid">${shots}</div></section>`
+      : '')
 }
+
 function trustRow(page) {
   const badges = list(page.trustBadges).length ? list(page.trustBadges) : DEFAULT_TRUST
   return `<div class="trust-row" role="list">${badges.map((b) => `<div class="trust-item" role="listitem">${iconHtml(b.icon)} ${escapeHtml(b.text)}</div>`).join('')}</div>`
@@ -279,8 +292,21 @@ export function renderProductWith(template, snapshot, opts = {}) {
   const midWidth = widths[Math.min(1, widths.length - 1)]
   const heroSrcOpt = hero ? imageUrl({ ...imgOpts, width: midWidth, quality: DEFAULT_QUALITY.gallery }) : ''
   const heroSrcset = hero ? srcsetFor(imgOpts) : ''
-  const heroHtml = heroSrcOpt
-    ? `<img class="hero-fallback" src="${escapeUrl(heroSrcOpt)}"${heroSrcset ? ` srcset="${escapeHtmlAttr(heroSrcset)}" sizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} alt="${escapeHtmlAttr(heroAlt)}" width="${widths[widths.length - 1]}" height="${widths[widths.length - 1]}" fetchpriority="high" decoding="async">`
+  // The WHOLE gallery is printed as the finished carousel track (slides only; arrows and dots are an absolutely-placed
+  // overlay the script adds, so adding them moves nothing). The script then only wires it up. Before, the script deleted
+  // the painted hero and built a new one, which showed a blank box on slow phones and was HTML generated after delivery.
+  // The first slide is byte-for-byte the old hero image (same src, srcset, sizes), so the preload below still matches.
+  const slideHtml = (img, i) => {
+    const src = i === 0 ? heroSrcOpt : imageUrl({ key: img.r2Key, slot: 'gallery', mode: imageMode, deliveryBase, width: midWidth, quality: DEFAULT_QUALITY.gallery })
+    if (!src) return ''
+    const set = i === 0 ? heroSrcset : srcsetFor({ key: img.r2Key, slot: 'gallery', mode: imageMode, deliveryBase })
+    const alt = i === 0 ? heroAlt : (img.altText ?? '')
+    const dim = widths[widths.length - 1]
+    return `<div class="carousel-slide"><img src="${escapeUrl(src)}"${set ? ` srcset="${escapeHtmlAttr(set)}" sizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} alt="${escapeHtmlAttr(alt)}" width="${dim}" height="${dim}"${i === 0 ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></div>`
+  }
+  const slides = heroSrcOpt ? images.map(slideHtml).join('') : ''
+  const heroHtml = slides
+    ? `<div class="carousel-wrap"><div class="carousel" role="region" aria-roledescription="carousel" aria-label="Product photos" tabindex="0">${slides}</div></div>`
     : ''
   const heroOrigin = originOf(heroSrcOpt)
   const sameOrigin = heroOrigin && heroOrigin === originOf(siteUrl)
@@ -288,10 +314,7 @@ export function renderProductWith(template, snapshot, opts = {}) {
   const preload = heroSrcOpt
     ? `<link rel="preload" as="image" href="${escapeUrl(heroSrcOpt)}"${heroSrcset ? ` imagesrcset="${escapeHtmlAttr(heroSrcset)}" imagesizes="${escapeHtmlAttr(DEFAULT_SIZES.gallery)}"` : ''} fetchpriority="high">`
     : ''
-  // The whole gallery, for the carousel to build from at once (no API round trip).
-  const carouselAttrs = images.length
-    ? ` data-gallery="${escapeHtmlAttr(JSON.stringify(images.map((i) => ({ key: i.r2Key, alt: i.altText ?? '' }))))}"`
-    : ''
+  const carouselAttrs = ''
 
   const ldImages = images.map((i) => absoluteUrl(mediaUrl(i.r2Key, deliveryBase), siteUrl)).filter(Boolean)
 
@@ -325,7 +348,7 @@ export function renderProductWith(template, snapshot, opts = {}) {
     SUMMARY_BLOCK: page.summaryHtml ? `<p>${page.summaryHtml}</p>` : '', // sanitised rich text (adminSchema), inserted as-is
     TRUST_ROW: trustRow(page),
     BENEFITS_SECTION: benefitsSection(page),
-    TESTIMONIALS_SECTION: testimonialsSection(snapshot, deliveryBase),
+    TESTIMONIALS_SECTION: testimonialsSection(snapshot, deliveryBase, imageMode),
     HOW_TO_SECTION: howToSection(page),
     FAQ_SECTION: faqSection(page),
     CTA_TEXT: escapeHtml(page.ctaText || 'Place your order'),

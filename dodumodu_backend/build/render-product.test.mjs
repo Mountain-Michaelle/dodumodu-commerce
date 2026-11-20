@@ -146,7 +146,7 @@ test('the OG tags come before the inline CSS so a crawler that reads only the st
 test('the static hero is the optimised image the carousel requests first, preloaded with the same srcset', () => {
   const html = rich()
   const o = 'https://media.example.com/cdn-cgi/image/'
-  assert.ok(html.includes(`class="hero-fallback" src="${o}width=640,quality=75,format=auto,fit=scale-down/uploads/hero.jpg"`))
+  assert.ok(html.includes(`<div class="carousel-slide"><img src="${o}width=640,quality=75,format=auto,fit=scale-down/uploads/hero.jpg"`))
   assert.ok(html.includes(`${o}width=320,quality=75,format=auto,fit=scale-down/uploads/hero.jpg 320w`))
   assert.ok(html.includes('alt="Serum bottle with dropper"'))
   assert.match(html, /<link rel="preload" as="image" href="[^"]*width=640[^"]*" imagesrcset="[^"]*320w[^"]*960w" imagesizes="[^"]+" fetchpriority="high">/)
@@ -164,19 +164,23 @@ test('without a custom domain (same-origin /media or workers.dev) photos are the
     const html = rich({ deliveryBase })
     assert.ok(!html.includes('cdn-cgi'), deliveryBase)
     assert.ok(html.includes(`uploads/hero.jpg"`), deliveryBase)
-    assert.ok(!html.includes('hero-fallback" src="" '), deliveryBase)
-    assert.ok(!/class="hero-fallback"[^>]* srcset=/.test(html), 'no srcset of identical URLs')
+    assert.ok(!html.includes('<img src="" '), deliveryBase)
+    assert.ok(!/<div class="carousel-slide"><img[^>]* srcset=/.test(html), 'no srcset of identical URLs')
   }
 })
 
-test('the whole gallery is printed into the page so the carousel needs no API call', () => {
-  const html = rich()
-  const m = html.match(/<div id="carousel" data-gallery="([^"]*)">/)
-  assert.ok(m, 'carousel carries data-gallery')
-  const gallery = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
-  assert.equal(gallery[0].key, 'uploads/hero.jpg')
-  assert.ok(gallery.length >= 1)
-  assert.ok(!renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE }).includes('data-gallery'))
+test('the whole gallery is printed as the finished carousel track, so the script never has to rebuild (or blank) the hero', () => {
+  const two = { ...baseSnapshot, images: [{ r2Key: 'uploads/hero.jpg', altText: 'Serum bottle with dropper' }, { r2Key: 'uploads/two.jpg', altText: 'Second' }, { r2Key: 'uploads/three.jpg', altText: '' }] }
+  const html = renderProduct(two, { siteUrl: SITE, deliveryBase: 'https://media.example.com' })
+  const track = html.match(/<div id="carousel">\s*<div class="carousel-wrap"><div class="carousel" role="region" aria-roledescription="carousel" aria-label="Product photos" tabindex="0">(.*?)<\/div><\/div>\s*<\/div>/s)
+  assert.ok(track, 'a finished track sits inside #carousel')
+  const slides = track[1].split('<div class="carousel-slide">').slice(1)
+  assert.equal(slides.length, 3)
+  assert.match(slides[0], /fetchpriority="high"/); assert.ok(!/loading="lazy"/.test(slides[0]), 'the first photo is never lazy')
+  assert.ok(slides.slice(1).every((x) => /loading="lazy"/.test(x) && /decoding="async"/.test(x) && /width="960" height="960"/.test(x)))
+  assert.ok(slides[1].includes('uploads/two.jpg') && slides[1].includes('alt="Second"') && slides[2].includes('alt=""'))
+  assert.ok(!html.includes('data-gallery'), 'no second copy of the gallery as JSON')
+  assert.ok(!renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE }).includes('class="carousel"'))
 })
 
 test('an empty hero alt falls back to the product name (an empty string used to win)', () => {
@@ -188,7 +192,7 @@ test('a product with no images renders without a hero, preload or og:image', () 
   const html = renderProduct({ ...baseSnapshot, images: [] }, { siteUrl: SITE })
   assert.ok(!html.includes('og:image'))
   assert.ok(!html.includes('rel="preload"'))
-  assert.ok(!html.includes('hero-fallback'))
+  assert.ok(!html.includes('carousel-slide'))
 })
 
 test('mediaUrl and absoluteUrl follow the browser rules', () => {
@@ -214,7 +218,7 @@ test('benefits, how-to, FAQ and testimonials render from the stored arrays, esca
   assert.ok(html.includes('<details class="faq-item"><summary>How fast?</summary>'))
   assert.ok(html.includes('<p class="testimonial-title">Amaka O. - Lagos</p>'))
   assert.ok(html.includes('Faded in 10 days &lt;3'))
-  assert.ok(html.includes('src="https://media.example.com/uploads/t1.jpg"'))
+  assert.match(html, /<img class="testimonial-image" src="https:\/\/media\.example\.com\/cdn-cgi\/image\/width=640,quality=70[^"]*\/uploads\/t1\.jpg"/, 'the review photo is the resized, lazy image')
 })
 
 test('empty lists drop their section instead of printing an empty heading', () => {
@@ -316,22 +320,42 @@ test('the same snapshot renders byte-identically (no clock or random input at re
   assert.equal(a, b)
 })
 
-test('a WhatsApp screenshot prints BELOW its written text; a photo review is a picture card; a text-only review keeps the initial tile', () => {
+test('written reviews and WhatsApp screenshots are two sections: screenshots are image-only, lazy, responsive, after the reviews', () => {
   const testimonials = [
     { r2Key: 'uploads/p.jpg', title: 'Photo', description: 'photo text', kind: 'review' },
     { r2Key: null, title: 'Plain', description: 'plain text', kind: 'review' },
-    { r2Key: 'uploads/s.png', title: 'Shot', description: 'shot text', kind: 'whatsapp', width: 540, height: 960 },
-    { r2Key: 'uploads/s2.png', title: 'NoDims', description: 'no dims', kind: 'whatsapp' },
+    { r2Key: 'uploads/s.png', title: 'Shot', description: '', kind: 'whatsapp', width: 540, height: 960 },
+    { r2Key: 'uploads/s2.png', title: 'NoDims', description: '', kind: 'whatsapp' },
   ]
-  const html = renderProduct({ ...baseSnapshot, testimonials }, { css: '', jsPath: '/site.js', deliveryBase: 'https://media.example.com' })
-  assert.match(html, /testimonial-card has-photo"><img class="testimonial-image" src="https:\/\/media\.example\.com\/uploads\/p\.jpg"/)
-  assert.match(html, /testimonial-card"><span class="testimonial-avatar"[^>]*>P<\/span>/)
-  const shot = html.match(/<div class="testimonial-card is-screenshot">(.*?)<\/div><\/section>|<div class="testimonial-card is-screenshot">.*?<img class="testimonial-screenshot"[^>]*>/s)[0]
-  assert.ok(shot.indexOf('shot text') < shot.indexOf('testimonial-screenshot'), 'the written text comes before the screenshot')
-  assert.match(html, /<img class="testimonial-screenshot" src="https:\/\/media\.example\.com\/uploads\/s\.png" alt="WhatsApp message from Shot" loading="lazy" decoding="async" width="540" height="960">/)
-  assert.match(html, /uploads\/s2\.png" alt="WhatsApp message from NoDims" loading="lazy" decoding="async">/, 'no invented dimensions')
-  assert.ok(!/is-screenshot[^>]*><div class="testimonial-body">[^]*?<span class="testimonial-avatar"/.test(html.split('Shot')[0]), 'a screenshot card has no avatar tile')
-  // a screenshot row whose image is missing degrades to a text card rather than a broken frame
-  const broken = renderProduct({ ...baseSnapshot, testimonials: [{ r2Key: '', title: 'X', description: 'y', kind: 'whatsapp' }] }, { css: '', jsPath: '/site.js' })
-  assert.ok(!broken.includes('testimonial-screenshot') && broken.includes('testimonial-avatar'))
+  const o = { css: '', jsPath: '/site.js', deliveryBase: 'https://media.example.com' }
+  const html = renderProduct({ ...baseSnapshot, testimonials }, o)
+  // review section: photo card + initial tile, and NO screenshot inside it
+  const rev = html.match(/<section class="section" aria-labelledby="testimonials-title">(.*?)<\/section>/s)[1]
+  assert.match(rev, /testimonial-card has-photo"><img class="testimonial-image" src="https:\/\/media\.example\.com\/cdn-cgi\/image\/[^"]*uploads\/p\.jpg"/)
+  assert.match(rev, /testimonial-card"><span class="testimonial-avatar"[^>]*>P<\/span>/)
+  assert.ok(!rev.includes('testimonial-screenshot') && !rev.includes('is-screenshot'))
+  // screenshot section: own H2, after the reviews, images only
+  const iRev = html.indexOf('id="testimonials-title"'), iShot = html.indexOf('id="whatsapp-title"')
+  assert.ok(iRev > 0 && iShot > iRev, 'the screenshot section comes after the written reviews')
+  const sec = html.match(/<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">([^<]+)<\/h2><div class="screenshot-grid">(.*?)<\/div><\/section>/s)
+  assert.ok(sec, 'an H2 titled section like the others')
+  assert.ok(!/<p|testimonial-body|testimonial-description/.test(sec[2]), 'no written text in the screenshot section')
+  const imgs = sec[2].match(/<img [^>]*>/g)
+  assert.equal(imgs.length, 2)
+  for (const img of imgs) {
+    assert.match(img, /loading="lazy"/); assert.match(img, /decoding="async"/); assert.match(img, /fetchpriority="low"/)
+    assert.match(img, /srcset="[^"]*320w[^"]*640w"/); assert.match(img, /sizes="\(max-width: 768px\) 92vw, 300px"/)
+    assert.match(img, /alt="WhatsApp message from (Shot|NoDims)"/)
+  }
+  assert.match(imgs[0], /width="540" height="960"/); assert.ok(!/ width=/.test(imgs[1]), 'no invented dimensions')
+  // only screenshots: no review section at all; only reviews: no screenshot section
+  const onlyShots = renderProduct({ ...baseSnapshot, testimonials: testimonials.slice(2) }, o)
+  assert.ok(!onlyShots.includes('testimonials-title') && onlyShots.includes('whatsapp-title'))
+  const onlyReviews = renderProduct({ ...baseSnapshot, testimonials: testimonials.slice(0, 2) }, o)
+  assert.ok(onlyReviews.includes('testimonials-title') && !onlyReviews.includes('whatsapp-title'))
+  // a screenshot row whose image is missing prints nothing (no broken frame, no empty section)
+  const broken = renderProduct({ ...baseSnapshot, testimonials: [{ r2Key: '', title: 'X', description: '', kind: 'whatsapp' }] }, o)
+  assert.ok(!broken.includes('whatsapp-title') && !broken.includes('testimonial-screenshot'))
+  // lazy review photo too
+  assert.match(rev, /class="testimonial-image"[^>]*loading="lazy"[^>]*decoding="async"/)
 })

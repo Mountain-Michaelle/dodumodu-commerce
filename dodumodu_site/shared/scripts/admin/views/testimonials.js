@@ -114,22 +114,25 @@ export function testimonialsView({ shell, identity }) {
           el("span", {
             class: "hint",
             text: isScreenshot
-              ? "Required. The screenshot is shown below the written quote on the product page."
+              ? "Required. Shown in its own “Real WhatsApp messages” section after the written reviews. No quote is needed; the title is only a label (and the screen-reader description)."
               : "Optional. Shown large beside (desktop) or above (phone) the text. Leave empty for a text-only review.",
           })));
     }
     paintImageRow();
 
+    // A screenshot carries no written text, so its quote box is hidden (and sent empty).
+    const quote = adminField({ name: "description", label: "Quote", value: item.description, type: "textarea", rows: 4 });
+    quote.hidden = item.kind === "whatsapp";
     const form = el("form", { class: "form", onsubmit: (e) => e.preventDefault() },
       fieldset({ legend: "Testimonial", fields: [
         adminField({ name: "title", label: "Title", value: item.title }),
-        adminField({ name: "description", label: "Quote", value: item.description, type: "textarea", rows: 4 }),
+        quote,
       ] }),
       fieldset({ legend: "Placement", columns: 2, fields: [
         adminField({
           name: "kind", label: "Kind", type: "select", value: item.kind,
           options: [{ value: "review", label: "Written review" }, { value: "whatsapp", label: "WhatsApp screenshot" }],
-          onInput: (e) => { item.kind = e.target.value; paintImageRow(); },
+          onInput: (e) => { item.kind = e.target.value; quote.hidden = item.kind === "whatsapp"; paintImageRow(); },
         }),
         adminField({
           name: "productId", label: "Product", type: "select", value: item.productId ?? "",
@@ -146,7 +149,7 @@ export function testimonialsView({ shell, identity }) {
           const values = readForm(form);
           const payload = {
             title: values.title,
-            description: values.description,
+            description: values.kind === "whatsapp" ? "" : values.description,
             kind: values.kind,
             r2Key: item.r2Key,
             // Left out (not null) when no product is chosen: the server then uses the only product, or says which is needed.

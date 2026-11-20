@@ -222,7 +222,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
 // gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
 // Re-pinned for the accessibility pass: darker text-amber token, 24px carousel dot targets, keyboard-focusable carousel.
-const EXPECTED_CUSTOMER = { js: "site.861afe4d.min.js", css: "site.46cba2e3.min.css" }; // testimonial picture cards + screenshots
+const EXPECTED_CUSTOMER = { js: "site.5205c02a.min.js", css: "site.1579e840.min.css" }; // screenshots as their own section; desktop photo card from the top
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;
