@@ -182,25 +182,35 @@ function pageDataScript(snapshot) {
     paymentRules: snapshot.paymentRules ?? null,
     deliveryOptions: ['today', 'tomorrow', 'next_tomorrow'],
     images: list(snapshot.images).map((i) => ({ r2Key: i.r2Key, altText: i.altText ?? '' })),
-    testimonials: list(snapshot.testimonials).map((t) => ({ r2Key: t.r2Key ?? null, title: t.title ?? '', description: t.description ?? '' })),
+    testimonials: list(snapshot.testimonials).map((t) => ({ r2Key: t.r2Key ?? null, title: t.title ?? '', description: t.description ?? '', kind: t.kind === 'whatsapp' ? 'whatsapp' : 'review' })),
   }
   // "<" and the two JS line separators are escaped so no value can close the tag or break a parser.
   const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
   return `<script type="application/json" id="page-data">${json}</script>`
 }
 function testimonialsSection(snapshot, deliveryBase) {
-  // EVERY testimonial, in the exact markup the storefront script used to build at runtime (avatar letter when there is no
-  // photo, empty alt, <p> title). The page used to print four and then have the script replace them with all of them in
-  // different markup, which was a visible reload; now there is nothing left for the script to do.
+  // EVERY testimonial is printed here, so the script has nothing left to build. Three shapes, one card class:
+  //  - written review with a photo: big photo (90% wide on a phone, a fixed column beside the text on desktop)
+  //  - written review without one: the small initial tile, unchanged
+  //  - WhatsApp screenshot: the written text first, the screenshot BELOW it (a screenshot has to be legible, so it is
+  //    never squeezed into a thumbnail)
   const items = list(snapshot.testimonials)
   if (!items.length) return ''
+  const dim = (n) => (Number.isInteger(n) && n > 0 ? n : 0)
   const cards = items.map((t) => {
     const src = mediaUrl(t.r2Key, deliveryBase)
     const title = String(t.title ?? '')
-    const avatar = src
-      ? `<img class="testimonial-image" src="${escapeUrl(src)}" alt="" loading="lazy" decoding="async" width="64" height="64">`
-      : `<span class="testimonial-avatar" aria-hidden="true">${escapeHtml((title || '?').trim().charAt(0).toUpperCase())}</span>`
-    return `<div class="testimonial-card">${avatar}<div><p class="testimonial-title">${escapeHtml(title)}</p><p class="testimonial-description">${escapeHtml(t.description ?? '')}</p></div></div>`
+    const text = `<div class="testimonial-body"><p class="testimonial-title">${escapeHtml(title)}</p><p class="testimonial-description">${escapeHtml(t.description ?? '')}</p></div>`
+    if (src && t.kind === 'whatsapp') {
+      // Real dimensions when the admin recorded them (no layout shift while it loads); otherwise the CSS reserves a phone-shaped box.
+      const w = dim(t.width), h = dim(t.height)
+      const size = w && h ? ` width="${w}" height="${h}"` : ''
+      return `<div class="testimonial-card is-screenshot">${text}<img class="testimonial-screenshot" src="${escapeUrl(src)}" alt="WhatsApp message from ${escapeHtml(title)}" loading="lazy" decoding="async"${size}></div>`
+    }
+    if (src) {
+      return `<div class="testimonial-card has-photo"><img class="testimonial-image" src="${escapeUrl(src)}" alt="" loading="lazy" decoding="async" width="480" height="600">${text}</div>`
+    }
+    return `<div class="testimonial-card"><span class="testimonial-avatar" aria-hidden="true">${escapeHtml((title || '?').trim().charAt(0).toUpperCase())}</span>${text}</div>`
   }).join('')
   return `<section class="section lazy-section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${cards}</div></div></section>`
 }

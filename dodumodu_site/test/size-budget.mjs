@@ -25,7 +25,7 @@ if (!existsSync(distDir)) {
 // Wire-byte ceilings, with roughly 15% headroom for the next small feature.
 const BUDGETS = {
   page: 10.5 * 1024,   // HTML document, preview script included (CSS is linked)
-  css: 5.1 * 1024,     // the whole stylesheet (includes brand-motion.css keyframes)
+  css: 5.3 * 1024,     // 5.3 (was 5.1): picture-card + screenshot testimonial layout (~0.15 KB); the whole stylesheet (includes brand-motion.css keyframes)
   // 9.5 (was 9.0: the bot check restarts itself after an error or a stall, keeps its box visible when a tap failed, and finishes a recorded order by itself when the check returns late; was 8.9: connection warm-up and a safety-net start for the bot check; was 8.7: the order is never blocked by the bot check - sent with or without a token, finished later when it arrives; was 8.4; +error codes so a refusal is never a mystery; before that 7.8): the bot check now renders explicitly, refreshes expired/spent tokens, retries a dropped script load
   // and recovers from a refused token by itself (+0.6 KB gzipped). That is what stops orders failing on slow phones.
   // 10.0 (was 9.5): the bundle is now built for es2015 (Android 5-era WebViews, Chrome 49+; was es2019 = Chrome 73+), which turns async/await
@@ -222,7 +222,7 @@ console.log(`      (js ${kb(adminParts[0].raw).trim()}, css ${kb(adminParts[1].r
 // Carousel rework: controls moved out of the scrolling track into a fixed bar (grey chevrons), photos built from the
 // gallery printed in the page through the image delivery base (resized at the edge), no placeholder fallback photos.
 // Re-pinned for the accessibility pass: darker text-amber token, 24px carousel dot targets, keyboard-focusable carousel.
-const EXPECTED_CUSTOMER = { js: "site.908c7a23.min.js", css: "site.6f42e0d2.min.css" };
+const EXPECTED_CUSTOMER = { js: "site.861afe4d.min.js", css: "site.46cba2e3.min.css" }; // testimonial picture cards + screenshots
 for (const [kind, expected] of Object.entries(EXPECTED_CUSTOMER)) {
   const actual = kind === "js" ? siteJsFile : siteCssFile;
   const ok = actual === expected;

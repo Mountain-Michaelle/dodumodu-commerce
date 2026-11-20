@@ -50,6 +50,7 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // testimonials
   rule("GET", "testimonials", "testimonials.view"),
   rule("PUT", "testimonials", "testimonials.add"),
+  rule("POST", "testimonials", "testimonials.add"),
   rule("PUT", `testimonials/${ID}`, "testimonials.change"),
   // reports (the handler narrows a mono operator to their own orders)
   rule("GET", "reports/monthly-kpis", "reports.view"),

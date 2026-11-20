@@ -32,7 +32,8 @@ export const productUpsertSchema = z.object({
 // frame. That rule spans two fields, which is why it is a refine rather than a
 // field rule.
 export const testimonialUpsertSchema = z.object({
-  productId: z.number().int().positive().optional(),
+  // null = "no product chosen" (the panel's empty dropdown); it means the same as leaving the field out.
+  productId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
   kind: z.enum(["review", "whatsapp"]).default("review"),
   r2Key: z.string().trim().max(300).default(""),
   title: z.string().trim().min(1).max(200),

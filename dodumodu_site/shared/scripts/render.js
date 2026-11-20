@@ -159,18 +159,19 @@ export function renderTestimonials(container, testimonials) {
 
   for (const t of testimonials) {
     const card = document.createElement("div");
-    card.className = "testimonial-card";
-    const hasPhoto = Boolean(t.url);
-    const avatar = !hasPhoto
-      ? `<span class="testimonial-avatar" aria-hidden="true">${escapeHtml((t.title || "?").trim().charAt(0).toUpperCase())}</span>`
-      : `<img class="testimonial-image" src="${t.url}" alt="" loading="lazy" decoding="async" width="64" height="64">`;
-    card.innerHTML = `
-      ${avatar}
-      <div>
-        <p class="testimonial-title">${escapeHtml(t.title)}</p>
-        <p class="testimonial-description">${escapeHtml(t.description)}</p>
-      </div>
-    `;
+    const title = escapeHtml(t.title);
+    const text = `<div class="testimonial-body"><p class="testimonial-title">${title}</p><p class="testimonial-description">${escapeHtml(t.description)}</p></div>`;
+    // Same three shapes build-time rendering prints (build/render-core.mjs): screenshot under its text, big photo, initial tile.
+    if (t.url && t.kind === "whatsapp") {
+      card.className = "testimonial-card is-screenshot";
+      card.innerHTML = `${text}<img class="testimonial-screenshot" src="${t.url}" alt="WhatsApp message from ${title}" loading="lazy" decoding="async">`;
+    } else if (t.url) {
+      card.className = "testimonial-card has-photo";
+      card.innerHTML = `<img class="testimonial-image" src="${t.url}" alt="" loading="lazy" decoding="async" width="480" height="600">${text}`;
+    } else {
+      card.className = "testimonial-card";
+      card.innerHTML = `<span class="testimonial-avatar" aria-hidden="true">${escapeHtml((t.title || "?").trim().charAt(0).toUpperCase())}</span>${text}`;
+    }
     list.appendChild(card);
   }
   container.appendChild(list);
