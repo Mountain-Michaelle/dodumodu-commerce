@@ -66,9 +66,14 @@ let lastField = null; // the field the customer was last in, to give focus back 
 let urgent = false; // Place order was pressed: do not wait for a pause any more
 let deferred = [];
 let autoLeft = 2; // automatic restarts still allowed before the check goes quiet (see AUTO_RESTARTS)
-let dormant = false; // quiet: out of automatic restarts, waiting for the next real interaction
+let dormant = false;
+let lastWake = 0;
+let wakePending = false;
+let draws = 0; // widgets drawn in this visit // quiet: out of automatic restarts, waiting for the next real interaction
 
 const AUTO_RESTARTS = 2;
+const WAKE_GAP_MS = 30_000; // typing wakes a quiet check at most this often
+const MAX_WAKE_DRAWS = 4; // widgets drawn in one visit, beyond which only a tap on Place order starts another
 const QUIET_MS = 1200;
 // Between evaluating Cloudflare's script and drawing the widget, so the two heavy steps never land together.
 const DRAW_GAP_MS = 800;
@@ -232,6 +237,7 @@ function removeWidget() {
 function renderWidget() {
   const host = hostEl();
   if (!host || !window.turnstile || widgetId !== null) return;
+  draws += 1;
   solveAt = Date.now();
   const prevFocus = lastField && document.activeElement === lastField ? lastField : null;
   widgetId = window.turnstile.render(host, {
@@ -340,17 +346,25 @@ function arm() {
 }
 
 /**
- * A real interaction with the form wakes a check that went quiet or whose token has expired. Cheap on every keystroke: it
- * returns at once unless a new token is actually needed and nothing is already working on one.
+ * A real interaction with the form wakes a check that went quiet or whose token has expired. It NEVER touches a solve that
+ * is already in flight (typing must not restart a slow solve: each restart builds another Cloudflare iframe, which is what
+ * overloads a weak phone), it waits for a pause in typing like every other heavy step, it is spaced out (WAKE_GAP_MS), and
+ * it stops for good after MAX_WAKE_DRAWS widgets in one visit (a tap on Place order still works).
  */
 function wakeOnInteraction() {
   if (!turnstileConfigured() || state === "idle" || state === "loading" || tokenIsFresh()) return;
-  if (state === "failed") { refill(); return void arm(); }
-  const working = widgetId !== null && !dormant && errors === 0 && Date.now() - solveAt <= STALL_MS;
-  if (working) return;
-  refill();
-  errors = 0;
-  restartSolve(false);
+  if (widgetId !== null && !dormant) return; // a solve is running (or its box is up): leave it alone
+  if (Date.now() - lastWake < WAKE_GAP_MS || draws >= MAX_WAKE_DRAWS || wakePending) return;
+  lastWake = Date.now();
+  wakePending = true;
+  defer(() => {
+    wakePending = false;
+    if (tokenIsFresh() || (widgetId !== null && !dormant)) return;
+    refill();
+    errors = 0;
+    if (state === "failed") return void arm();
+    restartSolve(false);
+  });
 }
 
 export function armTurnstile(formEl) {
