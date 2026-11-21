@@ -23,6 +23,8 @@ export function testimonialsView({ shell, identity }) {
   let products = [];
   let ui;
   const state = { page: 1, pageSize: 20 };
+  let shotCounts = {}; // visible WhatsApp screenshots per product, from the server
+  let maxShots = 5;
 
   const can = (permission) => (identity?.permissions || []).includes(permission);
 
@@ -32,6 +34,8 @@ export function testimonialsView({ shell, identity }) {
         page: state.page, pageSize: state.pageSize,
       })}`, signal), { pending: "Loading testimonials…" });
       if (!data) return;
+      shotCounts = data.screenshotCounts || {};
+      maxShots = data.maxScreenshots || 5;
       render(data);
     } catch (err) {
       ui.results(errorState(err, load));
@@ -78,8 +82,11 @@ export function testimonialsView({ shell, identity }) {
 
     // WhatsApp screenshots: one row per image. A NEW screenshot testimonial takes up to MAX_SHOTS images at once (the product page
     // shows at most 5 of them in its WhatsApp section; the server enforces that too); editing one row changes that one image.
-    const MAX_SHOTS = 5;
-    const shotLimit = () => (isNew ? MAX_SHOTS : 1);
+    // How many images this form may hold = the product's 5, minus the screenshots it already shows from OTHER rows. So with
+    // one screenshot saved you can add up to four more; with five you can only change them.
+    const productKey = () => String(item.productId || (products.length === 1 ? products[0].id : ""));
+    const ownsVisibleShot = () => Boolean(existing && existing.kind === "whatsapp" && existing.active && String(existing.productId) === productKey());
+    const shotLimit = () => Math.max(1, maxShots - ((shotCounts[productKey()] || 0) - (ownsVisibleShot() ? 1 : 0)));
     const shots = existing && existing.r2Key && existing.kind === "whatsapp"
       ? [{ r2Key: existing.r2Key, width: existing.width || null, height: existing.height || null }] : [];
     const imageField = el("div", { class: "field-row" });
@@ -90,17 +97,17 @@ export function testimonialsView({ shell, identity }) {
         const toShot = (media, dims) => ({ r2Key: media.r2Key, width: dims?.width || media.width || null, height: dims?.height || media.height || null });
         mount(imageField,
           el("div", { class: "field" },
-            el("span", { class: "field-label", text: isNew ? `Screenshot images (up to ${MAX_SHOTS})` : "Screenshot image" }),
+            el("span", { class: "field-label", text: `Screenshot images (${shots.length} of up to ${shotLimit()} for this product)` }),
             el("div", { class: "shot-list" }, ...shots.map((shot, i) => el("div", { class: "uploader-row" },
               el("div", { class: "image-preview" }, el("img", { class: "picker-thumb", src: `${imageBase()}/${shot.r2Key}`, alt: "", loading: "lazy" })),
               // Change: replace THIS image with another upload.
               adminImageUploader({ label: "Change image", onUploaded: (media, dims) => { shots[i] = toShot(media, dims); paintImageRow(); } }),
-              isNew ? el("button", { class: "button button-small", type: "button", text: "Remove", onclick: () => { shots.splice(i, 1); paintImageRow(); } }) : null))),
+              (isNew || i > 0) ? el("button", { class: "button button-small", type: "button", text: "Remove", onclick: () => { shots.splice(i, 1); paintImageRow(); } }) : null))),
             room > 0
               ? el("div", { class: "uploader-row" },
                 adminImageUploader({
                   max: room,
-                  label: shots.length ? "Add more images…" : (shotLimit() > 1 ? "Choose images…" : "Choose image…"),
+                  label: shots.length ? "Upload more images…" : (shotLimit() > 1 ? "Choose images…" : "Choose image…"),
                   onUploaded: (media, dims) => { if (shots.length < shotLimit()) { shots.push(toShot(media, dims)); paintImageRow(); } },
                 }),
                 adminImagePicker({
@@ -158,6 +165,7 @@ export function testimonialsView({ shell, identity }) {
         adminField({
           name: "productId", label: "Product", type: "select", value: item.productId ?? "",
           options: [{ value: "", label: "— none —" }, ...products.map((p) => ({ value: p.id, label: p.name }))],
+          onInput: (e) => { item.productId = e.target.value; if (item.kind === "whatsapp") paintImageRow(); },
         }),
         adminField({ name: "displayOrder", label: "Order", type: "number", value: item.displayOrder ?? 0, min: 0, step: 1 }),
         adminField({ name: "active", label: "Visible", type: "checkbox", value: item.active !== false }),
@@ -183,8 +191,9 @@ export function testimonialsView({ shell, identity }) {
             : [{ ...base, description: values.description, r2Key: item.r2Key }];
           let saved = 0;
           try {
-            for (const payload of payloads) {
-              if (isNew) await api.post("/testimonials", payload);
+            for (const [i, payload] of payloads.entries()) {
+              // Editing: the first image updates this row; any ADDED images become new screenshot rows.
+              if (isNew || i > 0) await api.post("/testimonials", payload);
               else await api.put(`/testimonials/${item.id}`, payload);
               saved += 1;
             }
@@ -193,8 +202,8 @@ export function testimonialsView({ shell, identity }) {
             load();
           } catch (err) {
             if (saved) {
-              // Some images are already saved: drop them from the form so pressing save again cannot create duplicates.
-              shots.splice(0, saved); paintImageRow(); load();
+              // Some images are already saved: close and reload so pressing save again cannot create duplicates.
+              modal.close(); load();
               toast(`${saved} saved, the rest were not: ${err?.message || err}`, "error", 8000);
               return;
             }
