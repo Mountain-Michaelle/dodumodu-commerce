@@ -183,9 +183,33 @@ console.log("PASS  turnstile starts only on first form interaction, once, with n
   const quiet = calls.reset + calls.render;
   await wait(2500);
   assert.equal(calls.reset + calls.render, quiet, "once out of restarts it stays quiet");
-  // The customer keeps filling the form: that wakes it again, with a fresh allowance.
+  // The customer keeps filling the form (30s later, wakes are spaced out): that wakes it again, with a fresh allowance.
+  const realNow2 = Date.now; Date.now = () => realNow2() + 31_000;
   type(); await wait(1600);
+  Date.now = realNow2;
   assert.ok(calls.reset + calls.render > quiet, "form interaction wakes a quiet check");
+}
+// ---- Typing never restarts a solve that is already running (the Android reload: one Cloudflare iframe per keystroke) --------
+{
+  const g = await import("../shared/scripts/turnstile.js?no-typing-restarts");
+  const listeners = {};
+  const form = { addEventListener(ev, fn) { (listeners[ev] ||= []).push(fn); }, removeEventListener() {} };
+  const calls = { render: 0, remove: 0, reset: 0 };
+  let opts = null; let n = 0;
+  window.turnstile = { ready() {}, render(_e, o) { calls.render += 1; opts = o; return `x${++n}`; }, remove() { calls.remove += 1; }, reset() { calls.reset += 1; } };
+  input.value = "";
+  const wait = (ms) => new Promise((r) => realSetTimeout(r, ms));
+  const type = () => { for (const fn of listeners.input) fn({ type: "input" }); };
+  g.armTurnstile(form);
+  type(); await wait(1500); window.__turnstileLoaded(); await wait(1700);
+  assert.equal(calls.render, 1);
+  // The solve is slow (no token yet). The customer keeps typing for a long time, with errors in between.
+  const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew;
+  for (let i = 0; i < 40; i += 1) { skew += 5000; type(); if (i % 7 === 3) opts["error-callback"]("300030"); await wait(30); }
+  await wait(1700);
+  const spent = calls.render + calls.remove + calls.reset;
+  Date.now = realNow;
+  assert.ok(spent <= 4, `40 keystrokes over 200s of a slow, erroring solve cost at most the capped restarts, not one each (saw ${spent})`);
 }
 console.log("PASS  turnstile frees its widget after a token, never refreshes on its own, restarts at most twice, and wakes only on form interaction");
 process.exit(0); // pending Cloudflare-restart timers are not waited for
