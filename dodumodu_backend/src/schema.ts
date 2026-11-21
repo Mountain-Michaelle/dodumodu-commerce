@@ -372,6 +372,22 @@ export const productPages = pgTable("product_pages", {
   faq: jsonb("faq").notNull().default([]), // [{ q, a }]
   whyLoveTitle: text("why_love_title").notNull().default("Why Nigerian Women Love This Serum"),
   howToUseTitle: text("how_to_use_title").notNull().default("How To Use For Best Results"),
+  // One JSONB object: the admin-managed headings for all eight product-page H2
+  // sections, keyed by stable identifier (benefits, testimonials, whatsapp,
+  // howToUse, faq, middleCta, order, finalCta). Replaces the two individually
+  // configured title columns and the headings once hardcoded in the renderer
+  // and template. The legacy columns stay so existing data is never destroyed;
+  // sectionTitles is the single source of truth the code path reads.
+  sectionTitles: jsonb("section_titles").notNull().default({
+    benefits: "Why Nigerian Women Love This Serum",
+    testimonials: "What customers say",
+    whatsapp: "Real WhatsApp messages from customers",
+    howToUse: "How To Use For Best Results",
+    faq: "Frequently Asked Questions",
+    middleCta: "Ready to place your order?",
+    order: "Place your order now",
+    finalCta: "Still thinking it over?",
+  }),
   ratingValue: text("rating_value").notNull().default("4.9"),
   ratingCount: text("rating_count").notNull().default("1,048"),
   trustBadges: jsonb("trust_badges").notNull().default([]), // [{ icon, text }]

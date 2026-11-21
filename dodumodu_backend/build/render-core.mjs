@@ -10,6 +10,7 @@
 // One URL builder for build time and browser time, so the page can never advertise a width the browser's carousel
 // would not also request (the browser then reuses the already-downloaded first photo).
 import { imageUrl, srcsetFor, DEFAULT_SIZES, DEFAULT_QUALITY, DEFAULT_WIDTHS } from '../../dodumodu_site/shared/scripts/imageUrls.js'
+import { DEFAULT_SECTION_TITLES } from '../../dodumodu_site/shared/scripts/sectionTitles.js'
 
 
 // ---- HTML text escaping (for element content) ----
@@ -140,6 +141,15 @@ function iconHtml(icon, cls = 'icon') {
 }
 const list = (v) => (Array.isArray(v) ? v : [])
 
+// Resolve a section heading from the admin-managed sectionTitles object, falling
+// back to the default wording when the key is missing, null, or blank. One
+// clearly defined default configuration rather than scattered fallback strings.
+function sectionTitle(page, key, fallback) {
+  const titles = page && page.sectionTitles ? page.sectionTitles : {}
+  const v = titles[key]
+  return v && String(v).trim() ? String(v) : fallback
+}
+
 const DEFAULT_TRUST = [
   { icon: 'shield', text: 'Dermatologist tested' },
   { icon: 'truck', text: 'Pay on delivery available' },
@@ -151,19 +161,19 @@ function benefitsSection(page) {
   if (!items.length) return ''
   const lis = items.map((b) =>
     `<li class="benefit-card">${iconHtml(b.icon, 'icon icon--orange')}<div><strong>${escapeHtml(b.title)}</strong><span>${escapeHtml(b.body)}</span></div></li>`).join('')
-  return `<section id="benefits" class="section lazy-section" aria-labelledby="benefits-title"><h2 id="benefits-title">${escapeHtml(page.whyLoveTitle ?? 'Why Nigerian Women Love This Serum')}</h2><ul class="benefits-grid">${lis}</ul></section>`
+  return `<section id="benefits" class="section lazy-section" aria-labelledby="benefits-title"><h2 id="benefits-title">${escapeHtml(sectionTitle(page, 'benefits', DEFAULT_SECTION_TITLES.benefits))}</h2><ul class="benefits-grid">${lis}</ul></section>`
 }
 function howToSection(page) {
   const items = list(page.howToUse)
   if (!items.length) return ''
   const lis = items.map((s) => `<li><strong>${escapeHtml(String(s.title).replace(/:+$/, ''))}:</strong> ${escapeHtml(s.body)}</li>`).join('')
-  return `<section class="section lazy-section" aria-labelledby="how-to-use-title"><h2 id="how-to-use-title">${escapeHtml(page.howToUseTitle ?? 'How To Use For Best Results')}</h2><ol class="steps-list">${lis}</ol></section>`
+  return `<section class="section lazy-section" aria-labelledby="how-to-use-title"><h2 id="how-to-use-title">${escapeHtml(sectionTitle(page, 'howToUse', DEFAULT_SECTION_TITLES.howToUse))}</h2><ol class="steps-list">${lis}</ol></section>`
 }
 function faqSection(page) {
   const items = list(page.faq)
   if (!items.length) return ''
   const ds = items.map((f, i) => `<details class="faq-item"${i === 0 ? ' open' : ''}><summary>${escapeHtml(f.q)}</summary><p>${escapeHtml(f.a)}</p></details>`).join('')
-  return `<section class="section lazy-section" aria-labelledby="faq-title"><h2 id="faq-title">Frequently Asked Questions</h2>${ds}</section>`
+  return `<section class="section lazy-section" aria-labelledby="faq-title"><h2 id="faq-title">${escapeHtml(sectionTitle(page, 'faq', DEFAULT_SECTION_TITLES.faq))}</h2>${ds}</section>`
 }
 /**
  * Everything the order form needs to price and validate an order, printed into the page as inert JSON (type=application/json
@@ -213,7 +223,7 @@ function testimonialsSection(snapshot, deliveryBase, mode = 'transform') {
     return `<div class="testimonial-card"><span class="testimonial-avatar" aria-hidden="true">${escapeHtml((title || '?').trim().charAt(0).toUpperCase())}</span>${text}</div>`
   }).join('')
   return reviews
-    ? `<section class="section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">What customers say</h2><div id="testimonials"><div class="testimonials-list">${reviews}</div></div></section>`
+    ? `<section class="section" aria-labelledby="testimonials-title"><h2 id="testimonials-title">${escapeHtml(sectionTitle(snapshot.page, 'testimonials', DEFAULT_SECTION_TITLES.testimonials))}</h2><div id="testimonials"><div class="testimonials-list">${reviews}</div></div></section>`
     : ''
 }
 
@@ -227,7 +237,7 @@ function whatsappSection(snapshot, deliveryBase, mode = 'transform') {
     return lazyTestimonialImg('testimonial-screenshot', t, deliveryBase, mode, `WhatsApp message from ${String(t.title ?? 'a customer')}`, w && h ? ` width="${w}" height="${h}"` : '')
   }).filter(Boolean).join('')
   return shots
-    ? `<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">Real WhatsApp messages from customers</h2><div class="screenshot-grid">${shots}</div></section>`
+    ? `<section class="section" aria-labelledby="whatsapp-title"><h2 id="whatsapp-title">${escapeHtml(sectionTitle(snapshot.page, 'whatsapp', DEFAULT_SECTION_TITLES.whatsapp))}</h2><div class="screenshot-grid">${shots}</div></section>`
     : ''
 }
 
@@ -356,8 +366,10 @@ export function renderProductWith(template, snapshot, opts = {}) {
     WHATSAPP_SECTION: whatsappSection(snapshot, deliveryBase, imageMode),
     HOW_TO_SECTION: howToSection(page),
     FAQ_SECTION: faqSection(page),
-    CTA_TEXT: escapeHtml(page.ctaText || 'Place your order'),
+    CTA_TEXT: escapeHtml(sectionTitle(page, 'order', DEFAULT_SECTION_TITLES.order)),
     ORDER_INTRO: escapeHtml('Fill the short form below. Pay cash or transfer when your package arrives.'),
+    MIDDLE_CTA: escapeHtml(sectionTitle(page, 'middleCta', DEFAULT_SECTION_TITLES.middleCta)),
+    FINAL_CTA: escapeHtml(sectionTitle(page, 'finalCta', DEFAULT_SECTION_TITLES.finalCta)),
     MAX_ORDER_QUANTITY: String(Number(opts.maxOrderQuantity ?? 20)),
     TURNSTILE_SITE_KEY: escapeHtmlAttr(opts.turnstileSiteKey ?? ''),
     CSS_INLINE: css,

@@ -245,8 +245,23 @@ export const productPageUpsertSchema = z.object({
   benefits: z.array(benefitSchema).max(12).optional(),
   howToUse: z.array(stepSchema).max(12).optional(),
   faq: z.array(faqSchema).max(20).optional(),
-  whyLoveTitle: z.string().trim().min(1).max(160).optional(),
-  howToUseTitle: z.string().trim().min(1).max(160).optional(),
+  // One object: the headings for all eight product-page H2 sections. Stable keys
+  // (not display text). Optional for partial saves — an omitted key leaves the
+  // previously saved value untouched. Unexpected keys are rejected rather than
+  // silently stored.
+  sectionTitles: z
+    .object({
+      benefits: z.string().trim().min(1).max(160),
+      testimonials: z.string().trim().min(1).max(160),
+      whatsapp: z.string().trim().min(1).max(160),
+      howToUse: z.string().trim().min(1).max(160),
+      faq: z.string().trim().min(1).max(160),
+      middleCta: z.string().trim().min(1).max(160),
+      order: z.string().trim().min(1).max(160),
+      finalCta: z.string().trim().min(1).max(160),
+    })
+    .strict()
+    .optional(),
   ratingValue: z.string().trim().min(1).max(10).optional(),
   ratingCount: z.string().trim().min(1).max(20).optional(),
   trustBadges: z.array(badgeSchema).max(8).optional(),

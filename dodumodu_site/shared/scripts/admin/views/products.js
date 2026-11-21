@@ -1,5 +1,6 @@
 import { el, mount, formatNaira, formatDateTime, toWireTimestamp } from "../dom.js";
 import { api, ApiError, qs } from "../api.js";
+import { DEFAULT_SECTION_TITLES, SECTION_TITLE_KEYS } from "../sectionTitles.js";
 import {
   adminTable, adminSearch, adminFilters, adminPagination, resultCount, adminField,
   fieldset, saveBar, readForm, applyFieldErrors, actionButtons, statusBadge, toast,
@@ -370,12 +371,27 @@ export function productsView({ shell, identity, onNavigate }) {
       const form = el("form", { class: "form", onsubmit: (e) => e.preventDefault() },
         el("p", { class: "form-note" },
           "This is a DRAFT. Nothing here reaches a customer until you publish, and publishing captures an immutable snapshot rather than changing what is on screen."),
-        fieldset({ legend: "Headlines", columns: 2, fields: [
-          adminField({ name: "whyLoveTitle", label: "“Why love it” heading", value: content.whyLoveTitle || "" }),
-          adminField({ name: "howToUseTitle", label: "“How to use” heading", value: content.howToUseTitle || "" }),
+        fieldset({ legend: "Section headings", columns: 2, fields: SECTION_TITLE_KEYS.map((key) => {
+          const sectionLabels = {
+            benefits: "Benefits section heading",
+            testimonials: "Customer reviews heading",
+            whatsapp: "WhatsApp screenshots heading",
+            howToUse: "How to use section heading",
+            faq: "FAQ section heading",
+            middleCta: "Middle call-to-action heading",
+            order: "Order form heading",
+            finalCta: "Final call-to-action heading",
+          };
+          const saved = content.sectionTitles || {};
+          return adminField({
+            name: key,
+            label: sectionLabels[key],
+            value: saved[key] !== undefined && saved[key] !== null ? String(saved[key]) : DEFAULT_SECTION_TITLES[key],
+          });
+        }) }),
+        fieldset({ legend: "Copy", fields: [
           adminField({ name: "ratingValue", label: "Rating", value: content.ratingValue || "" }),
           adminField({ name: "ratingCount", label: "Review count", value: content.ratingCount || "" }),
-        ] }),
         fieldset({ legend: "Copy", fields: [
           // The server sanitises this to a short allowlist of inline tags, so
           // formatting survives and everything else is dropped. The hint says so,
@@ -394,11 +410,12 @@ export function productsView({ shell, identity, onNavigate }) {
           onCancel: () => modal.close(),
           onSave: async () => {
             const values = readForm(form);
+            const sectionTitles = {};
+            for (const key of SECTION_TITLE_KEYS) sectionTitles[key] = values[key];
             try {
               await api.put(`/products/${product.id}/page`, {
                 summaryHtml: values.summaryHtml,
-                whyLoveTitle: values.whyLoveTitle,
-                howToUseTitle: values.howToUseTitle,
+                sectionTitles,
                 ratingValue: values.ratingValue,
                 ratingCount: values.ratingCount,
                 ctaText: values.ctaText,

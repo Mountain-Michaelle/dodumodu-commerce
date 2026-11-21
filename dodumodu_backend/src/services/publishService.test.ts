@@ -50,7 +50,7 @@ function harness() {
   };
 
   productsRepo.findBySlug = async () => PRODUCT as never;
-  productPagesRepo.forProduct = async () => ({ summaryHtml: "<p>Summary</p>" }) as never;
+  productPagesRepo.forProduct = async () => ({ summaryHtml: "<p>Summary</p>", sectionTitles: { benefits: "Why people love it", testimonials: "What customers say", whatsapp: "Real WhatsApp messages", howToUse: "How to use", faq: "Frequently asked questions", middleCta: "Ready to order?", order: "Place your order", finalCta: "Still thinking?" } }) as never;
   productPagesRepo.save = async () => ({ summaryHtml: "<p>Summary</p>" }) as never;
   productsRepo.imagesForProduct = async () => [] as never;
   testimonialsRepo.listActiveForProduct = async () => [] as never;
@@ -190,10 +190,14 @@ test("every publish writes a complete snapshot, so the build never reads a draft
   await withHarness(ok, async (ctx) => {
     await publishService.publish(db, env("tok"), "glow-serum", "owner@test");
     const payload = ctx.rows[0].payload as Record<string, unknown>;
+    const page = (payload.page ?? {}) as Record<string, unknown>;
     for (const key of ["slug", "publishedAt", "product", "page", "images", "testimonials",
       "deliveryOptions", "discountTiers", "paymentRules"]) {
       assert.ok(key in payload, `the snapshot must carry ${key}`);
     }
+    assert.ok("sectionTitles" in page, "the page snapshot must carry sectionTitles");
+    assert.ok(Array.isArray(Object.keys(page.sectionTitles ?? {})) && Object.keys(page.sectionTitles ?? {}).length === 8,
+      "sectionTitles must carry all eight headings");
   });
 });
 

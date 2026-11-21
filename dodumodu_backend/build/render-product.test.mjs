@@ -21,15 +21,23 @@ const baseSnapshot = {
     benefits: [{ icon: 'shield', title: 'Benefit <one>', body: 'Body & more' }, { icon: '🌿', title: 'Benefit two', body: 'Second' }],
     howToUse: [{ title: 'Cleanse', body: 'Wash your face.' }, { title: 'Apply:', body: 'Use 3 drops.' }],
     faq: [{ q: 'Is it safe?', a: 'Yes, <b>very</b>.' }, { q: 'How fast?', a: '24 hours.' }],
-    whyLoveTitle: 'Why Love It',
-    howToUseTitle: 'How to Use',
+    sectionTitles: {
+      benefits: 'Why people love it',
+      testimonials: 'Customer feedback',
+      whatsapp: 'Customer WhatsApp messages',
+      howToUse: 'How to apply',
+      faq: 'Questions & answers',
+      middleCta: 'Ready to order?',
+      order: 'Place your order',
+      finalCta: 'Still thinking?',
+    },
     ratingValue: '4.9',
     ratingCount: '1048',
     heroAlt: 'Serum bottle with dropper',
     ctaText: 'Place your order',
   },
   images: [{ r2Key: 'uploads/hero.jpg', altText: 'hero', width: 640, height: 640, variants: [] }],
-  testimonials: [{ r2Key: 'uploads/t1.jpg', title: 'Amaka O. - Lagos', description: 'Faded in 10 days <3', kind: 'review' }],
+  testimonials: [{ r2Key: 'uploads/t1.jpg', title: 'Amaka O. - Lagos', description: 'Faded in 10 days <3', kind: 'review' }, { r2Key: 'uploads/w1.jpg', title: 'Shot', description: '', kind: 'whatsapp', width: 540, height: 960 }],
   deliveryOptions: [],
   discountTiers: [],
   maxOrderQuantity: 20,
@@ -226,6 +234,90 @@ test('empty lists drop their section instead of printing an empty heading', () =
   for (const id of ['benefits-title', 'how-to-use-title', 'faq-title', 'testimonials-title']) assert.ok(!html.includes(id), id)
   assert.ok(!html.includes('<p></p>'))
   assert.ok(html.includes('class="trust-row"'), 'default trust badges still render')
+})
+
+// ---------------------------------------------------------------------------
+// Section headings: all eight resolve from page.sectionTitles
+// ---------------------------------------------------------------------------
+test('all eight section headings render from custom sectionTitles values', () => {
+  const html = rich()
+  assert.ok(html.includes('<h2 id="benefits-title">Why people love it</h2>'), 'benefits')
+  assert.ok(html.includes('<h2 id="testimonials-title">Customer feedback</h2>'), 'testimonials')
+  assert.ok(html.includes('<h2 id="whatsapp-title">Customer WhatsApp messages</h2>'), 'whatsapp')
+  assert.ok(html.includes('<h2 id="how-to-use-title">How to apply</h2>'), 'howToUse')
+  assert.ok(html.includes('<h2 id="faq-title">Questions &amp; answers</h2>'), 'faq')
+  assert.ok(html.includes('<h2 id="cta-mid-title">Ready to order?</h2>'), 'middleCta')
+  assert.ok(html.includes('<h2 id="order-title">Place your order</h2>'), 'order')
+  assert.ok(html.includes('<h2 id="cta-end-title">Still thinking?</h2>'), 'finalCta')
+})
+
+test('section headings escape HTML-sensitive input', () => {
+  const html = renderProduct({ ...baseSnapshot, page: { ...baseSnapshot.page, sectionTitles: { ...baseSnapshot.page.sectionTitles, benefits: '<script>alert("x")</script>' } } }, { siteUrl: SITE })
+  assert.ok(html.includes('<h2 id="benefits-title">&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;</h2>'))
+  assert.ok(!html.includes('<script>'))
+})
+
+test('missing, null, and blank heading values fall back to the default wording', () => {
+  const page = {
+    ...baseSnapshot.page,
+    sectionTitles: {
+      benefits: '',
+      testimonials: null,
+      whatsapp: '   ',
+      howToUse: undefined,
+      faq: 'Custom FAQ',
+      middleCta: null,
+      order: '',
+      finalCta: 'Custom final',
+    },
+  }
+  const html = renderProduct({ ...baseSnapshot, page }, { siteUrl: SITE })
+  assert.ok(html.includes('<h2 id="benefits-title">Why Nigerian Women Love This Serum</h2>'), 'benefits blank -> default')
+  assert.ok(html.includes('<h2 id="testimonials-title">What customers say</h2>'), 'testimonials null -> default')
+  assert.ok(html.includes('<h2 id="whatsapp-title">Real WhatsApp messages from customers</h2>'), 'whatsapp blank -> default')
+  assert.ok(html.includes('<h2 id="how-to-use-title">How To Use For Best Results</h2>'), 'howToUse undefined -> default')
+  assert.ok(html.includes('<h2 id="faq-title">Custom FAQ</h2>'), 'faq custom kept')
+  assert.ok(html.includes('<h2 id="cta-mid-title">Ready to place your order?</h2>'), 'middleCta null -> default')
+  assert.ok(html.includes('<h2 id="order-title">Place your order now</h2>'), 'order blank -> default')
+  assert.ok(html.includes('<h2 id="cta-end-title">Custom final</h2>'), 'finalCta custom kept')
+})
+
+test('section with no content omits its heading too', () => {
+  const html = renderProduct({ ...baseSnapshot, testimonials: [], page: { ...baseSnapshot.page, benefits: [], howToUse: [], faq: [] } }, { siteUrl: SITE })
+  assert.ok(!html.includes('benefits-title'), 'empty benefits section has no heading')
+  assert.ok(!html.includes('how-to-use-title'), 'empty how-to section has no heading')
+  assert.ok(!html.includes('faq-title'), 'empty faq section has no heading')
+  assert.ok(!html.includes('testimonials-title'), 'empty testimonials section has no heading')
+  assert.ok(!html.includes('whatsapp-title'), 'no whatsapp screenshots -> no heading')
+  assert.ok(html.includes('cta-mid-title'), 'middle CTA heading still renders')
+  assert.ok(html.includes('order-title'), 'order heading still renders')
+  assert.ok(html.includes('cta-end-title'), 'final CTA heading still renders')
+})
+
+test('section order and CTA placement remain unchanged', () => {
+  const html = rich()
+  const positions = {
+    benefits: html.indexOf('id="benefits-title"'),
+    testimonials: html.indexOf('id="testimonials-title"'),
+    whatsapp: html.indexOf('id="whatsapp-title"'),
+    howToUse: html.indexOf('id="how-to-use-title"'),
+    faq: html.indexOf('id="faq-title"'),
+    middleCta: html.indexOf('id="cta-mid-title"'),
+    order: html.indexOf('id="order-title"'),
+    finalCta: html.indexOf('id="cta-end-title"'),
+  }
+  const ordered = Object.entries(positions)
+    .filter(([, p]) => p >= 0)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k)
+  assert.deepEqual(ordered, ['benefits', 'testimonials', 'middleCta', 'whatsapp', 'howToUse', 'order', 'faq', 'finalCta'], 'headings appear in template section order')
+  assert.ok(positions.testimonials > positions.benefits, 'testimonials after benefits')
+  assert.ok(positions.middleCta > positions.testimonials, 'middle CTA after testimonials')
+  assert.ok(positions.whatsapp > positions.middleCta, 'whatsapp after middle CTA')
+  assert.ok(positions.howToUse > positions.whatsapp, 'how-to after whatsapp')
+  assert.ok(positions.order > positions.howToUse, 'order form after how-to')
+  assert.ok(positions.faq > positions.order, 'FAQ after order form')
+  assert.ok(positions.finalCta > positions.faq, 'final CTA after FAQ')
 })
 
 test('a value that looks like a template slot is data, not a slot', () => {

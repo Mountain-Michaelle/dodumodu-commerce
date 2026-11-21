@@ -62,7 +62,49 @@ test("a partial page save leaves the absent columns alone", () => {
   assert.equal(parsed.ctaText, "Order now");
   assert.equal(parsed.summaryHtml, undefined);
   assert.equal(parsed.benefits, undefined);
+  assert.equal(parsed.sectionTitles, undefined);
 });
+
+test("sectionTitles accepts all eight headings with valid lengths", () => {
+  const titles = {
+    benefits: "Why people love it",
+    testimonials: "What customers say",
+    whatsapp: "Real WhatsApp messages",
+    howToUse: "How to use",
+    faq: "Frequently asked questions",
+    middleCta: "Ready to order?",
+    order: "Place your order",
+    finalCta: "Still thinking?",
+  };
+  const parsed = productPageUpsertSchema.parse({ sectionTitles: titles });
+  assert.deepEqual(parsed.sectionTitles, titles);
+});
+
+test("sectionTitles trims and rejects blank headings", () => {
+  assert.equal(productPageUpsertSchema.safeParse({ sectionTitles: { benefits: "   " } }).success, false);
+  assert.equal(productPageUpsertSchema.safeParse({ sectionTitles: { benefits: "", testimonials: "x", whatsapp: "x", howToUse: "x", faq: "x", middleCta: "x", order: "x", finalCta: "x" } }).success, false);
+  assert.equal(productPageUpsertSchema.safeParse({ sectionTitles: { benefits: "  spaced  ", testimonials: "x", whatsapp: "x", howToUse: "x", faq: "x", middleCta: "x", order: "x", finalCta: "x" } }).success, true);
+});
+
+test("sectionTitles rejects unknown keys", () => {
+  assert.equal(productPageUpsertSchema.safeParse({
+    sectionTitles: { benefits: "x", testimonials: "x", whatsapp: "x", howToUse: "x", faq: "x", middleCta: "x", order: "x", finalCta: "x", bogus: "x" },
+  }).success, false);
+});
+
+test("sectionTitles rejects missing keys", () => {
+  assert.equal(productPageUpsertSchema.safeParse({
+    sectionTitles: { benefits: "x", testimonials: "x", whatsapp: "x", howToUse: "x", faq: "x", middleCta: "x", order: "x" },
+  }).success, false);
+});
+
+test("sectionTitles rejects oversized headings", () => {
+  const long = "a".repeat(161);
+  assert.equal(productPageUpsertSchema.safeParse({
+    sectionTitles: { benefits: long, testimonials: "x", whatsapp: "x", howToUse: "x", faq: "x", middleCta: "x", order: "x", finalCta: "x" },
+  }).success, false);
+});
+
 
 test("a benefit without a title is not a benefit", () => {
   assert.equal(productPageUpsertSchema.safeParse({ benefits: [{ body: "no title" }] }).success, false);
