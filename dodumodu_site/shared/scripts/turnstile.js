@@ -20,9 +20,20 @@
 // without one otherwise (the server records it, internally unconfirmed). The page then keeps the check going and completes
 // the SAME order (same idempotency key) when the token arrives. See orchestrate.js.
 //
-// TOKENS. A token is valid for 5 minutes and works once. So: a token older than 4.5 minutes is dropped and re-solved in
-// the background, a token the server saw is dropped by resetTurnstile(), and Cloudflare is told to refresh an expired
-// token on its own.
+// TOKENS. A token is valid for 5 minutes and works once. A token older than 4.5 minutes is dropped, and so is one the
+// server saw (resetTurnstile()).
+//
+// NOTHING RUNS BY ITSELF (the low-RAM-phone rule). Cloudflare's own `refresh-expired: auto` and `retry: auto` loop for as
+// long as the page is open, which on a weak phone is a challenge solving over and over for no reason. They are switched
+// off and this module owns the policy:
+//  - the widget (a whole cross-origin iframe) is REMOVED as soon as it has delivered a token: the token lives in the form,
+//    the iframe's memory and CPU go back to the page, and it is drawn again only when a fresh token is needed;
+//  - a fresh token is needed only when the customer interacts with the form (or taps Place order) and the one they have
+//    is missing or expired: the interaction wakes the check, nothing else does (no timer, no online/visibility listener);
+//  - automatic restarts after an error, a timeout or an expiry are limited to AUTO_RESTARTS (2) in a row; after that the
+//    check goes quiet until the next real interaction, which gives it a fresh allowance of 2.
+//  - on EVERY device (no special low-end mode) it waits for a pause in typing, and leaves a gap between loading
+//    Cloudflare's script and drawing the widget, so the two heavy steps never land together or between keystrokes.
 //
 // No site key means the challenge is not configured for this build (local development, where the server skips
 // verification too): nothing is requested and every helper resolves at once.
@@ -54,8 +65,30 @@ let lastActivity = 0; // last keystroke/field change, so heavy work waits for a 
 let lastField = null; // the field the customer was last in, to give focus back to it
 let urgent = false; // Place order was pressed: do not wait for a pause any more
 let deferred = [];
+let autoLeft = 2; // automatic restarts still allowed before the check goes quiet (see AUTO_RESTARTS)
+let dormant = false; // quiet: out of automatic restarts, waiting for the next real interaction
 
-const QUIET_MS = 700;
+const AUTO_RESTARTS = 2;
+const QUIET_MS = 1200;
+// Between evaluating Cloudflare's script and drawing the widget, so the two heavy steps never land together.
+const DRAW_GAP_MS = 800;
+// One schedule for every device (a desktop gets lighter too, and a weak phone needs it): wait for a real pause in typing.
+const quietMs = () => QUIET_MS;
+
+/** The customer is acting: refill the automatic-restart allowance. Returns true if the check had gone quiet. */
+function refill() {
+  const wasDormant = dormant;
+  autoLeft = AUTO_RESTARTS;
+  dormant = false;
+  return wasDormant;
+}
+
+/** One automatic restart, if any are left; otherwise the check goes quiet until the customer interacts again. */
+function spend() {
+  if (autoLeft > 0) { autoLeft -= 1; return true; }
+  dormant = true;
+  return false;
+}
 
 function runDeferred() {
   const list = deferred;
@@ -69,10 +102,10 @@ function defer(fn) {
   deferred.push(fn);
   const check = () => {
     if (!deferred.length) return; // already run (urgent)
-    const wait = QUIET_MS - (Date.now() - lastActivity);
+    const wait = quietMs() - (Date.now() - lastActivity);
     if (wait > 0) return void setTimeout(check, wait);
     if (typeof window.requestIdleCallback === "function") {
-      window.requestIdleCallback(() => (Date.now() - lastActivity < QUIET_MS ? check() : runDeferred()), { timeout: 1500 });
+      window.requestIdleCallback(() => (Date.now() - lastActivity < quietMs() ? check() : runDeferred()), { timeout: 3000 });
     } else {
       setTimeout(runDeferred, 0);
     }
@@ -150,7 +183,8 @@ function restartSolve(hard = false) {
   clearToken();
   solveAt = Date.now();
   if (state === "failed") return void arm();
-  if (widgetId === null || !window.turnstile) return;
+  if (widgetId === null) return void ensureWidget(); // the widget was removed after the last token: draw a new one
+  if (!window.turnstile) return;
   try {
     if (hard && typeof window.turnstile.remove === "function") {
       window.turnstile.remove(widgetId);
@@ -181,6 +215,20 @@ function startWatchdog() {
   }, 3000);
 }
 
+/** Draws the widget if the script is there and no widget exists (it is removed after every token to free its iframe). */
+function ensureWidget() {
+  if (state !== "ready" || widgetId !== null) return;
+  defer(() => {
+    try { renderWidget(); } catch { state = "failed"; settle(new Error("Challenge could not start")); }
+  });
+}
+
+/** Frees the widget's iframe once its token is safely in the form. The token stays valid without it. */
+function removeWidget() {
+  if (widgetId === null || !window.turnstile || typeof window.turnstile.remove !== "function") return;
+  try { window.turnstile.remove(widgetId); widgetId = null; } catch { /* keep it: a later reset still works */ }
+}
+
 function renderWidget() {
   const host = hostEl();
   if (!host || !window.turnstile || widgetId !== null) return;
@@ -189,9 +237,8 @@ function renderWidget() {
   widgetId = window.turnstile.render(host, {
     sitekey: host.dataset.sitekey,
     appearance: "interaction-only",
-    retry: "auto",
-    "retry-interval": 2500,
-    "refresh-expired": "auto",
+    retry: "never", // this module decides when to try again, and how many times (AUTO_RESTARTS)
+    "refresh-expired": "manual", // an expired token is replaced when the customer next interacts, never on a timer
     callback(token) {
       const input = inputEl();
       if (input) input.value = token;
@@ -206,6 +253,7 @@ function renderWidget() {
       const list = tokenListeners;
       tokenListeners = [];
       for (const fn of list) { try { fn(token); } catch { /* a listener must never break the solve */ } }
+      setTimeout(() => { if (tokenIsFresh()) removeWidget(); }, 0); // out of Cloudflare's callback first, then free the iframe
     },
     // A configuration problem (bad/disabled site key, hostname not allowed) can never fix itself: say so at once
     // instead of waiting out the clock.
@@ -223,7 +271,7 @@ function renderWidget() {
       errors += 1;
       clearToken();
       if (waiters.length || interacted) showBox(true);
-      scheduleRestart();
+      if (spend()) scheduleRestart();
       return false;
     },
     "unsupported-callback"() {
@@ -234,8 +282,9 @@ function renderWidget() {
       return true;
     },
     // The tap-to-verify box timed out unanswered: start over instead of leaving a dead box behind.
-    "timeout-callback"() { restartSolve(false); },
-    "expired-callback": clearToken, // Cloudflare retries errors itself (retry: auto); WAIT_MS is the only give-up
+    "timeout-callback"() { if (spend()) restartSolve(false); },
+    // An expired token is dropped; it is replaced (at most AUTO_RESTARTS times in a row) or left until the customer interacts.
+    "expired-callback"() { clearToken(); if (spend()) restartSolve(false); },
     // The challenge needs a tap: show the box, and if someone is already waiting, bring it into view.
     "before-interactive-callback"() {
       interacted = true;
@@ -261,10 +310,12 @@ function loadScript() {
   // customer waited the full timeout at "Place order" with nothing ever loading.
   window.__turnstileLoaded = () => {
     state = "ready";
-    // Drawing the widget is the heavy part: do it in a pause in typing, not between two keystrokes.
-    defer(() => {
+    // Drawing the widget is the heavy part: do it in a pause in typing, not between two keystrokes, and not in the same
+    // stretch as evaluating Cloudflare's script.
+    const draw = () => defer(() => {
       try { renderWidget(); } catch (e) { state = "failed"; settle(new Error("Challenge could not start")); }
     });
+    if (urgent) draw(); else setTimeout(draw, DRAW_GAP_MS);
   };
   const script = document.createElement("script");
   script.src = API_SRC;
@@ -285,20 +336,21 @@ function arm() {
   if (!turnstileConfigured()) return;
   if (state === "failed") { state = "idle"; loadAttempts = 0; } // a later interaction gets a fresh try
   if (state !== "idle") return;
-  if (!wakeListening) {
-    // Registered only once the check has actually been started, never before any interaction.
-    wakeListening = true;
-    window.addEventListener?.("online", wake);
-    document.addEventListener?.("visibilitychange", wake);
-  }
   loadScript();
 }
 
-// A phone that lost signal, slept, or came back to this tab must not be left holding a failed or stalled check.
-function wake() {
-  if (state === "idle" || !turnstileConfigured() || document.visibilityState === "hidden") return;
-  if (state === "failed") return void arm();
-  if (widgetId !== null && !tokenIsFresh() && (errors > 0 || Date.now() - solveAt > STALL_MS)) restartSolve(errors > 2);
+/**
+ * A real interaction with the form wakes a check that went quiet or whose token has expired. Cheap on every keystroke: it
+ * returns at once unless a new token is actually needed and nothing is already working on one.
+ */
+function wakeOnInteraction() {
+  if (!turnstileConfigured() || state === "idle" || state === "loading" || tokenIsFresh()) return;
+  if (state === "failed") { refill(); return void arm(); }
+  const working = widgetId !== null && !dormant && errors === 0 && Date.now() - solveAt <= STALL_MS;
+  if (working) return;
+  refill();
+  errors = 0;
+  restartSolve(false);
 }
 
 export function armTurnstile(formEl) {
@@ -314,6 +366,7 @@ export function armTurnstile(formEl) {
     const t = e && e.target;
     if (t && t.matches && t.matches("input,textarea,select")) lastField = t;
     arm();
+    wakeOnInteraction();
   };
   // These stay for the page's life: each call only records "the customer is typing" (one timestamp, one reference), which
   // is what lets the check wait for a pause. arm() does nothing after the first call.
@@ -328,7 +381,7 @@ export const checkConfigured = () => turnstileConfigured();
 export function tokenForSubmit(ms) {
   if (!turnstileConfigured()) return Promise.resolve("");
   if (tokenIsFresh()) return Promise.resolve(inputEl()?.value || "");
-  if (state === "idle" || state === "failed") { arm(); goUrgent(); return Promise.resolve(""); }
+  if (state === "idle" || state === "failed") { refill(); arm(); goUrgent(); return Promise.resolve(""); }
   goUrgent();
   return ensureToken(ms).then(() => inputEl()?.value || "", () => "");
 }
@@ -346,9 +399,11 @@ export function ensureToken(ms = WAIT_MS) {
     clearToken();
     if (widgetId !== null) try { window.turnstile.reset(widgetId); } catch { /* still loading */ }
   }
+  refill(); // the customer tapped: this is an interaction, so the check may try again
   arm();
   goUrgent(); // the customer is waiting on this: no more waiting for a pause in typing
   if (state === "failed") return Promise.reject(new Error("Challenge could not load"));
+  if (widgetId === null) ensureWidget(); // the widget was removed after the last token (state is loading: onload draws it)
   // The customer needs a token NOW. A solve that errored, or has been quiet for a while, will not get there by itself in
   // time: start it over at this moment (the tap on Place order) instead of letting them repeat the same wait.
   if (widgetId !== null && (tapRestart || errors > 0 || Date.now() - solveAt > STALL_MS)) {
@@ -399,6 +454,8 @@ export const waitForToken = (ms) => ensureToken(ms).then(() => Boolean(inputEl()
  */
 export function resetTurnstile() {
   clearToken();
+  // A spent token is replaced when the customer next interacts or taps Place order, not by solving in the background for
+  // a customer who may already be gone. (A widget still on screen is reset so it is ready to be used.)
   if (widgetId !== null && window.turnstile) {
     try { window.turnstile.reset(widgetId); } catch { /* the widget is still loading: nothing to reset */ }
   }

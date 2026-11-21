@@ -107,6 +107,8 @@ assert.equal(rendered["error-callback"]("110200"), true);
 await assert.rejects(second, (e) => e.code === "turnstile_config");
 
 process.on("exit", () => {});
+assert.equal(rendered.retry, "never", "Cloudflare's own endless retry is off: this module decides when to try again");
+assert.equal(rendered["refresh-expired"], "manual", "Cloudflare's own endless refresh of expired tokens is off");
 console.log("PASS  turnstile renders from onload, restarts after errors, and reports configuration errors immediately");
 
 // A fresh page: the first genuine interaction (typing) starts the check exactly once, whichever event it is.
@@ -128,11 +130,62 @@ console.log("PASS  turnstile renders from onload, restarts after errors, and rep
   for (const fn of [...listeners.input]) fn({ type: "input" }); // still typing: the pause timer restarts
   await new Promise((r) => realSetTimeout(r, 500));
   assert.equal(scripts.length, before, "still typing 800ms after the first key: nothing injected yet");
-  await new Promise((r) => realSetTimeout(r, 600));
+  await new Promise((r) => realSetTimeout(r, 1100));
   assert.equal(scripts.length, before + 1, "after a pause in typing the script is injected, once");
   for (const ev of ["input", "change", "focusin"]) for (const fn of listeners[ev] || []) fn();
   assert.equal(scripts.length, before + 1, "more typing, selecting or focusing never starts it again (once per lifecycle)");
-  assert.ok(globalListeners.length > globalBefore, "online/visibility recovery listeners exist only after the check started");
+  assert.equal(globalListeners.length, globalBefore, "no online/visibility/scroll listener ever: only form interaction wakes the check");
 }
 console.log("PASS  turnstile starts only on first form interaction, once, with no observer, timer or scroll trigger");
+
+
+// ---- The widget is freed after each token, and nothing restarts forever --------------------------------------------------
+{
+  const f = await import("../shared/scripts/turnstile.js?lean-policy");
+  const listeners = {};
+  const form = { addEventListener(ev, fn) { (listeners[ev] ||= []).push(fn); }, removeEventListener() {} };
+  const calls = { render: 0, remove: 0, reset: 0 };
+  let opts = null; let n = 0;
+  window.turnstile = {
+    ready() {},
+    render(_e, o) { calls.render += 1; opts = o; return `w${++n}`; },
+    remove() { calls.remove += 1; },
+    reset() { calls.reset += 1; },
+  };
+  input.value = "";
+  const wait = (ms) => new Promise((r) => realSetTimeout(r, ms));
+  const type = () => { for (const fn of listeners.input) fn({ type: "input" }); };
+  f.armTurnstile(form);
+  type(); await wait(1500); // pause -> script injected
+  window.__turnstileLoaded(); await wait(1700); // gap + pause -> widget drawn
+  assert.equal(calls.render, 1, "the widget is drawn once after the first pause");
+  opts.callback("tok-1"); await wait(20);
+  assert.equal(input.value, "tok-1");
+  assert.equal(calls.remove, 1, "the iframe is removed as soon as its token is in the form (frees memory and CPU on a weak phone)");
+
+  // Typing with a fresh token does nothing at all.
+  type(); await wait(1500);
+  assert.equal(calls.render, 1, "no new widget while the token is fresh");
+
+  // The token expires. Nothing happens by itself...
+  input.value = "";
+  await wait(1500);
+  assert.equal(calls.render, 1, "an expired token is NOT refreshed in the background (no timer, no auto-refresh)");
+  // ...until the customer interacts with the form again.
+  type(); await wait(1600);
+  assert.equal(calls.render, 2, "the next form interaction draws a new widget to get a new token");
+
+  // Errors: two automatic restarts, then it goes quiet.
+  const before = { reset: calls.reset, render: calls.render, remove: calls.remove };
+  for (let i = 0; i < 6; i += 1) { opts["error-callback"]("300030"); await wait(1400); }
+  const restarts = (calls.reset - before.reset) + (calls.render - before.render) + (calls.remove - before.remove);
+  assert.ok(restarts > 0 && restarts <= 4, `a failing challenge is restarted a couple of times and then left alone (saw ${restarts} calls)`);
+  const quiet = calls.reset + calls.render;
+  await wait(2500);
+  assert.equal(calls.reset + calls.render, quiet, "once out of restarts it stays quiet");
+  // The customer keeps filling the form: that wakes it again, with a fresh allowance.
+  type(); await wait(1600);
+  assert.ok(calls.reset + calls.render > quiet, "form interaction wakes a quiet check");
+}
+console.log("PASS  turnstile frees its widget after a token, never refreshes on its own, restarts at most twice, and wakes only on form interaction");
 process.exit(0); // pending Cloudflare-restart timers are not waited for
