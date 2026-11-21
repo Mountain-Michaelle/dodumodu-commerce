@@ -467,7 +467,7 @@ adminRoute.get("/testimonials", async (c) => {
   }
   const db = createDb(c.env.DATABASE_URL);
   const { rows, total } = await testimonialsRepo.listPaged(db, query.limit, query.offset);
-  return c.json({ testimonials: rows, page: pageMeta(query, total) });
+  return c.json({ testimonials: rows, page: pageMeta(query, total), screenshotCounts: await testimonialsRepo.screenshotCounts(db), maxScreenshots: MAX_WHATSAPP_SCREENSHOTS });
 });
 
 // Create is PUT (the contract the route table and the panel were written against), and POST is accepted as the same

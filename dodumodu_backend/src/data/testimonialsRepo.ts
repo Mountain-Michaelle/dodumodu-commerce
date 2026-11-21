@@ -6,6 +6,14 @@ import { testimonials } from "../schema";
 export const MAX_WHATSAPP_SCREENSHOTS = 5;
 
 export const testimonialsRepo = {
+  /** Visible WhatsApp screenshots per product ({ productId: n }), so the panel can say how many more fit. */
+  async screenshotCounts(db: Db) {
+    const rows = await db.select({ productId: testimonials.productId, n: count() }).from(testimonials)
+      .where(and(eq(testimonials.kind, "whatsapp"), eq(testimonials.active, true))).groupBy(testimonials.productId);
+    const out: Record<string, number> = {};
+    for (const r of rows) if (r.productId != null) out[String(r.productId)] = Number(r.n);
+    return out;
+  },
   /** Visible screenshots of a product, not counting the row being edited. */
   async countActiveWhatsapp(db: Db, productId: number, exceptId?: number) {
     const [{ n }] = await db.select({ n: count() }).from(testimonials).where(and(
