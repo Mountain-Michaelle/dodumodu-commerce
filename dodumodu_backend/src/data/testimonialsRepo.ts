@@ -1,8 +1,20 @@
-import { and, eq, asc, count } from "drizzle-orm";
+import { and, eq, asc, count, ne } from "drizzle-orm";
 import type { Db } from "../db";
 import { testimonials } from "../schema";
 
+/** How many WhatsApp screenshots one product's page may show. */
+export const MAX_WHATSAPP_SCREENSHOTS = 5;
+
 export const testimonialsRepo = {
+  /** Visible screenshots of a product, not counting the row being edited. */
+  async countActiveWhatsapp(db: Db, productId: number, exceptId?: number) {
+    const [{ n }] = await db.select({ n: count() }).from(testimonials).where(and(
+      eq(testimonials.productId, productId), eq(testimonials.kind, "whatsapp"), eq(testimonials.active, true),
+      exceptId ? ne(testimonials.id, exceptId) : undefined,
+    ));
+    return Number(n);
+  },
+
   // Testimonials are product content now. A page must never show a review that
   // belongs to a different product, so the scope is part of the read rather than
   // a filter every caller is expected to remember.

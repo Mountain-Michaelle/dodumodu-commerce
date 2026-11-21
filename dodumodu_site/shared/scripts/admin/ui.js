@@ -1110,8 +1110,9 @@ const EXTENSION_FOR_TYPE = {
  * the caller, because "did my upload work" is the question at this exact moment -
  * and a failed upload that says nothing is worse than no uploader at all.
  */
-export function adminImageUploader({ productId, onUploaded, accept = "image/jpeg,image/png,image/webp,image/avif", onError }) {
-  const input = el("input", { type: "file", accept, class: "sr-only", multiple: false });
+export function adminImageUploader({ productId, onUploaded, accept = "image/jpeg,image/png,image/webp,image/avif", onError, max = 1, label = "Choose image…" }) {
+  // max > 1 lets the operator pick several files in one go (each is resized and uploaded in turn); extra files beyond max are ignored with a note.
+  const input = el("input", { type: "file", accept, class: "sr-only", multiple: max > 1 });
   const status = el("span", { class: "upload-status", role: "status" });
   const preview = el("div", { class: "upload-preview" });
 
@@ -1144,7 +1145,7 @@ export function adminImageUploader({ productId, onUploaded, accept = "image/jpeg
 
       const result = await api.upload("/media", form);
       status.textContent = "";
-      onUploaded(result.media);
+      onUploaded(result.media, { width, height });
     } catch (err) {
       // The server's own words, in the uploader. Swallowing this was the second half
       // of "you can select a file but nothing happens": the rejection used to be
@@ -1159,15 +1160,16 @@ export function adminImageUploader({ productId, onUploaded, accept = "image/jpeg
   }
 
   input.addEventListener("change", () => {
-    const file = input.files?.[0];
+    const files = [...(input.files || [])];
     // Reset first, so picking the SAME file twice in a row still fires a change.
     input.value = "";
-    void handle(file);
+    if (files.length > max) toast(`Only ${max} image${max === 1 ? "" : "s"} can be added here; the first ${max} were used.`, "error", 6000);
+    void (async () => { for (const file of files.slice(0, max)) await handle(file); })();
   });
 
   return el("div", { class: "uploader" },
     input,
-    el("button", { class: "button", type: "button", text: "Choose image…", onclick: () => input.click() }),
+    el("button", { class: "button", type: "button", text: label, onclick: () => input.click() }),
     status,
     preview);
 }
